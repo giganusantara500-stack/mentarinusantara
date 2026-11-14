@@ -72,6 +72,17 @@ async function authHeader() {
   return { Authorization: `Bearer ${session.data.session?.access_token ?? ""}`, "Content-Type": "application/json" };
 }
 
+async function readApi(response: Response) {
+  const text = await response.text();
+  if (!text) return { ok: response.ok, body: {} as Record<string, any> };
+  try {
+    const body = JSON.parse(text);
+    return { ok: response.ok && !body?.error, body };
+  } catch {
+    return { ok: false, body: { error: "Layanan kolektif di hosting tidak menjawab JSON. Pastikan fungsi API dan kunci Supabase aktif." } };
+  }
+}
+
 function prepaidAmount(product: string) {
   const match = product.match(/Prepaid\s+(\d+)/i);
   return match ? Number(match[1]) * 1000 : null;
@@ -189,8 +200,12 @@ export function LoketKolektifPage() {
 
   const load = async () => {
     const response = await fetch("/api/kolektif", { headers: await authHeader() });
-    const body = response.ok ? await response.json() : { rows: [] };
-    const rows = (body.rows ?? []).map((row: Group) => ({ ...row, bills: row.bills ?? [], history: row.history ?? [], members: row.members ?? [] }));
+    const parsed = await readApi(response);
+    if (!parsed.ok) {
+      setNotice(parsed.body.error || "Daftar kolektif gagal dimuat.");
+      return;
+    }
+    const rows = (parsed.body.rows ?? []).map((row: Group) => ({ ...row, bills: row.bills ?? [], history: row.history ?? [], members: row.members ?? [] }));
     setGroups(rows);
     setActiveId((current) => rows.some((row: Group) => row.id === current) ? current : "");
   };
@@ -223,7 +238,9 @@ export function LoketKolektifPage() {
   const remainderTotal = remainder.reduce((sum, row) => sum + row.total, 0);
 
   const saveMembers = async (id: string, members: Member[], extra: { name?: string; collector?: string } = {}) => {
-    await fetch("/api/kolektif", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id, members, ...extra }) });
+    const response = await fetch("/api/kolektif", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id, members, ...extra }) });
+    const parsed = await readApi(response);
+    if (!parsed.ok) setNotice(parsed.body.error || "Anggota kolektif gagal disimpan.");
     await load();
   };
 
@@ -246,8 +263,12 @@ export function LoketKolektifPage() {
       headers: await authHeader(),
       body: JSON.stringify({ name: collectorName.trim() || "Kolektor", collector: collectorName.trim() || loketName, members: incoming }),
     });
-    const body = await response.json();
-    if (response.ok) setActiveId(body.row?.id ?? "");
+    const parsed = await readApi(response);
+    if (!parsed.ok) {
+      setNotice(parsed.body.error || "Grup kolektif gagal dibuat.");
+      return;
+    }
+    setActiveId(parsed.body.row?.id ?? "");
     await load();
   };
 
@@ -312,8 +333,8 @@ export function LoketKolektifPage() {
           headers: await authHeader(),
           body: JSON.stringify({ category: "Kolektif", product: `${row.product || "Kolektif"} ${active.name}`, customerNumber: row.number, customerName: row.name, amount: row.total, period: row.period, loketName }),
         });
-        const body = await response.json();
-        if (!response.ok) { stopped = body.error || "Batch berhenti."; break; }
+        const parsed = await readApi(response);
+        if (!parsed.ok) { stopped = parsed.body.error || "Batch berhenti."; break; }
         const target = next.find((item) => item.number === row.number);
         if (target) target.status = "LUNAS";
         paidCount += 1;
@@ -339,8 +360,9 @@ export function LoketKolektifPage() {
       headers: await authHeader(),
       body: JSON.stringify({ name: collectorName.trim(), collector: collectorName.trim(), members: [] }),
     });
-    const body = await response.json();
-    if (response.ok) setActiveId(body.row?.id ?? "");
+    const parsed = await readApi(response);
+    if (parsed.ok) setActiveId(parsed.body.row?.id ?? "");
+    else setNotice(parsed.body.error || "Kolektor gagal disimpan.");
     setCollectorName("");
     await load();
   };

@@ -324,12 +324,12 @@ export function MitraDashboardPage({ onNavigate }: { onNavigate: (path: string) 
             </div>
           }
         />
-        <div className="px-5 pb-5">
+        <div className="w-full overflow-hidden px-5 pb-5">
           <LineChart
             labels={chartData.labels}
             series={chartData.series}
             formatValue={(n) => formatRupiah(n)}
-            height={300}
+            height={288}
             emptyText="Belum ada transaksi pada 3 bulan terakhir."
           />
         </div>

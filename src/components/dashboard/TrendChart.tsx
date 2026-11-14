@@ -18,7 +18,7 @@ export function TrendChart({ data, formatValue, emptyText = "Belum ada data." }:
   const labelStep = Math.ceil(data.length / 8);
 
   return (
-    <div className="flex items-end gap-1.5 h-56">
+    <div className="flex h-64 max-h-80 w-full items-end gap-1.5 overflow-hidden">
       {data.map((p, i) => {
         const pct = max > 0 ? (p.value / max) * 100 : 0;
         return (
@@ -27,7 +27,7 @@ export function TrendChart({ data, formatValue, emptyText = "Belum ada data." }:
             className="group flex-1 min-w-0 flex flex-col items-center"
             title={`${p.label}: ${formatValue(p.value)}`}
           >
-            <div className="w-full h-44 flex items-end">
+            <div className="flex h-52 w-full items-end">
               <div
                 className="w-full rounded-t-md bg-blue-500 group-hover:bg-blue-600 transition-all duration-500"
                 style={{ height: `${p.value > 0 ? Math.max(pct, 3) : 0}%` }}

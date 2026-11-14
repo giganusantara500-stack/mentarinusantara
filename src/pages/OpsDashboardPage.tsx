@@ -136,8 +136,8 @@ export function OpsDashboardPage() {
             </div>
           }
         />
-        <div className="px-2 pb-4 sm:px-4">
-          <LineChart labels={chart.labels} series={chart.series} formatValue={(value) => `${Math.round(value)} lembar`} height={460} emptyText="Kurva menunggu data transaksi." />
+        <div className="w-full overflow-hidden px-2 pb-4 sm:px-4">
+          <LineChart labels={chart.labels} series={chart.series} formatValue={(value) => `${Math.round(value)} lembar`} height={288} emptyText="Kurva menunggu data transaksi." />
         </div>
       </Card>
     </PageContainer>

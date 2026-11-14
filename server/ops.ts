@@ -3,7 +3,7 @@ import path from "node:path";
 import { listWalletBalances } from "./ledger";
 import { setLoketActive } from "./createAccount";
 import { listAccounts, networkLoketIds, setManagedActive } from "./accountAdmin";
-import { ensureLoketCode } from "./loketCode";
+import { ensureLoketCode, listAuthUsers } from "./loketCode";
 
 interface Member { number: string; name: string; product?: string; createdAt?: string }
 interface Bill { number: string; name: string; product?: string; period: string; total: number; status: "LUNAS" | "BL LNS" | "LAINNYA" }
@@ -75,8 +75,67 @@ function readOps(): OpsFile {
 }
 
 function writeOps(data: OpsFile) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  } catch {
+    // Hosting statis tidak bisa menulis file lokal. Salinan di akun tetap tersimpan.
+  }
+}
+
+function serviceHeaders(env: { serviceRoleKey: string }) {
+  return {
+    apikey: env.serviceRoleKey,
+    Authorization: `Bearer ${env.serviceRoleKey}`,
+    "Content-Type": "application/json",
+  };
+}
+
+function collectivesFromMeta(metadata: Record<string, unknown> | undefined, ownerId: string) {
+  const raw = metadata?.collectives;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => normalizeCollective({ ...(item as Collective), ownerId: (item as Collective).ownerId || ownerId }));
+}
+
+async function loadCollectiveUsers(env: { supabaseUrl: string; serviceRoleKey: string }) {
+  const users = await listAuthUsers(env);
+  let rows = users.flatMap((user) => collectivesFromMeta(user.user_metadata, user.id));
+  if (rows.length === 0) {
+    const filed = readOps().collectives;
+    if (filed.length > 0) {
+      rows = filed.map((row) => normalizeCollective(row));
+      await saveCollectives(env, users, rows);
+    }
+  }
+  return { users, rows };
+}
+
+async function saveCollectives(
+  env: { supabaseUrl: string; serviceRoleKey: string },
+  users: Awaited<ReturnType<typeof listAuthUsers>>,
+  rows: Collective[],
+) {
+  const headers = serviceHeaders(env);
+  const owners = new Set<string>([
+    ...rows.map((row) => row.ownerId),
+    ...users.filter((user) => collectivesFromMeta(user.user_metadata, user.id).length > 0).map((user) => user.id),
+  ]);
+  for (const ownerId of owners) {
+    const user = users.find((item) => item.id === ownerId);
+    if (!user) continue;
+    const owned = rows.filter((row) => row.ownerId === ownerId);
+    const metadata = { ...(user.user_metadata ?? {}), collectives: owned };
+    const saved = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${ownerId}`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ user_metadata: metadata }),
+    });
+    if (!saved.ok) throw new Error("Grup kolektif gagal disimpan.");
+    user.user_metadata = metadata;
+  }
+  const file = readOps();
+  file.collectives = rows;
+  writeOps(file);
 }
 
 function management(role: string) {
@@ -150,21 +209,22 @@ export async function handleOpsRequest(
   if (pathname === "/api/kolektif" || pathname === "/api/kolektif/bills") {
     const scope = caller.role === "loket" ? [caller.id] : await networkLoketIds(authorization, env);
     const visible = (row: Collective) => scope === null || scope.includes(row.ownerId) || row.ownerId === caller.id;
+    const stored = await loadCollectiveUsers(env);
     if (pathname === "/api/kolektif" && method === "GET") {
-      return { status: 200, body: { rows: readOps().collectives.filter(visible) } };
+      return { status: 200, body: { rows: stored.rows.filter(visible) } };
     }
     if (pathname === "/api/kolektif" && method === "POST") {
       if (caller.role !== "loket" && !management(caller.role)) return { status: 403, body: { error: "Anda tidak dapat menyimpan kolektif." } };
       const name = typeof body.name === "string" ? body.name.trim() : "";
       const existingId = typeof body.id === "string" ? body.id : "";
+      const rows = stored.rows;
       if (existingId) {
-        const data = readOps();
-        const row = data.collectives.find((item) => item.id === existingId && (item.ownerId === caller.id || management(caller.role)));
+        const row = rows.find((item) => item.id === existingId && (item.ownerId === caller.id || management(caller.role)));
         if (!row || (caller.role === "loket" && row.ownerId !== caller.id)) return { status: 404, body: { error: "Kelompok kolektif tidak ditemukan." } };
         if (!visible(row)) return { status: 404, body: { error: "Kelompok kolektif tidak ditemukan." } };
         if (body.action === "delete") {
-          data.collectives = data.collectives.filter((item) => item.id !== existingId);
-          writeOps(data);
+          const next = rows.filter((item) => item.id !== existingId);
+          await saveCollectives(env, stored.users, next);
           return { status: 200, body: { row } };
         }
         if (name) row.name = name;
@@ -182,7 +242,7 @@ export async function handleOpsRequest(
           row.ownerName = loket.full_name || loket.username || "Loket";
           row.loketCode = loket.loket_code || "";
         }
-        writeOps(data);
+        await saveCollectives(env, stored.users, rows);
         return { status: 200, body: { row } };
       }
       if (!name) return { status: 400, body: { error: "Nama kolektif wajib diisi." } };
@@ -198,7 +258,6 @@ export async function handleOpsRequest(
         ownerName = loket.full_name || loket.username || "Loket";
         loketCode = loket.loket_code || "";
       }
-      const data = readOps();
       const row = normalizeCollective({
         id: crypto.randomUUID(),
         ownerId,
@@ -210,14 +269,13 @@ export async function handleOpsRequest(
         status: body.status === "nonaktif" ? "nonaktif" : "aktif",
         createdAt: new Date().toISOString(),
       });
-      data.collectives.unshift(row);
-      writeOps(data);
+      rows.unshift(row);
+      await saveCollectives(env, stored.users, rows);
       return { status: 200, body: { row } };
     }
     if (pathname === "/api/kolektif/bills" && method === "POST") {
       if (caller.role !== "loket") return { status: 403, body: { error: "Hanya Loket yang dapat memperbarui daftar tagihan." } };
-      const data = readOps();
-      const row = data.collectives.find((item) => item.id === String(body.id ?? "") && item.ownerId === caller.id);
+      const row = stored.rows.find((item) => item.id === String(body.id ?? "") && item.ownerId === caller.id);
       if (!row) return { status: 404, body: { error: "Kelompok kolektif tidak ditemukan." } };
       const bills = Array.isArray(body.bills) ? body.bills as Bill[] : [];
       row.bills = bills.map((bill) => ({
@@ -238,7 +296,7 @@ export async function handleOpsRequest(
           total: Number.isFinite(total) && total > 0 ? total : paid.reduce((sum, bill) => sum + bill.total, 0),
         });
       }
-      writeOps(data);
+      await saveCollectives(env, stored.users, stored.rows);
       return { status: 200, body: { row } };
     }
   }

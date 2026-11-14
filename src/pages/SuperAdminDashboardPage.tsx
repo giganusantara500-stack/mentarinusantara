@@ -177,7 +177,7 @@ export function SuperAdminDashboardPage() {
       <div className="grid lg:grid-cols-2 gap-6 mb-6">
         <Card>
           <CardHeader title="Transaksi Harian" subtitle="Nilai transaksi sukses per hari pada rentang terpilih" />
-          <CardBody>
+          <CardBody className="w-full overflow-hidden">
             {loading ? (
               <p className="py-10 text-center text-sm text-slate-500">Memuat grafik...</p>
             ) : (
@@ -187,7 +187,7 @@ export function SuperAdminDashboardPage() {
         </Card>
         <Card>
           <CardHeader title="Transaksi Bulanan" subtitle="Nilai transaksi sukses, 12 bulan terakhir" />
-          <CardBody>
+          <CardBody className="w-full overflow-hidden">
             {loading ? (
               <p className="py-10 text-center text-sm text-slate-500">Memuat grafik...</p>
             ) : (
@@ -197,7 +197,7 @@ export function SuperAdminDashboardPage() {
         </Card>
         <Card>
           <CardHeader title="Perkembangan Jaringan" subtitle="Akun Mitra, Sub Mitra, dan Loket baru per bulan" />
-          <CardBody>
+          <CardBody className="w-full overflow-hidden">
             {loading ? (
               <p className="py-10 text-center text-sm text-slate-500">Memuat grafik...</p>
             ) : (

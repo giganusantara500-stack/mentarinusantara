@@ -180,11 +180,11 @@ export function ReportsPage() {
         <Card>
           <CardHeader title="Transaksi 7 Hari Terakhir" subtitle="Nilai transaksi berhasil per hari" />
           <CardBody>
-            <div className="flex items-end justify-between gap-2 h-40">
+            <div className="flex h-64 max-h-80 w-full items-end justify-between gap-2 overflow-hidden">
               {last7.map((d, i) => (
                 <div key={i} className="flex-1 flex flex-col items-center gap-1.5">
                   <div className="text-[10px] text-slate-500 font-medium">{formatRupiah(d.total).replace("Rp", "")}</div>
-                  <div className="w-full bg-slate-100 rounded-t-lg relative" style={{ height: "100%" }}>
+                  <div className="relative h-40 w-full rounded-t-lg bg-slate-100">
                     <div
                       className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-blue-600 to-blue-400 rounded-t-lg transition-all"
                       style={{ height: `${(d.total / maxDay) * 100}%` }}

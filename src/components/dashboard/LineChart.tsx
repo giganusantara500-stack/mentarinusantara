@@ -27,8 +27,9 @@ function niceMax(peak: number, emptyMax: number) {
   return nice * base;
 }
 
-export function LineChart({ labels, series, formatValue, axisFormat, height = 280, emptyText = "Belum ada data.", emptyMax = 10 }: Props) {
+export function LineChart({ labels, series, formatValue, axisFormat, height = 288, emptyText = "Belum ada data.", emptyMax = 10 }: Props) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const chartHeight = Math.min(320, Math.max(192, height));
 
   const allValues = series.flatMap((s) => s.values).filter((value): value is number => value != null);
   const peak = allValues.length ? Math.max(...allValues, 0) : 0;
@@ -40,7 +41,7 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
   const width = 800;
   const padding = { top: 20, right: 20, bottom: 36, left: Math.min(88, Math.max(46, axisText(max).length * 7 + 16)) };
   const chartW = width - padding.left - padding.right;
-  const chartH = height - padding.top - padding.bottom;
+  const plotH = chartHeight - padding.top - padding.bottom;
 
   const xStep = labels.length > 1 ? chartW / (labels.length - 1) : chartW;
 
@@ -50,11 +51,11 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
       coords: s.values.map((v, i) => {
         if (v == null) return null;
         const x = padding.left + i * xStep;
-        const y = padding.top + chartH - ((v - min) / range) * chartH;
+        const y = padding.top + plotH - ((v - min) / range) * plotH;
         return { x, y, value: v };
       }),
     }));
-  }, [series, xStep, chartH, range, min, padding.left, padding.top]);
+  }, [series, xStep, plotH, range, min, padding.left, padding.top]);
 
   const yTicks = useMemo(() => {
     const splits = [5, 4, 2].map((count) => max / count).find((step) => {
@@ -67,14 +68,14 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
     const count = Math.round(max / step);
     return Array.from({ length: count + 1 }, (_, i) => {
       const value = Math.round(step * i * 1000) / 1000;
-      const y = padding.top + chartH - ((value - min) / range) * chartH;
+      const y = padding.top + plotH - ((value - min) / range) * plotH;
       return { value, y };
     });
-  }, [max, min, range, chartH, padding.top]);
+  }, [max, min, range, plotH, padding.top]);
 
   if (labels.length === 0) {
     return (
-      <div className="flex items-center justify-center text-sm text-slate-400" style={{ height }}>
+      <div className="flex h-72 max-h-80 w-full items-center justify-center overflow-hidden text-sm text-slate-400">
         {emptyText}
       </div>
     );
@@ -106,7 +107,7 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
       }
       const first = run[0];
       const last = run[run.length - 1];
-      path += `${linePath(run)} L ${last.x} ${padding.top + chartH} L ${first.x} ${padding.top + chartH} Z `;
+      path += `${linePath(run)} L ${last.x} ${padding.top + plotH} L ${first.x} ${padding.top + plotH} Z `;
       run = [];
     };
     coords.forEach((point) => {
@@ -118,11 +119,10 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
   };
 
   return (
-    <div className="relative w-full" onMouseLeave={() => setHoverIdx(null)}>
+    <div className="relative h-72 max-h-80 w-full overflow-hidden" style={{ height: chartHeight }} onMouseLeave={() => setHoverIdx(null)}>
       <svg
-        viewBox={`0 0 ${width} ${height}`}
-        className="w-full"
-        style={{ minHeight: height }}
+        viewBox={`0 0 ${width} ${chartHeight}`}
+        className="h-full w-full"
         preserveAspectRatio="none"
       >
         <defs>
@@ -182,7 +182,7 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
             <text
               key={i}
               x={x}
-              y={height - 12}
+              y={chartHeight - 12}
               textAnchor="middle"
               fontSize="10"
               fill="#94a3b8"
@@ -201,7 +201,7 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
               x={x - xStep / 2}
               y={0}
               width={xStep}
-              height={height}
+              height={chartHeight}
               fill="transparent"
               onMouseEnter={() => setHoverIdx(i)}
             />
@@ -215,7 +215,7 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
               x1={padding.left + hoverIdx * xStep}
               y1={padding.top}
               x2={padding.left + hoverIdx * xStep}
-              y2={padding.top + chartH}
+              y2={padding.top + plotH}
               stroke="#cbd5e1"
               strokeWidth="1"
             />
