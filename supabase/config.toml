@@ -1,0 +1,11 @@
+[functions.setup-first-superadmin]
+verify_jwt = false
+
+[functions.create-subuser]
+verify_jwt = false
+
+[functions.reset-password-temp]
+verify_jwt = false
+
+[functions.change-password]
+verify_jwt = false

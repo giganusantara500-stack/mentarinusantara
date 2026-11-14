@@ -1,0 +1,112 @@
+import type { Role } from "@/lib/types";
+import {
+  LayoutDashboard,
+  Users,
+  Store,
+  Package,
+  ShoppingCart,
+  Wallet,
+  Landmark,
+  FileBarChart,
+  Megaphone,
+  Settings,
+  Network,
+  Layers,
+  ScrollText,
+  Ban,
+  BadgeAlert,
+  QrCode,
+  History,
+  Percent,
+  Share2,
+  type LucideIcon,
+} from "lucide-react";
+
+export interface NavItem {
+  path: string;
+  label: string;
+  icon: LucideIcon;
+  group?: string;
+}
+
+export interface NavSection {
+  category: string;
+  icon?: LucideIcon;
+  items: NavItem[];
+}
+
+const dashboard: NavItem = { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard };
+
+function managementNav(role: Role): NavSection[] {
+  const reporting: NavItem[] = [
+    { path: "/mutasi", label: "Mutasi Saldo", icon: History },
+    { path: "/transaksi", label: "Detail Transaksi", icon: ShoppingCart },
+    { path: "/rekap", label: "Rekap Transaksi", icon: FileBarChart },
+    { path: "/qris", label: "Laporan QRIS", icon: QrCode },
+  ];
+  const monitoring: NavItem[] = [
+    { path: "/setoran", label: "Manage Setoran", icon: Landmark },
+    { path: "/saldo", label: "Saldo Mitra/Loket", icon: Wallet },
+    { path: "/outstanding", label: "Monitoring OS", icon: BadgeAlert },
+  ];
+  const admin: NavItem[] = [];
+  if (role === "superadmin") admin.push({ path: "/mitra", label: "Kelola Mitra", icon: Users });
+  if (role === "mitra") admin.push({ path: "/submitra", label: "Kelola Sub Mitra", icon: Network });
+  admin.push(
+    { path: "/loket", label: "Kelola Loket", icon: Store },
+    { path: "/kolektif-admin", label: "Manajemen Kolektif", icon: Layers },
+  );
+  if (role === "superadmin" || role === "mitra") admin.push({ path: "/runtext", label: "Kelola RunText", icon: ScrollText });
+  admin.push({ path: "/blokir", label: "Blokir Loket", icon: Ban });
+  if (role === "superadmin") {
+    admin.push(
+      { path: "/harga", label: "Prepare Fee", icon: Percent },
+      { path: "/pembagian", label: "Share Fee", icon: Share2 },
+    );
+  }
+  admin.push({ path: "/pengaturan", label: "Pengaturan", icon: Settings });
+  return [
+    { category: "Dashboard", icon: LayoutDashboard, items: [dashboard] },
+    { category: "Reporting", icon: FileBarChart, items: reporting },
+    { category: "Monitoring", icon: BadgeAlert, items: monitoring },
+    { category: "Administrasi", icon: Settings, items: admin },
+  ];
+}
+
+export const NAV_CONFIG: Record<Role, NavSection[]> = {
+  superadmin: managementNav("superadmin"),
+  mitra: managementNav("mitra"),
+  submitra: managementNav("submitra"),
+  loket: [
+    { category: "Utama", items: [dashboard] },
+    {
+      category: "Transaksi",
+      items: [
+        { path: "/beli", label: "Beli Produk", icon: ShoppingCart },
+        { path: "/produk", label: "Katalog Produk", icon: Package },
+        { path: "/transaksi", label: "Riwayat Transaksi", icon: History },
+      ],
+    },
+    {
+      category: "Keuangan",
+      items: [
+        { path: "/mutasi", label: "Mutasi Saldo", icon: Wallet },
+        { path: "/deposit", label: "Deposit", icon: Landmark },
+      ],
+    },
+    {
+      category: "Informasi",
+      items: [
+        { path: "/pengumuman", label: "Pengumuman", icon: Megaphone },
+        { path: "/pengaturan", label: "Pengaturan", icon: Settings },
+      ],
+    },
+  ],
+};
+
+export const ROLE_LABELS: Record<Role, string> = {
+  superadmin: "Super Admin",
+  mitra: "Mitra",
+  submitra: "Sub Mitra",
+  loket: "Loket",
+};

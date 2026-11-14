@@ -1,0 +1,15 @@
+export const PDAM_AREAS = [
+  "Kab. Bangli", "Kab. Bantaeng", "Kab. Batang", "Kab. Bone", "Kab. Demak", "Kab. Enrekang",
+  "Kab. Jembrana", "Kab. Jeneponto", "Kab. Karanganyar", "Kab. Karangasem", "Kab. Kudus",
+  "Kab. Lampung Selatan", "Kab. Magelang", "Kab. Majene", "Kab. Malang", "Kab. Mamuju",
+  "Kab. Mamuju Tengah", "Kab. Mojokerto", "Kab. Pandeglang", "Kab. Pati", "Kab. Pekalongan",
+  "Kab. Pemalang", "Kab. Pesawaran", "Kab. Polewali Mandar", "Kab. Ponorogo", "Kab. Probolinggo",
+  "Kab. Purbalingga", "Kab. Purwakarta", "Kab. Purworejo", "Kab. Rembang", "Kab. Semarang",
+  "Kab. Serang", "Kab. Sidoarjo", "Kab. Sinjai", "Kab. Situbondo", "Kab. Sleman", "Kab. Sragen",
+  "Kab. Sukabumi", "Kab. Sukoharjo", "Kab. Sumedang", "Kab. Tabanan", "Kab. Takalar",
+  "Kab. Tangerang", "Kab. Tapin", "Kab. Tegal", "Kab. Temanggung", "Kab. Toraja Utara",
+  "Kab. Wonogiri", "Kab. Wonosobo", "Kota Bandar Lampung", "Kota Bandung", "Kota Banjar",
+  "Kota Batam", "Kota Batu", "Kota Bogor", "Kota Cilegon", "Kota Cirebon", "Kota Denpasar",
+  "Kota Depok", "Kota Madiun", "Kota Magelang", "Kota Malang", "Kota Pekalongan",
+  "Kota Yogyakarta", "Mataram", "Palembang",
+];

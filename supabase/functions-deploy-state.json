@@ -1,0 +1,21 @@
+{
+  "projectId": "72191945",
+  "functions": {
+    "change-password": {
+      "hasChanged": false,
+      "hash": "b4bc2cd2909f13a8c636aa559b170ffba2e592e31e5385f767cc918c997542bb"
+    },
+    "create-subuser": {
+      "hasChanged": false,
+      "hash": "d6ab62b964af92e00a9bc486013cec734030067794f169a460bf9300e43b61f8"
+    },
+    "reset-password-temp": {
+      "hasChanged": false,
+      "hash": "eb6735a92843ae4a5d5253a7c2a6f8485094fe5d7a11259ad66379119e3bc674"
+    },
+    "setup-first-superadmin": {
+      "hasChanged": false,
+      "hash": "a7276dec6d6ce817a3dd8499b4f9922625e7cd39876a2cc49f3dda77ee405343"
+    }
+  }
+}

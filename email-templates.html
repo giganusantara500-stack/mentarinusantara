@@ -1,0 +1,423 @@
+<!--
+  EMAIL TEMPLATES GIGA NUSANTARA
+  =============================
+  Template HTML berikut dipasang di:
+  Bolt > Database > Authentication > Email > Edit email templates
+  atau
+  Supabase Dashboard > Authentication > Email Templates
+
+  Variabel yang tersedia (Supabase Go templating):
+  - {{ .ConfirmationURL }}  : tautan konfirmasi/reset/aktivasi
+  - {{ .Token }}            : OTP 6 digit
+  - {{ .Email }}            : alamat email penerima
+  - {{ .Data }}             : metadata dari user_metadata (full_name, dll.)
+  - {{ .SiteURL }}          : URL aplikasi
+  - {{ .RedirectTo }}       : URL redirect yang dikirim oleh aplikasi
+
+  Identitas pengirim diatur di:
+  Bolt > Database > Authentication > Email > SMTP Settings
+  atau
+  Supabase Dashboard > Authentication > Email > SMTP Settings
+
+  Sender Name : Giga Mentari Nusantara
+  Sender Email: giganusantara500@gmail.com
+-->
+
+<!-- ================================================== -->
+<!-- TEMPLATE 1: RESET PASSWORD (Recovery)              -->
+<!-- Pasang di template "Reset Password"                 -->
+<!-- ================================================== -->
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Permintaan Reset Password - Giga Mentari Nusantara</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;min-height:100vh;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table width="560" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:28px 32px;text-align:center;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center">
+                    <div style="display:inline-block;width:44px;height:44px;background:rgba(255,255,255,0.15);border-radius:12px;line-height:44px;font-size:24px;font-weight:bold;color:#ffffff;">G</div>
+                    <div style="margin-top:8px;font-size:18px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">Giga Mentari Nusantara</div>
+                    <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px;margin-top:2px;">Platform PPOB</div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px;">
+              <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0f172a;">Permintaan Reset Password</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">
+                Kami menerima permintaan untuk mengatur ulang kata sandi akun Anda di Giga Mentari Nusantara. Klik tombol di bawah untuk membuat kata sandi baru.
+              </p>
+
+              <!-- Button -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding:8px 0 24px;">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 40px;border-radius:10px;">
+                      Reset Password
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">
+                Jika tombol tidak berfungsi, salin tautan berikut ke browser Anda:
+              </p>
+              <p style="margin:0 0 24px;font-size:12px;line-height:1.5;color:#94a3b8;word-break:break-all;">
+                {{ .ConfirmationURL }}
+              </p>
+
+              <div style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">
+                  <strong style="color:#334155;">Penting:</strong> Tautan ini hanya dapat digunakan satu kali dan akan kedaluwarsa dalam waktu terbatas. Jika Anda tidak meminta reset password, abaikan email ini — akun Anda tetap aman.
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;line-height:1.5;">
+                Email ini dikirim oleh sistem Giga Mentari Nusantara. Jangan membalas email ini.<br>
+                &copy; 2026 Giga Mentari Nusantara. Semua hak dilindungi.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+
+
+<!-- ================================================== -->
+<!-- TEMPLATE 2: UNDANGAN AKUN (Invite)                 -->
+<!-- Pasang di template "Invite User"                    -->
+<!-- ================================================== -->
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Undangan Akun - Giga Mentari Nusantara</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;min-height:100vh;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table width="560" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:28px 32px;text-align:center;">
+              <div style="display:inline-block;width:44px;height:44px;background:rgba(255,255,255,0.15);border-radius:12px;line-height:44px;font-size:24px;font-weight:bold;color:#ffffff;">G</div>
+              <div style="margin-top:8px;font-size:18px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">Giga Mentari Nusantara</div>
+              <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px;margin-top:2px;">Platform PPOB</div>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:32px;">
+              <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0f172a;">Undangan Akun Giga Mentari Nusantara</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">
+                Anda diundang untuk bergabung dengan jaringan Giga Mentari Nusantara. Akun Anda sudah disiapkan — silakan aktifkan dengan membuat kata sandi melalui tautan di bawah.
+              </p>
+
+              <!-- Account info -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:24px;">
+                <tr>
+                  <td style="padding:16px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="font-size:13px;color:#64748b;padding-bottom:8px;">Email</td>
+                        <td style="font-size:13px;font-weight:600;color:#1e293b;padding-bottom:8px;text-align:right;">{{ .Email }}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:13px;color:#64748b;">Nama</td>
+                        <td style="font-size:13px;font-weight:600;color:#1e293b;text-align:right;">{{ .Data.full_name }}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Button -->
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding:8px 0 24px;">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 40px;border-radius:10px;">
+                      Aktifkan Akun
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#64748b;">
+                Jika tombol tidak berfungsi, salin tautan berikut ke browser Anda:
+              </p>
+              <p style="margin:0 0 24px;font-size:12px;line-height:1.5;color:#94a3b8;word-break:break-all;">
+                {{ .ConfirmationURL }}
+              </p>
+
+              <div style="background-color:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:16px;">
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#92400e;">
+                  <strong>Penting:</strong> Tautan ini hanya dapat digunakan satu kali dan akan kedaluwarsa. Buat kata sandi yang kuat (minimal 12 karakter, kombinasi huruf besar, huruf kecil, angka, dan simbol).
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;line-height:1.5;">
+                Email ini dikirim oleh sistem Giga Mentari Nusantara. Jangan membalas email ini.<br>
+                &copy; 2026 Giga Mentari Nusantara. Semua hak dilindungi.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+
+
+<!-- ================================================== -->
+<!-- TEMPLATE 3: KONFIRMASI EMAIL (Confirm Signup)      -->
+<!-- Pasang di template "Confirm Signup"                 -->
+<!-- ================================================== -->
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Konfirmasi Email - Giga Mentari Nusantara</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;min-height:100vh;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table width="560" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
+
+          <tr>
+            <td style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:28px 32px;text-align:center;">
+              <div style="display:inline-block;width:44px;height:44px;background:rgba(255,255,255,0.15);border-radius:12px;line-height:44px;font-size:24px;font-weight:bold;color:#ffffff;">G</div>
+              <div style="margin-top:8px;font-size:18px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">Giga Mentari Nusantara</div>
+              <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px;margin-top:2px;">Platform PPOB</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:32px;">
+              <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0f172a;">Konfirmasi Email Anda</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">
+                Selamat datang di Giga Mentari Nusantara! Konfirmasi alamat email Anda untuk mengaktifkan akun dan mulai menggunakan platform.
+              </p>
+
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding:8px 0 24px;">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 40px;border-radius:10px;">
+                      Konfirmasi Email
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 24px;font-size:13px;line-height:1.6;color:#64748b;">
+                Atau salin tautan ini ke browser Anda:<br>
+                <span style="font-size:12px;color:#94a3b8;word-break:break-all;">{{ .ConfirmationURL }}</span>
+              </p>
+
+              <div style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">
+                  Jika Anda tidak mendaftar akun Giga Mentari Nusantara, abaikan email ini.
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;line-height:1.5;">
+                Email ini dikirim oleh sistem Giga Mentari Nusantara. Jangan membalas email ini.<br>
+                &copy; 2026 Giga Mentari Nusantara. Semua hak dilindungi.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+
+
+<!-- ================================================== -->
+<!-- TEMPLATE 4: PERUBAHAN EMAIL (Change Email)         -->
+<!-- Pasang di template "Change Email Address"           -->
+<!-- ================================================== -->
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Konfirmasi Email Baru - Giga Mentari Nusantara</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;min-height:100vh;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table width="560" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
+
+          <tr>
+            <td style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:28px 32px;text-align:center;">
+              <div style="display:inline-block;width:44px;height:44px;background:rgba(255,255,255,0.15);border-radius:12px;line-height:44px;font-size:24px;font-weight:bold;color:#ffffff;">G</div>
+              <div style="margin-top:8px;font-size:18px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">Giga Mentari Nusantara</div>
+              <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px;margin-top:2px;">Platform PPOB</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:32px;">
+              <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0f172a;">Konfirmasi Email Baru</h1>
+              <p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:#475569;">
+                Anda meminta untuk mengubah alamat email akun Giga Mentari Nusantara Anda.
+              </p>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">
+                Email lama: <strong style="color:#334155;">{{ .Email }}</strong><br>
+                Email baru: <strong style="color:#334155;">{{ .NewEmail }}</strong>
+              </p>
+
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding:8px 0 24px;">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 40px;border-radius:10px;">
+                      Konfirmasi Email Baru
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 24px;font-size:13px;line-height:1.6;color:#64748b;">
+                Atau salin tautan ini ke browser Anda:<br>
+                <span style="font-size:12px;color:#94a3b8;word-break:break-all;">{{ .ConfirmationURL }}</span>
+              </p>
+
+              <div style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">
+                  Jika Anda tidak meminta perubahan email, abaikan email ini. Akun Anda tetap aman.
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;line-height:1.5;">
+                Email ini dikirim oleh sistem Giga Mentari Nusantara. Jangan membalas email ini.<br>
+                &copy; 2026 Giga Mentari Nusantara. Semua hak dilindungi.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+
+
+<!-- ================================================== -->
+<!-- TEMPLATE 5: MAGIC LINK (jika digunakan)            -->
+<!-- Pasang di template "Magic Link"                     -->
+<!-- ================================================== -->
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tautan Login - Giga Mentari Nusantara</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;min-height:100vh;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table width="560" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
+
+          <tr>
+            <td style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:28px 32px;text-align:center;">
+              <div style="display:inline-block;width:44px;height:44px;background:rgba(255,255,255,0.15);border-radius:12px;line-height:44px;font-size:24px;font-weight:bold;color:#ffffff;">G</div>
+              <div style="margin-top:8px;font-size:18px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">Giga Mentari Nusantara</div>
+              <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px;margin-top:2px;">Platform PPOB</div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:32px;">
+              <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0f172a;">Tautan Login Anda</h1>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">
+                Klik tombol di bawah untuk masuk ke akun Giga Mentari Nusantara Anda.
+              </p>
+
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding:8px 0 24px;">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 40px;border-radius:10px;">
+                      Masuk ke Akun
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <div style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#64748b;">
+                  Tautan ini hanya berlaku untuk satu kali login dan akan kedaluwarsa. Jika Anda tidak meminta tautan login, abaikan email ini.
+                </p>
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background-color:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;line-height:1.5;">
+                Email ini dikirim oleh sistem Giga Mentari Nusantara. Jangan membalas email ini.<br>
+                &copy; 2026 Giga Mentari Nusantara. Semua hak dilindungi.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

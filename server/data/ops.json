@@ -1,0 +1,641 @@
+{
+  "runText": "bernari mencoba untuk masa depan yang lebih baik",
+  "collectives": [
+    {
+      "id": "46dcde86-0c14-4bd5-b381-f280a028496b",
+      "ownerId": "dbdf3c29-9da6-46d9-9d18-8969a4fb050c",
+      "ownerName": "adibah",
+      "loketCode": "5970107",
+      "name": "alfiah",
+      "collector": "alfiah",
+      "members": [
+        {
+          "number": "520591338156",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520591334323",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520591329677",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520591302409",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520591230494",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520591129480",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520591123756",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520591067796",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520591061257",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520591026357",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590971402",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590802287",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590777704",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590767315",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590631260",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590611063",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590524826",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590521049",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590519773",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590519270",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590508798",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590425431",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590401085",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590300354",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590242095",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590149483",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590121089",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590118450",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590113189",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590074499",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590074408",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590051581",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590044747",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590044713",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590044683",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        },
+        {
+          "number": "520590044659",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "createdAt": "2026-11-14T01:46:56.026Z"
+        }
+      ],
+      "bills": [
+        {
+          "number": "520591338156",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 53156,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591334323",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 49323,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591329677",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 44677,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591302409",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 17409,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591230494",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 45494,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591129480",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 44480,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591123756",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 38756,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591067796",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 82796,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591061257",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 76257,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591026357",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 41357,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590971402",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 86402,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590802287",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 17287,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590777704",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 92704,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590767315",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 82315,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590631260",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 46260,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590611063",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 26063,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590524826",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 39826,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590521049",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 36049,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590519773",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 36773,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590519270",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 34270,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590508798",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 23798,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590425431",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 40431,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590401085",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 16085,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590300354",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 15354,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590242095",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 57095,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590149483",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 64483,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590121089",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 36089,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590118450",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 35450,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590113189",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 28189,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590074499",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 89499,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590074408",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 89408,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590051581",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 66581,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590044747",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 59747,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590044713",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 59713,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590044683",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 59683,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590044659",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 59659,
+          "status": "BL LNS"
+        }
+      ],
+      "history": [
+        {
+          "at": "2026-11-14T01:47:33.434Z",
+          "count": 0,
+          "total": 0
+        }
+      ],
+      "numbers": [
+        "520591338156",
+        "520591334323",
+        "520591329677",
+        "520591302409",
+        "520591230494",
+        "520591129480",
+        "520591123756",
+        "520591067796",
+        "520591061257",
+        "520591026357",
+        "520590971402",
+        "520590802287",
+        "520590777704",
+        "520590767315",
+        "520590631260",
+        "520590611063",
+        "520590524826",
+        "520590521049",
+        "520590519773",
+        "520590519270",
+        "520590508798",
+        "520590425431",
+        "520590401085",
+        "520590300354",
+        "520590242095",
+        "520590149483",
+        "520590121089",
+        "520590118450",
+        "520590113189",
+        "520590074499",
+        "520590074408",
+        "520590051581",
+        "520590044747",
+        "520590044713",
+        "520590044683",
+        "520590044659"
+      ],
+      "status": "aktif",
+      "createdAt": "2026-11-14T01:46:02.309Z"
+    },
+    {
+      "id": "a657ea5e-1771-4358-b5ed-92b5d2d36dde",
+      "ownerId": "dbdf3c29-9da6-46d9-9d18-8969a4fb050c",
+      "ownerName": "adibah",
+      "loketCode": "5970107",
+      "name": "gaga",
+      "collector": "gaga",
+      "members": [
+        {
+          "number": "520591307052",
+          "name": "Pelanggan",
+          "product": "PLN"
+        },
+        {
+          "number": "520591304732",
+          "name": "Pelanggan",
+          "product": "PLN"
+        },
+        {
+          "number": "520591296618",
+          "name": "Pelanggan",
+          "product": "PLN"
+        },
+        {
+          "number": "520590604373",
+          "name": "Pelanggan",
+          "product": "PLN"
+        }
+      ],
+      "bills": [
+        {
+          "number": "520591307052",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 22052,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591304732",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 19732,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520591296618",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 111618,
+          "status": "BL LNS"
+        },
+        {
+          "number": "520590604373",
+          "name": "Pelanggan",
+          "product": "PLN",
+          "period": "November 2026",
+          "total": 19373,
+          "status": "BL LNS"
+        }
+      ],
+      "history": [],
+      "numbers": [
+        "520591307052",
+        "520591304732",
+        "520591296618",
+        "520590604373"
+      ],
+      "status": "aktif",
+      "createdAt": "2026-11-14T00:56:53.965Z"
+    }
+  ]
+}
