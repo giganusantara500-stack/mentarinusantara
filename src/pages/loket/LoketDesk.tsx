@@ -442,7 +442,7 @@ export function LoketKolektifPage() {
   const statusText = (status: GroupBill["status"]) => status === "BL LNS" ? "BL LUNAS" : status === "LAINNYA" ? "Perlu Diperiksa" : "LUNAS";
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[220px_1fr]">
+    <div className="grid w-full min-w-0 gap-3 lg:grid-cols-[240px_minmax(0,1fr)]">
       <aside className="flex min-h-[560px] max-h-[calc(100vh-11rem)] flex-col rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="mb-2 text-xs font-bold uppercase text-slate-500">Kolektor</div>
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
@@ -456,7 +456,7 @@ export function LoketKolektifPage() {
         </div>
         <button onClick={() => setManageOpen(true)} className="mt-3 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">Kelola Kolektif</button>
       </aside>
-      <section className="flex min-h-[560px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <section className="flex min-h-[560px] w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap gap-2 border-b border-slate-100 p-3">
           <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) importFile(file); event.target.value = ""; }} />
           <button onClick={() => fileRef.current?.click()} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">Impor Excel/CSV</button>
@@ -984,7 +984,7 @@ export function LoketSettingPage() {
   const previewSlip = previewPage.pages[0]?.[0];
 
   return (
-    <div className="grid overflow-hidden rounded-2xl bg-white shadow-sm md:grid-cols-[220px_1fr]">
+    <div className="grid w-full min-w-0 overflow-hidden rounded-2xl bg-white shadow-sm md:grid-cols-[220px_minmax(0,1fr)]">
       <aside className="border-b border-slate-100 p-3 md:border-b-0 md:border-r">
         <button onClick={() => setPanel("password")} className={`mb-1 block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${panel === "password" ? "bg-sky-700 text-white" : "text-slate-600"}`}>Ubah Password</button>
         <button onClick={() => setPanel("printer")} className={`block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${panel === "printer" ? "bg-sky-700 text-white" : "text-slate-600"}`}>Setting Printer</button>

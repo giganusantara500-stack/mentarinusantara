@@ -105,7 +105,7 @@ export function OpsDashboardPage() {
         <h1 className="text-lg font-bold text-slate-900">{brandLine(role, profile.city)}</h1>
         <p className="text-sm text-slate-500">{networkView ? "Ringkasan jaringan dan downline Anda." : `${profile.full_name || profile.username} memantau operasional jaringan.`}</p>
       </div>
-      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6 ${networkView ? "lg:grid-cols-3 xl:grid-cols-5" : "xl:grid-cols-4"}`}>
+      <div className={`mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 ${networkView ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         {cards.map((card) => {
           const Icon = card.icon;
           return (
