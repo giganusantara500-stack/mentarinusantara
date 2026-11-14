@@ -141,7 +141,7 @@ export function SuperAdminDashboardPage() {
       )}
 
       <h2 className="text-sm font-semibold text-slate-700 mb-3">Hari Ini dan Rentang Terpilih</h2>
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
         <StatCard
           label="Transaksi Hari Ini"
           value={count(s?.today_tx)}
@@ -167,7 +167,7 @@ export function SuperAdminDashboardPage() {
       </div>
 
       <h2 className="text-sm font-semibold text-slate-700 mb-3">Jaringan</h2>
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <StatCard label="Total Mitra" value={count(s?.total_mitra)} icon={Users} tone="blue" />
         <StatCard label="Total Sub Mitra" value={count(s?.total_submitra)} icon={Network} tone="cyan" />
         <StatCard label="Total Loket" value={count(s?.total_loket)} icon={Store} tone="emerald" />

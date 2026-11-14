@@ -7,5 +7,5 @@ interface Props {
 }
 
 export function PageContainer({ children, className }: Props) {
-  return <div className={cn("max-w-7xl mx-auto", className)}>{children}</div>;
+  return <div className={cn("w-full min-w-0", className)}>{children}</div>;
 }

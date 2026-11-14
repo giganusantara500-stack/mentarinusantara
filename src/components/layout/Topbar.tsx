@@ -43,7 +43,7 @@ export function Topbar({ current }: Props) {
 
   return (
     <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-slate-200">
-      <div className="flex items-center justify-between gap-3 h-16 px-4 lg:px-8 pl-16 lg:pl-8">
+      <div className="flex h-16 w-full items-center justify-between gap-3 px-4 pl-16 sm:px-6 sm:pl-16 lg:px-8 lg:pl-8">
         <div className="flex items-center gap-3 min-w-0">
           <div className="leading-tight min-w-0">
             <div className="text-xs font-bold text-slate-800 truncate">{PLATFORM_NAME}</div>

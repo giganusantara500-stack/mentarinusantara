@@ -25,7 +25,7 @@ export function Table<T>({ columns, data, rowKey, empty, onRowClick }: Props<T>)
     );
   }
   return (
-    <div className="w-full max-w-full">
+    <div className="w-full min-w-0">
       <table className="w-full table-fixed text-sm">
         <thead>
           <tr className="text-left text-xs uppercase tracking-wide text-slate-500 bg-slate-50 border-y border-slate-100">

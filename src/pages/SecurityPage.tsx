@@ -97,7 +97,7 @@ export function SecurityPage() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="w-full min-w-0">
       <div className="mb-6">
         <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
           <ShieldCheck size={22} className="text-blue-600" /> Profil &amp; Keamanan
@@ -204,7 +204,7 @@ export function SecurityPage() {
       <Card className="mt-6">
         <CardHeader title="Ganti Password" subtitle="Password baru minimal 6 karakter" />
         <CardBody>
-          <div className="grid sm:grid-cols-2 gap-4 max-w-xl">
+          <div className="grid w-full gap-4 sm:grid-cols-2">
             <Field label="Password Baru">
               <div className="relative">
                 <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -219,13 +219,13 @@ export function SecurityPage() {
             </Field>
           </div>
           {pwdError && (
-            <div className="mt-3 flex items-start gap-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 max-w-xl">
+            <div className="mt-3 flex w-full items-start gap-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
               <AlertCircle size={14} className="shrink-0 mt-0.5" />
               <span>{pwdError}</span>
             </div>
           )}
           {pwdSuccess && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 max-w-xl">
+            <div className="mt-3 flex w-full items-center gap-2 text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
               <CheckCircle2 size={14} /> Password berhasil diperbarui.
             </div>
           )}

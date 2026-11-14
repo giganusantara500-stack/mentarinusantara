@@ -107,7 +107,7 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
     <LoketRefreshContext.Provider value={{ tick, requestRefresh, loketCode, openDeposit: () => setDepositOpen(true) }}>
       <div className="flex h-screen flex-col overflow-hidden bg-slate-100">
         <header className="bg-gradient-to-r from-sky-950 via-sky-800 to-cyan-700 text-white">
-          <div className="max-w-6xl mx-auto px-4 pt-3 pb-4">
+          <div className="w-full px-4 pt-3 pb-4 sm:px-6 lg:px-8">
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-sky-800 shadow">
@@ -144,13 +144,13 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
           </div>
         </header>
         {runText && <div className="overflow-hidden bg-amber-100 text-[11px] text-amber-950"><div className="animate-ticker whitespace-nowrap py-1">{runText}</div></div>}
-        <main className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-hidden px-3 pt-3">
+        <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden px-4 pt-3 sm:px-6 lg:px-8">
           <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
           <div className="h-[4.75rem] shrink-0" />
         </main>
         <DepositModal open={depositOpen || current === "/deposit"} tick={tick} requestRefresh={requestRefresh} onClose={() => { setDepositOpen(false); if (current === "/deposit") onNavigate("/dashboard"); }} />
         <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-slate-200 bg-white">
-          <div className="max-w-6xl mx-auto flex overflow-x-auto">
+          <div className="flex w-full min-w-0">
             {MENU.map((item) => {
               const active = current === item.path || (item.path === "/beli" && current.startsWith("/beli"));
               const Icon = item.icon;
@@ -159,12 +159,12 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
                   key={item.path}
                   onClick={() => onNavigate(item.path)}
                   className={cn(
-                    "flex min-w-[5.5rem] flex-1 flex-col items-center gap-1.5 px-2 py-3 text-xs font-semibold",
+                    "flex min-w-0 flex-1 flex-col items-center gap-1 px-1 py-3 text-[10px] font-semibold sm:text-xs",
                     active ? "text-sky-700" : "text-slate-500",
                   )}
                 >
                   <Icon size={28} strokeWidth={2.25} />
-                  <span className="whitespace-nowrap">{item.label}</span>
+                  <span className="max-w-full text-center leading-tight">{item.label}</span>
                 </button>
               );
             })}
