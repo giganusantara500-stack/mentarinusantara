@@ -38,7 +38,7 @@ export function LoketHomePage() {
         <div className="mt-3 font-mono text-xl font-semibold tracking-wide text-slate-900">{account.accountNumber}</div>
         <div className="mt-1 text-sm text-slate-500">a.n. {account.holder}</div>
       </article>
-      <section className="w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="w-full overflow-visible rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-2 flex items-end justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-slate-900">Capaian Transaksi</h2>

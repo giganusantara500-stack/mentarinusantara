@@ -39,7 +39,7 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
   const axisText = axisFormat ?? ((value: number) => new Intl.NumberFormat("id-ID").format(Math.round(value)));
 
   const width = 800;
-  const padding = { top: 20, right: 20, bottom: 36, left: Math.min(88, Math.max(46, axisText(max).length * 7 + 16)) };
+  const padding = { top: 28, right: 28, bottom: 58, left: Math.min(128, Math.max(92, axisText(max).length * 8 + 36)) };
   const chartW = width - padding.left - padding.right;
   const plotH = chartHeight - padding.top - padding.bottom;
 
@@ -119,11 +119,13 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
   };
 
   return (
-    <div className="relative h-72 max-h-80 w-full overflow-hidden" style={{ height: chartHeight }} onMouseLeave={() => setHoverIdx(null)}>
+    <div className="relative h-72 max-h-80 w-full overflow-visible" style={{ height: chartHeight }} onMouseLeave={() => setHoverIdx(null)}>
       <svg
         viewBox={`0 0 ${width} ${chartHeight}`}
         className="h-full w-full"
-        preserveAspectRatio="none"
+        preserveAspectRatio="xMidYMid meet"
+        role="img"
+        aria-label="Jumlah Transaksi (Lembar) per Tanggal (Hari ke-)"
       >
         <defs>
           {points.map((s, i) => (
@@ -147,12 +149,13 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
               strokeDasharray={i === 0 ? "0" : "4 4"}
             />
             <text
-              x={padding.left - 8}
+              x={padding.left - 10}
               y={t.y + 4}
               textAnchor="end"
-              fontSize="10"
-              fill="#94a3b8"
-              className="font-mono"
+              fontSize="12"
+              fontWeight="500"
+              fill="#334155"
+              className="text-xs font-medium text-slate-700"
             >
               {axisText(t.value)}
             </text>
@@ -182,15 +185,41 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
             <text
               key={i}
               x={x}
-              y={chartHeight - 12}
+              y={chartHeight - 28}
               textAnchor="middle"
-              fontSize="10"
-              fill="#94a3b8"
+              fontSize="12"
+              fontWeight="500"
+              fill="#334155"
+              className="text-xs font-medium text-slate-700"
             >
               {showLabel ? label : ""}
             </text>
           );
         })}
+
+        <text
+          x={18}
+          y={padding.top + plotH / 2}
+          textAnchor="middle"
+          fontSize="12"
+          fontWeight="500"
+          fill="#334155"
+          className="text-xs font-medium text-slate-700"
+          transform={`rotate(-90 18 ${padding.top + plotH / 2})`}
+        >
+          Jumlah Transaksi (Lembar)
+        </text>
+        <text
+          x={padding.left + chartW / 2}
+          y={chartHeight - 8}
+          textAnchor="middle"
+          fontSize="12"
+          fontWeight="500"
+          fill="#334155"
+          className="text-xs font-medium text-slate-700"
+        >
+          Tanggal (Hari ke-)
+        </text>
 
         {/* Hover hit areas */}
         {labels.map((_, i) => {
@@ -241,9 +270,9 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
       {/* Tooltip */}
       {hoverIdx !== null && (
         <div
-          className="absolute pointer-events-none bg-white rounded-xl shadow-xl border border-slate-200 px-3 py-2 z-10"
+          className="absolute pointer-events-none z-10 max-w-[220px] rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-xl"
           style={{
-            left: `${((padding.left + hoverIdx * xStep) / width) * 100}%`,
+            left: `${Math.min(82, Math.max(18, ((padding.left + hoverIdx * xStep) / width) * 100))}%`,
             top: 8,
             transform: "translateX(-50%)",
           }}

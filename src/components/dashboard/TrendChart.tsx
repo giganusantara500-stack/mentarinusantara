@@ -18,7 +18,9 @@ export function TrendChart({ data, formatValue, emptyText = "Belum ada data." }:
   const labelStep = Math.ceil(data.length / 8);
 
   return (
-    <div className="flex h-64 max-h-80 w-full items-end gap-1.5 overflow-hidden">
+    <div className="w-full overflow-visible">
+      <div className="mb-1 text-xs font-medium text-slate-700">Jumlah Transaksi (Lembar)</div>
+      <div className="flex h-64 max-h-80 w-full items-end gap-1.5 overflow-visible">
       {data.map((p, i) => {
         const pct = max > 0 ? (p.value / max) * 100 : 0;
         return (
@@ -33,12 +35,14 @@ export function TrendChart({ data, formatValue, emptyText = "Belum ada data." }:
                 style={{ height: `${p.value > 0 ? Math.max(pct, 3) : 0}%` }}
               />
             </div>
-            <div className="h-5 mt-2 text-[10px] text-slate-500 truncate w-full text-center">
+            <div className="mt-2 h-5 w-full truncate text-center text-xs font-medium text-slate-700">
               {i % labelStep === 0 ? p.label : ""}
             </div>
           </div>
         );
       })}
+      </div>
+      <div className="mt-1 text-center text-xs font-medium text-slate-700">Tanggal (Hari ke-)</div>
     </div>
   );
 }

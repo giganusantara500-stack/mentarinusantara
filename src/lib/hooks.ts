@@ -111,6 +111,14 @@ export function useVisibleScope() {
   return { descendantIds, loading, isSuperAdmin };
 }
 
+function canonicalRole(role: unknown) {
+  const value = String(role ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (value === "superadmin" || value === "super_admin") return "super_admin";
+  if (value === "sub_mitra" || value === "submitra") return "submitra";
+  if (value === "mitra" || value === "loket") return value;
+  return value;
+}
+
 function mapProfileRow(row: Record<string, unknown>): Profile {
   const username = (row.username as string | null) ?? null;
   const active = row.is_active !== false && row.status !== "suspended";
@@ -123,7 +131,7 @@ function mapProfileRow(row: Record<string, unknown>): Profile {
     business_name: (row.business_name as string | null) ?? null,
     address: (row.address as string | null) ?? null,
     city: (row.city as string | null) ?? null,
-    role: (row.role === "sub_mitra" ? "submitra" : row.role) as AppRole,
+    role: canonicalRole(row.role) as AppRole,
     parent_id: (row.parent_id as string | null) ?? null,
     status: active ? "active" : "suspended",
     must_change_password: Boolean(row.must_change_password),
@@ -137,23 +145,44 @@ function mapProfileRow(row: Record<string, unknown>): Profile {
   };
 }
 
+async function profileTableRows() {
+  const narrow = await supabase.from("profiles").select("id, username, role, is_active, created_at, updated_at");
+  if (!narrow.error) return { rows: (narrow.data ?? []).map((row) => mapProfileRow(row as Record<string, unknown>)), error: null as string | null };
+  const wide = await supabase.from("profiles").select("*");
+  if (wide.error) return { rows: [] as Profile[], error: wide.error.message };
+  return { rows: (wide.data ?? []).map((row) => mapProfileRow(row as Record<string, unknown>)), error: null };
+}
+
+function mergeProfiles(primary: Profile[], extra: Profile[]) {
+  const byId = new Map(primary.map((row) => [row.id, row]));
+  extra.forEach((row) => {
+    if (!byId.has(row.id)) byId.set(row.id, row);
+  });
+  return [...byId.values()];
+}
+
 async function loadProfiles() {
   const session = await supabase.auth.getSession();
   const token = session.data.session?.access_token;
+  const table = await profileTableRows();
   if (token) {
     const response = await fetch("/api/accounts", { headers: { Authorization: `Bearer ${token}` } });
-    if (response.ok) {
-      const body = await response.json();
-      const rows = ((body.rows ?? []) as Record<string, unknown>[]).map((row) => mapProfileRow(row));
-      return { rows, scoped: true, error: null as string | null };
+    const text = await response.text();
+    let body: { rows?: unknown; error?: string } | null = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
     }
-    return { rows: [] as Profile[], scoped: true, error: "Daftar akun gagal dimuat." };
+    if (response.ok && Array.isArray(body?.rows)) {
+      const apiRows = (body.rows as Record<string, unknown>[]).map((row) => mapProfileRow(row));
+      return { rows: mergeProfiles(apiRows, table.rows), scoped: true, error: null as string | null };
+    }
+    if (table.rows.length > 0) return { rows: table.rows, scoped: false, error: null };
+    return { rows: [] as Profile[], scoped: true, error: body?.error || table.error || "Daftar akun gagal dimuat dari server." };
   }
-  const narrow = await supabase.from("profiles").select("id, username, role, is_active, created_at, updated_at");
-  if (!narrow.error) return { rows: (narrow.data ?? []).map((row) => mapProfileRow(row as Record<string, unknown>)), scoped: false, error: null };
-  const wide = await supabase.from("profiles").select("*");
-  if (wide.error) return { rows: [], scoped: false, error: wide.error.message };
-  return { rows: (wide.data ?? []).map((row) => mapProfileRow(row as Record<string, unknown>)), scoped: false, error: null };
+  if (table.error) return { rows: [] as Profile[], scoped: false, error: table.error };
+  return { rows: table.rows, scoped: false, error: null };
 }
 export function useProfiles() {
   const { profile, isSuperAdmin } = useAuth();

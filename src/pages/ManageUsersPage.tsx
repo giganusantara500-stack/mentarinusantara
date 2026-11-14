@@ -105,7 +105,7 @@ async function readFunctionError(err: unknown): Promise<string> {
 
 export function ManageUsersPage({ targetRole, onNavigate }: Props) {
   const { profile, isSuperAdmin } = useAuth();
-  const { profiles, loading, refresh } = useProfiles();
+  const { profiles, loading, error: profilesError, refresh } = useProfiles();
   const { wallets } = useWallets();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("semua");
@@ -756,6 +756,7 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
         </Button>
         )}
       </PageHeader>
+      {profilesError && <p className="mb-3 text-sm text-rose-600">{profilesError}</p>}
 
       {/* Filters */}
       <Card className="mb-4 p-4">

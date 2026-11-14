@@ -324,7 +324,7 @@ export function MitraDashboardPage({ onNavigate }: { onNavigate: (path: string) 
             </div>
           }
         />
-        <div className="w-full overflow-hidden px-5 pb-5">
+        <div className="w-full overflow-visible px-5 pb-5">
           <LineChart
             labels={chartData.labels}
             series={chartData.series}

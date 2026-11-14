@@ -45,9 +45,15 @@ export function makeTransferCode(used: Set<string>) {
 }
 
 export async function listAuthUsers(env: Env): Promise<AuthUser[]> {
-  const response = await fetch(`${env.supabaseUrl}/auth/v1/admin/users?page=1&per_page=200`, { headers: headers(env) });
-  const body = await response.json().catch(() => null);
-  return Array.isArray(body?.users) ? body.users : [];
+  const users: AuthUser[] = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const response = await fetch(`${env.supabaseUrl}/auth/v1/admin/users?page=${page}&per_page=200`, { headers: headers(env) });
+    const body = await response.json().catch(() => null);
+    const batch = Array.isArray(body?.users) ? body.users as AuthUser[] : [];
+    users.push(...batch);
+    if (batch.length < 200) break;
+  }
+  return users;
 }
 
 async function saveCode(env: Env, user: AuthUser, code: string) {

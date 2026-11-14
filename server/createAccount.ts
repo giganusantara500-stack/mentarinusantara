@@ -169,6 +169,15 @@ export async function createNetworkAccount(authorization: string, input: CreateA
     username = nextUsername(base, existingNames);
   }
 
+  let mitraId: string | null = null;
+  if (callerRole === "mitra") mitraId = callerId;
+  if (callerRole === "submitra") {
+    const callerAuthResponse = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${callerId}`, { headers: serviceHeaders });
+    const callerAuth = await readJson(callerAuthResponse);
+    const linked = callerAuth?.user_metadata?.mitra_id || callerAuth?.user_metadata?.parent_id;
+    mitraId = typeof linked === "string" && linked ? linked : null;
+  }
+
   const tempPassword = generatePassword();
   const loginEmail = `${username}@gigamentarinusantara.id`;
   let loketCode: string | null = null;
@@ -192,6 +201,7 @@ export async function createNetworkAccount(authorization: string, input: CreateA
         city,
         contact_email: clean(input.email),
         parent_id: parentId,
+        mitra_id: mitraId,
         role,
         status: input.status === "suspended" ? "suspended" : "active",
         username,

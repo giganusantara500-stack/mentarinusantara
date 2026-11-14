@@ -566,8 +566,19 @@ export function CollectiveAdminPage() {
 
   const load = async () => {
     const response = await fetch("/api/kolektif", { headers: await authHeader() });
-    const body = response.ok ? await response.json() : null;
-    const next = (body?.rows ?? []) as CollectiveRow[];
+    const text = await response.text();
+    let body: { rows?: CollectiveRow[]; error?: string } | null = null;
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
+    if (!response.ok || !Array.isArray(body?.rows)) {
+      setError(body?.error || "Daftar kolektif gagal dimuat. Pastikan fungsi API dan kunci Supabase aktif.");
+      return;
+    }
+    const next = body.rows;
+    setError("");
     setRows(next);
     setDetail((current) => current ? next.find((row) => row.id === current.id) ?? null : null);
   };
@@ -634,6 +645,7 @@ export function CollectiveAdminPage() {
 
   return (
     <Shell title="Manajemen Kolektif" description="Grup kolektif yang dibuat loket masuk otomatis ke Sub Mitra, Mitra, dan Super Admin.">
+      {error && !creating && !detail && <p className="mb-3 text-sm text-rose-600">{error}</p>}
       <Card>
         <CardHeader
           title="Daftar grup kolektif"

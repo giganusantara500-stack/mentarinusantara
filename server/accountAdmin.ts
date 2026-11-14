@@ -131,20 +131,57 @@ export async function listAccounts(authorization: string, env: Env) {
   if (!caller || !["super_admin", "mitra", "submitra"].includes(caller.role)) {
     return { status: 403, body: { error: "Anda tidak dapat melihat daftar akun." } };
   }
-  const profilesResponse = await fetch(`${env.supabaseUrl}/rest/v1/profiles?select=id,username,role,is_active,created_at,updated_at`, { headers: serviceHeaders(env) });
+  const profilesResponse = await fetch(`${env.supabaseUrl}/rest/v1/profiles?select=id,username,role,is_active,created_at,updated_at&limit=1000`, { headers: serviceHeaders(env) });
   const profiles = await readJson(profilesResponse);
   const users = await authUsers(env);
   const byId = new Map(users.map((user: { id: string }) => [user.id, user]));
   const profileRows = Array.isArray(profiles) ? profiles : [];
+  const seen = new Set(profileRows.map((profile) => String(profile.id)));
+  for (const user of users) {
+    if (seen.has(user.id)) continue;
+    const meta = (user.user_metadata ?? {}) as Record<string, unknown>;
+    const role = accountRole(meta, "");
+    if (!["mitra", "submitra", "loket"].includes(role)) continue;
+    const username = clean(meta.username) || clean(user.email).split("@")[0] || "akun";
+    const active = meta.status !== "suspended";
+    await fetch(`${env.supabaseUrl}/rest/v1/profiles?on_conflict=id`, {
+      method: "POST",
+      headers: { ...serviceHeaders(env), Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ id: user.id, username, role, is_active: active }),
+    });
+    profileRows.push({
+      id: user.id,
+      username,
+      role,
+      is_active: active,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    seen.add(user.id);
+  }
   const loketIds = profileRows.filter((profile) => normalizeRole(clean(profile.role)) === "loket").map((profile) => String(profile.id));
   const codes = await assignMissingLoketCodes(env, users, loketIds);
-  const rows = profileRows.map((profile) => {
+  const rows = [];
+  for (const profile of profileRows) {
     const user = byId.get(profile.id) as { email?: string; user_metadata?: Record<string, string> } | undefined;
     const meta = user?.user_metadata ?? {};
     const parentId = meta.parent_id || null;
     const parent = parentId ? byId.get(parentId) as { user_metadata?: Record<string, string> } | undefined : null;
-    return {
+    const parentMeta = parent?.user_metadata ?? {};
+    const parentRole = normalizeRole(clean(parentMeta.role));
+    const role = accountRole(meta, normalizeRole(clean(profile.role))) || normalizeRole(clean(profile.role));
+    const mitraId = meta.mitra_id || (parentRole === "mitra" ? parentId : parentMeta.mitra_id || (parentRole === "submitra" ? parentMeta.parent_id : "")) || null;
+    if (role === "loket" && mitraId && !meta.mitra_id && user) {
+      meta.mitra_id = mitraId;
+      await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${profile.id}`, {
+        method: "PUT",
+        headers: serviceHeaders(env),
+        body: JSON.stringify({ user_metadata: meta }),
+      });
+    }
+    rows.push({
       ...profile,
+      role,
       email: meta.contact_email || user?.email || "",
       full_name: profile.username === "giganusantara" ? "Aris Purwanto" : (meta.full_name || profile.username || ""),
       phone: meta.phone || null,
@@ -152,13 +189,15 @@ export async function listAccounts(authorization: string, env: Env) {
       address: meta.address || null,
       city: meta.city || null,
       parent_id: parentId,
-      parent_of_parent: parent?.user_metadata?.parent_id || null,
+      mitra_id: mitraId,
+      parent_of_parent: parentMeta.parent_id || null,
       loket_type: meta.loket_type || null,
       loket_code: codes.get(profile.id) || meta.loket_code || null,
       status: profile.is_active === false ? "suspended" : "active",
-    };
-  }).filter((row) => caller.role === "super_admin" || canManage(caller, row.role, row.parent_id, row.parent_of_parent) || row.id === caller.id);
-  return { status: 200, body: { rows } };
+    });
+  }
+  const visible = rows.filter((row) => caller.role === "super_admin" || canManage(caller, row.role, row.parent_id, row.parent_of_parent) || row.id === caller.id);
+  return { status: 200, body: { rows: visible } };
 }
 
 export async function networkLoketIds(authorization: string, env: Env) {
