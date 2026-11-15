@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { useLoketRefresh } from "@/components/layout/LoketShell";
@@ -84,14 +85,33 @@ function inquire(number: string, product: string, adminFee: number): Omit<CartRo
 }
 
 function AreaPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const box = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
+  const [place, setPlace] = useState({ top: 0, left: 0, width: 280 });
   useEffect(() => setQuery(value), [value]);
+  useEffect(() => {
+    if (!open) return;
+    const placeMenu = () => {
+      const rect = box.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = Math.max(rect.width, 280);
+      const left = Math.min(rect.left, window.innerWidth - width - 12);
+      setPlace({ top: rect.bottom + 4, left: Math.max(8, left), width });
+    };
+    placeMenu();
+    window.addEventListener("resize", placeMenu);
+    window.addEventListener("scroll", placeMenu, true);
+    return () => {
+      window.removeEventListener("resize", placeMenu);
+      window.removeEventListener("scroll", placeMenu, true);
+    };
+  }, [open]);
   const needle = query.trim().toLowerCase();
   const showAll = needle.length === 0 || query === value;
   const matches = showAll ? PDAM_AREAS : PDAM_AREAS.filter((area) => area.toLowerCase().includes(needle));
   return (
-    <div className="relative">
+    <div ref={box} className="relative">
       <Input
         value={query}
         onChange={(event) => {
@@ -106,19 +126,24 @@ function AreaPicker({ value, onChange }: { value: string; onChange: (value: stri
           const exact = PDAM_AREAS.find((area) => area.toLowerCase() === query.trim().toLowerCase());
           if (exact) onChange(exact);
           else setQuery(value);
-          window.setTimeout(() => setOpen(false), 120);
+          window.setTimeout(() => setOpen(false), 160);
         }}
         placeholder="Ketik kota, contoh Sragen"
+        aria-expanded={open}
       />
-      {open && (
-        <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+      {open && createPortal(
+        <ul
+          className="fixed z-50 max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+          style={{ top: place.top, left: place.left, width: place.width }}
+        >
           {matches.map((area) => (
             <li key={area}>
-              <button type="button" className="block w-full px-3 py-2 text-left text-sm hover:bg-amber-50" onMouseDown={(event) => { event.preventDefault(); onChange(area); setQuery(area); setOpen(false); }}>{area}</button>
+              <button type="button" className="block w-full whitespace-normal break-words px-3 py-2 text-left text-sm leading-5 text-slate-800 hover:bg-amber-50" onMouseDown={(event) => { event.preventDefault(); onChange(area); setQuery(area); setOpen(false); }}>{area}</button>
             </li>
           ))}
           {matches.length === 0 && <li className="px-3 py-2 text-sm text-slate-400">Wilayah tidak ditemukan.</li>}
-        </ul>
+        </ul>,
+        document.body,
       )}
     </div>
   );
@@ -265,7 +290,7 @@ export function LoketTransaksiPage() {
       </div>
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
         {mode === "bayar" ? (
-          <div className="grid h-[92px] shrink-0 grid-cols-4 items-end gap-3 overflow-hidden p-4">
+          <div className="grid h-[92px] shrink-0 grid-cols-4 items-end gap-3 overflow-visible p-4">
             <Field label={productLabel}>
               {category === "PDAM" ? (
                 <AreaPicker value={product} onChange={setProduct} />

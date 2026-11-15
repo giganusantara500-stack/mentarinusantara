@@ -97,6 +97,22 @@ function collectivesFromMeta(metadata: Record<string, unknown> | undefined, owne
   return raw.map((item) => normalizeCollective({ ...(item as Collective), ownerId: (item as Collective).ownerId || ownerId }));
 }
 
+async function loadOwnedCollectives(env: { supabaseUrl: string; serviceRoleKey: string }, ownerId: string) {
+  const headers = serviceHeaders(env);
+  const response = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${ownerId}`, { headers });
+  const user = await response.json().catch(() => null);
+  const users = user?.id ? [user] : [];
+  let rows = user?.id ? collectivesFromMeta(user.user_metadata, user.id) : [];
+  if (user?.id && rows.length === 0) {
+    const filed = readOps().collectives.filter((row) => row.ownerId === user.id).map((row) => normalizeCollective(row));
+    if (filed.length > 0) {
+      rows = filed;
+      await saveCollectives(env, users, rows);
+    }
+  }
+  return { users, rows };
+}
+
 async function loadCollectiveUsers(env: { supabaseUrl: string; serviceRoleKey: string }) {
   const users = await listAuthUsers(env);
   let rows = users.flatMap((user) => collectivesFromMeta(user.user_metadata, user.id));
@@ -209,7 +225,7 @@ export async function handleOpsRequest(
   if (pathname === "/api/kolektif" || pathname === "/api/kolektif/bills") {
     const scope = caller.role === "loket" ? [caller.id] : await networkLoketIds(authorization, env);
     const visible = (row: Collective) => scope === null || scope.includes(row.ownerId) || row.ownerId === caller.id;
-    const stored = await loadCollectiveUsers(env);
+    const stored = caller.role === "loket" ? await loadOwnedCollectives(env, caller.id) : await loadCollectiveUsers(env);
     if (pathname === "/api/kolektif" && method === "GET") {
       return { status: 200, body: { rows: stored.rows.filter(visible) } };
     }

@@ -198,16 +198,36 @@ export function LoketKolektifPage() {
   const loketName = profile?.full_name || profile?.username || "Loket";
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const groupsFromSession = async () => {
+    const { data } = await supabase.auth.getUser();
+    const uid = data.user?.id ?? "";
+    const raw = data.user?.user_metadata?.collectives as Array<Group & { ownerId?: string }> | undefined;
+    if (!uid || !Array.isArray(raw)) return null;
+    return raw
+      .filter((row) => !row?.ownerId || row.ownerId === uid)
+      .map((row) => ({ ...row, bills: row.bills ?? [], history: row.history ?? [], members: row.members ?? [] }));
+  };
+
+  const applyGroups = (rows: Group[]) => {
+    setNotice("");
+    setGroups(rows);
+    setActiveId((current) => rows.some((row) => row.id === current) ? current : (rows[0]?.id ?? ""));
+  };
+
   const load = async () => {
     const response = await fetch("/api/kolektif", { headers: await authHeader() });
     const parsed = await readApi(response);
-    if (!parsed.ok) {
-      setNotice(parsed.body.error || "Daftar kolektif gagal dimuat.");
+    if (parsed.ok) {
+      const rows = (parsed.body.rows ?? []).map((row: Group) => ({ ...row, bills: row.bills ?? [], history: row.history ?? [], members: row.members ?? [] }));
+      applyGroups(rows);
       return;
     }
-    const rows = (parsed.body.rows ?? []).map((row: Group) => ({ ...row, bills: row.bills ?? [], history: row.history ?? [], members: row.members ?? [] }));
-    setGroups(rows);
-    setActiveId((current) => rows.some((row: Group) => row.id === current) ? current : "");
+    const own = await groupsFromSession();
+    if (own) {
+      applyGroups(own);
+      return;
+    }
+    setNotice(parsed.body.error || "Daftar kolektif gagal dimuat.");
   };
   useEffect(() => { load(); }, [tick]);
   const active = groups.find((group) => group.id === activeId) ?? null;
