@@ -87,7 +87,9 @@ function AreaPicker({ value, onChange }: { value: string; onChange: (value: stri
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
   useEffect(() => setQuery(value), [value]);
-  const matches = PDAM_AREAS.filter((area) => area.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 12);
+  const needle = query.trim().toLowerCase();
+  const showAll = needle.length === 0 || query === value;
+  const matches = showAll ? PDAM_AREAS : PDAM_AREAS.filter((area) => area.toLowerCase().includes(needle));
   return (
     <div className="relative">
       <Input
@@ -109,7 +111,7 @@ function AreaPicker({ value, onChange }: { value: string; onChange: (value: stri
         placeholder="Ketik kota, contoh Sragen"
       />
       {open && (
-        <ul className="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+        <ul className="absolute z-20 mt-1 max-h-72 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
           {matches.map((area) => (
             <li key={area}>
               <button type="button" className="block w-full px-3 py-2 text-left text-sm hover:bg-amber-50" onMouseDown={(event) => { event.preventDefault(); onChange(area); setQuery(area); setOpen(false); }}>{area}</button>

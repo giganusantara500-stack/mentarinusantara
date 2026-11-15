@@ -735,21 +735,31 @@ export function CollectiveAdminPage() {
       {detail && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
           <div className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-5 shadow-xl">
-            <h2 className="font-semibold text-slate-900">Anggota {detail.collector || detail.name}</h2>
+            <h2 className="font-semibold text-slate-900">Kelola Pelanggan - {detail.collector || detail.name}</h2>
             <div className="mt-3 w-full max-w-full">
               <table className="w-full table-fixed text-sm">
+                <colgroup>
+                  <col className="w-10" />
+                  <col className="w-36" />
+                  <col className="w-24" />
+                  <col />
+                  <col className="w-28" />
+                  <col className="w-32" />
+                  <col className="w-24" />
+                </colgroup>
                 <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
-                  <tr>{["Nomor Pelanggan", "Kode Produk", "Nama Pelanggan", "Status", "Tanggal Dibuat", "Aksi"].map((head) => <th key={head} className="px-3 py-2">{head}</th>)}</tr>
+                  <tr>{["No", "ID Pelanggan", "Kode Produk", "Nama Pelanggan", "Status", "Tanggal Dibuat", "Aksi"].map((head) => <th key={head} className="px-2 py-2">{head}</th>)}</tr>
                 </thead>
                 <tbody>
-                  {(detail.members ?? []).length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-500">Belum ada pelanggan.</td></tr>}
-                  {(detail.members ?? []).map((member) => {
+                  {(detail.members ?? []).length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-500">Belum ada pelanggan.</td></tr>}
+                  {(detail.members ?? []).map((member, index) => {
                     const bill = (detail.bills ?? []).find((item) => item.number === member.number);
                     return (
                       <tr key={member.number} className="border-t border-slate-100">
-                        <td className="px-3 py-2 font-mono">{member.number}</td>
-                        <td className="px-3 py-2">{member.product || "—"}</td>
-                        <td className="px-3 py-2">{member.name}</td>
+                        <td className="px-2 py-2">{index + 1}</td>
+                        <td className="px-2 py-2 font-mono">{member.number}</td>
+                        <td className="px-2 py-2">{member.product || "—"}</td>
+                        <td className="break-words px-2 py-2">{member.name}</td>
                         <td className="px-3 py-2">{bill?.status === "LUNAS" ? "Lunas" : bill?.status === "LAINNYA" ? "Perlu Diperiksa" : "Belum Lunas"}</td>
                         <td className="px-3 py-2 text-slate-500">{formatWaktu(member.createdAt || detail.createdAt || "")}</td>
                         <td className="px-3 py-2">

@@ -457,6 +457,9 @@ export function LoketKolektifPage() {
         <button onClick={() => setManageOpen(true)} className="mt-3 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">Kelola Kolektif</button>
       </aside>
       <section className="flex min-h-[560px] w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-900">
+          {active ? `Kelola Pelanggan - ${active.collector || active.name}` : "Kelola Pelanggan"}
+        </div>
         <div className="flex flex-wrap gap-2 border-b border-slate-100 p-3">
           <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) importFile(file); event.target.value = ""; }} />
           <button onClick={() => fileRef.current?.click()} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">Impor Excel/CSV</button>
@@ -477,10 +480,21 @@ export function LoketKolektifPage() {
         <div className="h-5 shrink-0 px-3 text-sm text-rose-600">{notice}</div>
         <div className="h-[450px] shrink-0 overflow-auto">
           <table className="w-full table-fixed text-left text-xs">
+            <colgroup>
+              <col className="w-8" />
+              <col className="w-10" />
+              <col className="w-32" />
+              <col />
+              <col className="w-24" />
+              <col className="w-28" />
+              <col className="w-28" />
+              <col className="w-24" />
+              <col className="w-14" />
+            </colgroup>
             <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
               <tr>
-                <th className="px-3 py-2"><input type="checkbox" checked={visible.length > 0 && visible.every((row) => picked.includes(row.number))} onChange={(event) => setPicked(event.target.checked ? visible.map((row) => row.number) : [])} /></th>
-                {["No", "ID Pelanggan", "Nama Pelanggan", "Produk", "Periode", "Total Bayar", "Status", ""].map((head) => <th key={head || "aksi"} className="px-3 py-2 font-semibold">{head}</th>)}
+                <th className="px-2 py-2"><input type="checkbox" checked={visible.length > 0 && visible.every((row) => picked.includes(row.number))} onChange={(event) => setPicked(event.target.checked ? visible.map((row) => row.number) : [])} /></th>
+                {["No", "ID Pelanggan", "Nama Pelanggan", "Produk", "Periode", "Total Bayar", "Status", ""].map((head) => <th key={head || "aksi"} className="px-2 py-2 font-semibold">{head}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -490,7 +504,7 @@ export function LoketKolektifPage() {
                   <td className="px-3 py-2"><input type="checkbox" checked={picked.includes(row.number)} onChange={(event) => setPicked((rows) => event.target.checked ? [...rows, row.number] : rows.filter((item) => item !== row.number))} /></td>
                   <td className="px-3 py-2">{index + 1}</td>
                   <td className="px-3 py-2 font-mono">{row.number}</td>
-                  <td className="px-3 py-2">{row.name}</td>
+                  <td className="px-2 py-2 break-words">{row.name}</td>
                   <td className="px-3 py-2">{row.product || "-"}</td>
                   <td className="px-3 py-2">{row.period}</td>
                   <td className="px-3 py-2 font-semibold">{formatRupiah(row.total)}</td>
@@ -535,10 +549,19 @@ export function LoketKolektifPage() {
             </div>
             <div className="min-h-[320px] flex-1 overflow-auto">
               <table className="w-full table-fixed text-left text-xs">
+                <colgroup>
+                  <col className="w-8" />
+                  <col className="w-10" />
+                  <col className="w-32" />
+                  <col />
+                  <col className="w-28" />
+                  <col className="w-36" />
+                  <col className="w-28" />
+                </colgroup>
                 <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
                   <tr>
-                    <th className="px-3 py-2"><input type="checkbox" checked={historyPageChecked} onChange={(event) => setHistoryPicked((rows) => event.target.checked ? [...new Set([...rows, ...historyPageIds])] : rows.filter((id) => !historyPageIds.includes(id)))} /></th>
-                    {["No", "ID Pelanggan", "Nama Pelanggan", "Produk", "Tanggal", "Nominal"].map((head) => <th key={head} className="px-3 py-2 font-semibold">{head}</th>)}
+                    <th className="px-2 py-2"><input type="checkbox" checked={historyPageChecked} onChange={(event) => setHistoryPicked((rows) => event.target.checked ? [...new Set([...rows, ...historyPageIds])] : rows.filter((id) => !historyPageIds.includes(id)))} /></th>
+                    {["No", "ID Pelanggan", "Nama Pelanggan", "Produk", "Tanggal", "Nominal"].map((head) => <th key={head} className="px-2 py-2 font-semibold">{head}</th>)}
                   </tr>
                 </thead>
                 <tbody>
@@ -548,7 +571,7 @@ export function LoketKolektifPage() {
                       <td className="px-3 py-2"><input type="checkbox" checked={historyPicked.includes(sale.id)} onChange={(event) => setHistoryPicked((rows) => event.target.checked ? [...rows, sale.id] : rows.filter((id) => id !== sale.id))} /></td>
                       <td className="px-3 py-2">{(historyPage - 1) * 8 + index + 1}</td>
                       <td className="px-3 py-2 font-mono">{sale.customerNumber}</td>
-                      <td className="px-3 py-2">{sale.customerName}</td>
+                      <td className="break-words px-2 py-2">{sale.customerName}</td>
                       <td className="px-3 py-2">{sale.product}</td>
                       <td className="px-3 py-2">{formatWaktu(sale.createdAt)}</td>
                       <td className="px-3 py-2 font-semibold">{formatRupiah(sale.amount)}</td>
@@ -607,7 +630,7 @@ export function LoketKolektifPage() {
               </div>
             </div>
             <div>
-              <h2 className="font-semibold text-slate-900">Pelanggan {active ? `· ${active.collector || active.name}` : ""}</h2>
+              <h2 className="font-semibold text-slate-900">{active ? `Kelola Pelanggan - ${active.collector || active.name}` : "Kelola Pelanggan"}</h2>
               <div className="mt-3 grid gap-2">
                 <Select value={biller} onChange={(event) => setBiller(event.target.value)}>
                   {["GAS", "PLN", "BPJS", "PDAM", "TELCO", "TELKOM", "FINANCE", "INTERNET & TV", "PAJAK PBB", "CUSTID"].map((item) => <option key={item}>{item}</option>)}
@@ -669,9 +692,11 @@ export function LoketTransferPage() {
           <button key={item} onClick={() => setBank(item)} className={`rounded-full px-3 py-1.5 text-sm font-semibold ${bank === item ? "bg-sky-700 text-white" : "bg-slate-100"}`}>{item}</button>
         ))}
       </div>
-      <Field label="Nomor rekening tujuan"><Input value={account} onChange={(event) => setAccount(event.target.value)} /></Field>
-      <Field label="Nama pemilik"><Input value={holder} onChange={(event) => setHolder(event.target.value)} /></Field>
-      <Field label="Nominal"><Input inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value.replace(/\D/g, ""))} /></Field>
+      <div className="max-w-xl space-y-3">
+        <Field label="Nomor rekening tujuan"><Input className="h-10" value={account} onChange={(event) => setAccount(event.target.value)} /></Field>
+        <Field label="Nama pemilik"><Input className="h-10" value={holder} onChange={(event) => setHolder(event.target.value)} /></Field>
+        <Field label="Nominal"><Input className="h-10" inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value.replace(/\D/g, ""))} /></Field>
+      </div>
       <Button onClick={send} disabled={account.trim().length < 6 || Number(amount) < 10000}>Kirim Transfer</Button>
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {message && <p className="text-sm text-emerald-700">{message}</p>}
@@ -993,24 +1018,26 @@ export function LoketSettingPage() {
         {panel === "password" && (
           <>
             <h1 className="font-semibold">Ubah Password</h1>
-            <Field label="Password Lama"><Input type="password" value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} /></Field>
-            <Field label="Password Baru"><Input type="password" value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} /></Field>
-            <Field label="Konfirmasi Password"><Input type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} /></Field>
-            <Button onClick={changePassword}>Simpan</Button>
+            <div className="max-w-lg space-y-3">
+              <Field label="Password Lama"><Input className="h-10" type="password" value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} /></Field>
+              <Field label="Password Baru"><Input className="h-10" type="password" value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} /></Field>
+              <Field label="Konfirmasi Password"><Input className="h-10" type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} /></Field>
+              <Button onClick={changePassword}>Simpan</Button>
+            </div>
           </>
         )}
         {panel === "printer" && (
           <>
             <h1 className="font-semibold">Setting Printer</h1>
             <p className="text-xs text-slate-500">Pengaturan ini berlaku untuk loket ini. Nama printer Windows dipilih lewat dialog cetak saat Tes Print.</p>
-            <Field label="Nama printer">
+            <Field label="Nama printer" className="max-w-lg">
               <div className="flex gap-2">
-                <Input value={printerForm.printer} onChange={(event) => setPrinterForm((form) => ({ ...form, printer: event.target.value }))} placeholder="EPSON LX-300+II ESC/P" />
+                <Input className="h-10" value={printerForm.printer} onChange={(event) => setPrinterForm((form) => ({ ...form, printer: event.target.value }))} placeholder="EPSON LX-300+II ESC/P" />
                 <button type="button" onClick={() => setPickerOpen((open) => !open)} className="shrink-0 rounded-lg border border-slate-300 px-3 text-sm font-semibold text-slate-700">Pilih Printer</button>
               </div>
             </Field>
             {pickerOpen && (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-2">
+              <div className="max-w-lg rounded-xl border border-slate-200 bg-slate-50 p-2">
                 {PRINTER_PRESETS.map((name) => (
                   <button key={name} type="button" onClick={() => { setPrinterForm((form) => ({ ...form, printer: name })); setPickerOpen(false); }} className="block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white">{name}</button>
                 ))}
@@ -1024,7 +1051,7 @@ export function LoketSettingPage() {
               </div>
             </Field>
             {printerForm.kind === "dotmatrix" && (
-              <Field label="Format struk">
+              <Field label="Format struk" className="max-w-lg">
                 <Select value={printerForm.format} onChange={(event) => setPrinterForm((form) => ({ ...form, format: event.target.value as PrinterSettings["format"] }))}>
                   {PRINT_FORMATS.map((item) => <option key={item}>{item}</option>)}
                 </Select>
