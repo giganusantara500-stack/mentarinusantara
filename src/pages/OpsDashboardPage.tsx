@@ -124,7 +124,7 @@ export function OpsDashboardPage() {
           );
         })}
       </div>
-      <section className="mr-auto mt-28 w-full max-w-3xl overflow-visible rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
+      <section className="mr-auto mt-28 w-[min(100%,calc(50vw+7.5rem))] overflow-visible rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
         <h2 className="text-sm font-bold text-slate-900">Capaian Transaksi</h2>
         <p className="text-xs text-slate-500">{scopeText}, tiga bulan terakhir</p>
         <div className="mb-2 mt-2 flex flex-wrap gap-3">

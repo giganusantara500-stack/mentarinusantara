@@ -32,7 +32,7 @@ export function DepositModal({ open, onClose, tick, requestRefresh }: { open: bo
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/45 px-[1.5cm] pb-6 pt-16" onClick={onClose}>
-      <div className="max-h-[80vh] w-full max-w-xl overflow-auto rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+      <div className="max-h-[82vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <DepositPanel onClose={onClose} tick={tick} requestRefresh={requestRefresh} />
       </div>
     </div>
@@ -96,11 +96,11 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
       const text = await response.text();
       let body: { error?: string; ticket?: Ticket } = {};
       try { body = text ? JSON.parse(text) : {}; } catch { body = { error: "Server tidak mengembalikan tiket." }; }
-      if (!response.ok || !body.ticket?.uniqueCode) {
+      const ticket = body.ticket;
+      if (!response.ok || !ticket?.id || !ticket.uniqueCode) {
         setError(body.error || "Tiket gagal dibuat.");
         return;
       }
-      const ticket = body.ticket;
       setIssued(ticket);
       setTickets((current) => [ticket, ...current.filter((item) => item.id !== ticket.id)]);
       setAmount("");
@@ -184,16 +184,20 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
       <div className="space-y-3 px-[1.5cm] py-4">
 
       {issued && (
-        <Card className="border-amber-300">
+        <Card className="border-neutral-950">
           <CardBody className="space-y-1">
-            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Nomor Tiket</div>
-            <div className="font-mono text-3xl font-extrabold tracking-widest text-slate-950">{issued.uniqueCode}</div>
-            <div className="text-sm text-slate-700">Total transfer <span className="font-bold">{formatRupiah(issued.transferAmount ?? issued.amount)}</span></div>
-            <div className="text-sm leading-tight text-slate-700">{issued.bank} · No.Rekening : {issued.accountNumber}</div>
+            <div className="rounded-xl bg-neutral-950 px-4 py-3 text-white">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-amber-300">Kode unik transfer</div>
+              <div className="font-mono text-4xl font-black tracking-[0.18em]">{issued.uniqueCode}</div>
+              <div className="mt-1 text-sm">Nominal {formatRupiah(issued.baseAmount ?? issued.amount)} + kode {issued.uniqueCode}</div>
+              <div className="text-sm font-bold">Total transfer {formatRupiah(issued.transferAmount ?? issued.amount)}</div>
+              <div className="mt-3 text-[11px] font-bold uppercase tracking-wide text-amber-300">Hitungan mundur</div>
+              <div className={`font-mono text-3xl font-black ${remain === 0 && issued.status === "pending" ? "text-rose-300" : "text-white"}`}>{issued.status === "pending" ? remainLabel : statusLabel[issued.status]}</div>
+              {issued.status === "pending" && <div className="text-xs text-white/70">{remain === 0 ? "Tiket kedaluwarsa." : "Tiket berlaku 6 jam sejak dibuat."}</div>}
+            </div>
+            <div className="pt-1 text-sm leading-tight text-slate-700">{issued.bank} · No.Rekening : {issued.accountNumber}</div>
             <div className="text-sm leading-tight text-slate-700">Atas Nama : {issued.accountHolder || "Aris Purwanto"}</div>
             <div className="text-xs text-slate-500">Jam transfer {formatWaktu(issued.transferAt)}</div>
-            <div className={`font-mono text-lg font-bold ${remain === 0 ? "text-rose-600" : "text-amber-600"}`}>{issued.status === "pending" ? remainLabel : statusLabel[issued.status]}</div>
-            {issued.status === "pending" && <div className="text-xs text-slate-500">Tiket berlaku 6 jam.</div>}
             <div className="flex flex-wrap gap-2 pt-1">
               <Button size="sm" variant="outline" onClick={copyTicket}>Salin Semua Informasi</Button>
               <Button size="sm" variant="outline" onClick={refreshStatus}>Perbarui Status</Button>

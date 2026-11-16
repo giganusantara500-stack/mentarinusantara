@@ -29,7 +29,7 @@ export function LoketHomePage() {
   return (
     <div>
       <DepositInfo />
-      <section className="mr-auto mt-28 w-full max-w-3xl overflow-visible rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
+      <section className="mr-auto mt-28 w-[min(100%,calc(50vw+7.5rem))] overflow-visible rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
         <div className="mb-2 flex items-end justify-start gap-8">
           <div>
             <h2 className="text-sm font-bold text-slate-900">Capaian Transaksi</h2>

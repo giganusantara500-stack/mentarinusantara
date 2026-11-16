@@ -32,12 +32,11 @@ export function useDeskStats(tick: number) {
       const remote = (txRes.data ?? []) as { amount: number; status: string; created_at: string }[];
       const today = new Date().toDateString();
       const todaySales = sales.filter((sale) => new Date(sale.createdAt).toDateString() === today);
-      const todayRemote = remote.filter((row) => new Date(row.created_at).toDateString() === today);
       const pending = remote.filter((row) => row.status === "pending").reduce((sum, row) => sum + Number(row.amount), 0);
       if (!active) return;
       setBalance(Number(wallet?.balance ?? salesBody.balance ?? 0));
-      setTodayCount(todaySales.length + todayRemote.length);
-      setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0) + todayRemote.reduce((sum, row) => sum + Number(row.amount), 0));
+      setTodayCount(todaySales.length);
+      setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0));
       setOutstanding(pending);
       setLoketCode(String(wallet?.loketCode || salesBody.loketCode || profile.loket_code || ""));
       const runBody = runRes.ok ? await runRes.json() : null;
@@ -45,6 +44,34 @@ export function useDeskStats(tick: number) {
     })();
     return () => { active = false; };
   }, [profile, tick]);
+
+  useEffect(() => {
+    if (!profile) return;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        const session = await supabase.auth.getSession();
+        const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
+        const [walletRes, salesRes] = await Promise.all([
+          fetch("/api/wallet", { headers }),
+          fetch("/api/loket-sales", { headers }),
+        ]);
+        if (walletRes.ok) {
+          const wallet = await walletRes.json();
+          setBalance(Number(wallet.balance ?? 0));
+          if (wallet.loketCode) setLoketCode(String(wallet.loketCode));
+        }
+        if (salesRes.ok) {
+          const body = await salesRes.json();
+          const sales = (body.sales ?? []) as { amount: number; createdAt: string }[];
+          const today = new Date().toDateString();
+          const todaySales = sales.filter((sale) => new Date(sale.createdAt).toDateString() === today);
+          setTodayCount(todaySales.length);
+          setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0));
+        }
+      })();
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [profile]);
 
   return { balance, todayCount, todayAmount, outstanding, loketCode, runText };
 }
@@ -89,7 +116,7 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout }: Hea
         </div>
       </div>
       <div className="flex flex-wrap items-stretch justify-start border-b border-slate-200 bg-white text-slate-900">
-        <Stat icon={Wallet} tone="bg-cyan-400 text-sky-950" label="Saldo" value={formatRupiah(stats.balance)} />
+        <Stat icon={Wallet} tone="bg-cyan-400 text-sky-950" label="Saldo" value={formatRupiah(stats.balance)} nowrap />
         <Stat icon={BadgeAlert} tone="bg-yellow-300 text-amber-950" label="OS" value={formatRupiah(stats.outstanding)} />
         <Stat icon={Receipt} tone="bg-lime-400 text-green-950" label="Trx Hari Ini" value={`${stats.todayCount} · ${formatRupiah(stats.todayAmount)}`} />
         <Stat icon={Store} tone="bg-sky-950 text-white" label="Loket" value={identity} hint={profile.username || deskName} />
@@ -103,15 +130,15 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout }: Hea
   );
 }
 
-function Stat({ icon: Icon, tone, label, value, hint }: { icon: typeof Wallet; tone: string; label: string; value: string; hint?: string }) {
+function Stat({ icon: Icon, tone, label, value, hint, nowrap }: { icon: typeof Wallet; tone: string; label: string; value: string; hint?: string; nowrap?: boolean }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 border-r border-slate-200 px-4 py-2 last:border-r-0">
+    <div className={cn("flex items-center gap-2 border-r border-slate-200 px-4 py-2 last:border-r-0", nowrap ? "shrink-0" : "min-w-0")}>
       <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", tone)}>
         <Icon size={16} strokeWidth={2.4} />
       </span>
-      <span className="min-w-0">
+      <span className={cn(nowrap ? "min-w-[12.5rem]" : "min-w-0")}>
         <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</span>
-        <span className="block truncate text-sm font-bold leading-tight">{value}</span>
+        <span className={cn("block text-sm font-bold leading-tight", nowrap ? "whitespace-nowrap" : "truncate")}>{value}</span>
         {hint && <span className="block truncate text-[11px] font-medium text-slate-500">{hint}</span>}
       </span>
     </div>

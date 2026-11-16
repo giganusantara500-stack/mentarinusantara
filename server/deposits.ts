@@ -45,8 +45,18 @@ export async function loadCaller(authorization: string, env: Env): Promise<Calle
   const rows = await readJson(profileResponse);
   const profile = Array.isArray(rows) ? rows[0] : null;
   if (!profile || profile.is_active === false) return null;
-  const stored = String(profile.role ?? "").toLowerCase();
-  const role = stored === "sub_mitra" || stored === "submitra" ? "submitra" : stored === "superadmin" ? "super_admin" : stored;
+  const meta = (callerAuth?.user_metadata ?? {}) as Record<string, unknown>;
+  const canon = (value: unknown) => {
+    const stored = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+    if (stored === "super_admin" || stored === "superadmin") return "super_admin";
+    if (stored === "mitra") return "mitra";
+    if (stored === "submitra" || stored === "sub_mitra") return "submitra";
+    if (stored === "loket" || stored === "role_loket") return "loket";
+    return "";
+  };
+  const loketCode = typeof meta.loket_code === "string" && /^\d{7}$/.test(meta.loket_code);
+  const role = canon(profile.role) || canon(meta.role) || (loketCode || meta.loket_type ? "loket" : "");
+  if (!role) return null;
   return { id: callerId, role, username: profile.username ?? null };
 }
 
@@ -57,13 +67,13 @@ function accountFor(bank: string) {
 export async function handleDepositRequest(method: string, pathname: string, body: Record<string, unknown>, caller: Caller, env: Env, authorization = "") {
   if (pathname === "/api/deposits" && method === "GET") {
     const scope = caller.role === "loket" || caller.role === "super_admin" ? null : await networkLoketIds(authorization, env);
-    const loketCode = caller.role === "loket" ? await ensureLoketCode(env, caller.id) : "";
+    const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
     return { status: 200, body: { tickets: listTickets(caller.id, caller.role, scope), accounts: DEPOSIT_ACCOUNTS, balance: walletBalance(caller.id), loketCode } };
   }
 
   if (pathname === "/api/loket-sales" && method === "GET") {
     if (caller.role === "loket") {
-      const loketCode = await ensureLoketCode(env, caller.id);
+      const loketCode = await loketCodeFor(env, caller.id).catch(() => "");
       return { status: 200, body: { sales: listNetworkSales([caller.id]), balance: walletBalance(caller.id), loketCode } };
     }
     if (!["super_admin", "mitra", "submitra"].includes(caller.role)) {
@@ -113,7 +123,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
   }
 
   if (pathname === "/api/wallet" && method === "GET") {
-    const loketCode = caller.role === "loket" ? await ensureLoketCode(env, caller.id) : "";
+    const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
     return { status: 200, body: { balance: walletBalance(caller.id), loketCode } };
   }
 
@@ -145,9 +155,13 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     ticket.baseAmount = ticket.amount;
     ticket.uniqueCode = uniqueCode;
     ticket.transferAmount = ticket.amount + Number(uniqueCode);
-    const created = createTicket(ticket);
-    await touchActivity(caller.id, env).catch(() => undefined);
-    return { status: 200, body: { ticket: created } };
+    try {
+      const created = createTicket(ticket);
+      await touchActivity(caller.id, env).catch(() => undefined);
+      return { status: 200, body: { ticket: created } };
+    } catch {
+      return { status: 500, body: { error: "Tiket gagal disimpan." } };
+    }
   }
 
   if (pathname === "/api/deposits/cancel" && method === "POST") {

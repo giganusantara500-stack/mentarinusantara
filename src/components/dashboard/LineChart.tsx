@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export interface LineSeries {
   name: string;
@@ -38,7 +38,17 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
   const range = max - min || 1;
   const axisText = axisFormat ?? ((value: number) => new Intl.NumberFormat("id-ID").format(Math.round(value)));
 
-  const width = 800;
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(960);
+  useEffect(() => {
+    const node = hostRef.current;
+    if (!node) return;
+    const update = () => setWidth(Math.max(720, Math.round(node.clientWidth)));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [labels.length]);
   const padding = { top: 28, right: 28, bottom: 58, left: Math.min(128, Math.max(92, axisText(max).length * 8 + 36)) };
   const chartW = width - padding.left - padding.right;
   const plotH = chartHeight - padding.top - padding.bottom;
@@ -119,7 +129,7 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
   };
 
   return (
-    <div className="relative w-full overflow-visible" style={{ height: chartHeight }} onMouseLeave={() => setHoverIdx(null)}>
+    <div ref={hostRef} className="relative w-full overflow-visible" style={{ height: chartHeight }} onMouseLeave={() => setHoverIdx(null)}>
       <svg
         viewBox={`0 0 ${width} ${chartHeight}`}
         className="h-full w-full"
@@ -144,9 +154,9 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
               y1={t.y}
               x2={width - padding.right}
               y2={t.y}
-              stroke="#e2e8f0"
-              strokeWidth="1"
-              strokeDasharray={i === 0 ? "0" : "4 4"}
+              stroke={t.value === 0 ? "#0a0a0a" : "#e2e8f0"}
+              strokeWidth={t.value === 0 ? 2 : 1}
+              strokeDasharray={t.value === 0 ? "0" : "4 4"}
             />
             <text
               x={padding.left - 10}
@@ -174,6 +184,9 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
               strokeLinecap="round"
               strokeLinejoin="round"
             />
+            {s.coords.map((point, index) => point && (
+              <circle key={index} cx={point.x} cy={point.y} r="3.5" fill={s.color} stroke="#ffffff" strokeWidth="1.5" />
+            ))}
           </g>
         ))}
 
