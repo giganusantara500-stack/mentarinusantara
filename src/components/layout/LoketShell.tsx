@@ -1,12 +1,10 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { useAuth, dbRoleToAppRole } from "@/lib/auth";
-import { supabase } from "@/lib/supabase";
-import { territoryMarker } from "@/lib/territory";
-import { formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { DepositModal } from "@/pages/DepositPage";
+import { DeskHeader, useDeskStats } from "./DeskHeader";
 import {
-  Home, Receipt, Layers, Banknote, ClipboardList, FileBarChart, Settings, Landmark, RefreshCw, RotateCw, LogOut, SunMedium,
+  Home, Receipt, Layers, Banknote, ClipboardList, FileBarChart, Settings,
 } from "lucide-react";
 
 interface RefreshValue {
@@ -23,13 +21,13 @@ export function useLoketRefresh() {
 }
 
 const MENU = [
-  { path: "/dashboard", label: "Beranda", icon: Home },
-  { path: "/beli", label: "Transaksi", icon: Receipt },
-  { path: "/kolektif", label: "Kolektif", icon: Layers },
-  { path: "/transfer", label: "Transfer Uang", icon: Banknote },
-  { path: "/riwayat", label: "Status Transaksi", icon: ClipboardList },
-  { path: "/laporan", label: "Laporan", icon: FileBarChart },
-  { path: "/pengaturan", label: "Setting", icon: Settings },
+  { path: "/dashboard", label: "Beranda", icon: Home, tone: "bg-sky-500" },
+  { path: "/beli", label: "Transaksi", icon: Receipt, tone: "bg-amber-500" },
+  { path: "/kolektif", label: "Kolektif", icon: Layers, tone: "bg-violet-500" },
+  { path: "/transfer", label: "Transfer Uang", icon: Banknote, tone: "bg-emerald-500" },
+  { path: "/riwayat", label: "Status Transaksi", icon: ClipboardList, tone: "bg-cyan-600" },
+  { path: "/laporan", label: "Laporan", icon: FileBarChart, tone: "bg-rose-500" },
+  { path: "/pengaturan", label: "Setting", icon: Settings, tone: "bg-indigo-600" },
 ];
 
 export const LOKET_BRAND = "Mentari Nusantara";
@@ -45,13 +43,9 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
   const { profile } = useAuth();
   const [tick, setTick] = useState(0);
   const [notice, setNotice] = useState("");
-  const [balance, setBalance] = useState(0);
-  const [todayCount, setTodayCount] = useState(0);
-  const [todayAmount, setTodayAmount] = useState(0);
-  const [outstanding, setOutstanding] = useState(0);
-  const [loketCode, setLoketCode] = useState("");
   const [depositOpen, setDepositOpen] = useState(false);
-  const [runText, setRunText] = useState("");
+  const stats = useDeskStats(tick);
+  const loketCode = stats.loketCode;
 
   const requestRefresh = () => {
     setTick((value) => value + 1);
@@ -66,87 +60,33 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!profile) return;
-    let active = true;
-    (async () => {
-      const session = await supabase.auth.getSession();
-      const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
-      const [walletRes, salesRes, txRes, runRes] = await Promise.all([
-        fetch("/api/wallet", { headers }),
-        fetch("/api/loket-sales", { headers }),
-        supabase.from("transactions").select("amount,status,created_at").eq("user_id", profile.id),
-        fetch("/api/runtext", { headers }),
-      ]);
-      const wallet = walletRes.ok ? await walletRes.json() : null;
-      const salesBody = salesRes.ok ? await salesRes.json() : { sales: [] };
-      const sales = (salesBody.sales ?? []) as { amount: number; createdAt: string; status: string }[];
-      const remote = (txRes.data ?? []) as { amount: number; status: string; created_at: string }[];
-      const today = new Date().toDateString();
-      const todaySales = sales.filter((sale) => new Date(sale.createdAt).toDateString() === today);
-      const todayRemote = remote.filter((row) => new Date(row.created_at).toDateString() === today);
-      const pending = remote.filter((row) => row.status === "pending").reduce((sum, row) => sum + Number(row.amount), 0);
-      if (!active) return;
-      setBalance(Number(wallet?.balance ?? salesBody.balance ?? 0));
-      setTodayCount(todaySales.length + todayRemote.length);
-      setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0) + todayRemote.reduce((sum, row) => sum + Number(row.amount), 0));
-      setOutstanding(pending);
-      setLoketCode(String(wallet?.loketCode || salesBody.loketCode || ""));
-      const runBody = runRes.ok ? await runRes.json() : null;
-      setRunText(String(runBody?.text ?? ""));
-    })();
-    return () => { active = false; };
-  }, [profile, tick]);
+    const desktop = window.matchMedia("(display-mode: standalone)").matches;
+    if (desktop || window.name === "mentari-loket") return;
+    const root = document.documentElement;
+    const fill = () => {
+      if (!document.fullscreenElement) root.requestFullscreen?.().catch(() => undefined);
+    };
+    fill();
+    if (!sessionStorage.getItem("mentari-desk")) {
+      const features = `menubar=no,toolbar=no,location=no,status=no,width=${window.screen.availWidth},height=${window.screen.availHeight},left=0,top=0`;
+      const opened = window.open(window.location.href, "mentari-loket", features);
+      if (opened) sessionStorage.setItem("mentari-desk", "1");
+    }
+    window.addEventListener("pointerdown", fill, { once: true });
+    return () => window.removeEventListener("pointerdown", fill);
+  }, []);
 
   if (!profile) return null;
   const role = dbRoleToAppRole(profile.role);
   if (role === "pending") return null;
-  const marker = territoryMarker(role, profile.city);
-  const name = profile.full_name || profile.username || "Loket";
-
   return (
     <LoketRefreshContext.Provider value={{ tick, requestRefresh, loketCode, openDeposit: () => setDepositOpen(true) }}>
-      <div className="flex h-screen flex-col overflow-hidden bg-slate-100">
-        <header className="bg-gradient-to-r from-sky-950 via-sky-800 to-cyan-700 text-white">
-          <div className="w-full px-6 pt-3 pb-4 md:px-10">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-sky-800 shadow">
-                  <SunMedium size={26} />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-base font-bold tracking-tight">{LOKET_BRAND}</div>
-                  <div className="text-xs font-medium text-amber-200">{marker}</div>
-                  <div className="mt-1 text-sm font-semibold break-words">{name}</div>
-                  <div className="text-[11px] text-sky-100 break-all">{loketCode ? `Kode ${loketCode}` : ""}{profile.username ? ` · @${profile.username}` : ""}{profile.city ? ` · ${profile.city}` : ""}</div>
-                </div>
-              </div>
-              <div className="flex flex-wrap justify-end gap-2 shrink-0">
-                <button onClick={() => setDepositOpen(true)} className="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-3 py-2 text-xs font-bold text-slate-900">
-                  <Landmark size={16} /> Deposit
-                </button>
-                <button onClick={requestRefresh} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-2 text-xs font-semibold">
-                  <RefreshCw size={16} /> Update
-                </button>
-                <button onClick={requestRefresh} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-2 text-xs font-semibold">
-                  <RotateCw size={16} /> Refresh
-                </button>
-                <button onClick={onLogout} className="inline-flex items-center gap-1.5 rounded-full border border-white/30 px-3 py-2 text-xs font-semibold" aria-label="Logout">
-                  <LogOut size={16} /> Logout
-                </button>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              <Stat label="Saldo" value={formatRupiah(balance)} />
-              <Stat label="OS" value={formatRupiah(outstanding)} />
-              <Stat label="Trx Hari Ini" value={`${todayCount} · ${formatRupiah(todayAmount)}`} />
-            </div>
-            {notice && <div className="mt-2 text-xs text-emerald-200">{notice}</div>}
-          </div>
-        </header>
-        {runText && <div className="overflow-hidden bg-amber-100 text-[11px] text-amber-950"><div className="animate-ticker whitespace-nowrap py-1">{runText}</div></div>}
+      <div className="flex h-dvh w-screen flex-col overflow-hidden bg-white">
+        <DeskHeader brand={LOKET_BRAND} stats={stats} onDeposit={() => setDepositOpen(true)} onRefresh={requestRefresh} onLogout={onLogout} />
+        {notice && <div className="bg-emerald-50 px-4 py-1 text-xs font-semibold text-emerald-700">{notice}</div>}
         <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden px-6 pt-3 md:px-10">
           <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
-          <div className="h-[4.75rem] shrink-0" />
+          <div className="h-20 shrink-0" />
         </main>
         <DepositModal open={depositOpen || current === "/deposit"} tick={tick} requestRefresh={requestRefresh} onClose={() => { setDepositOpen(false); if (current === "/deposit") onNavigate("/dashboard"); }} />
         <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-slate-200 bg-white">
@@ -159,12 +99,15 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
                   key={item.path}
                   onClick={() => onNavigate(item.path)}
                   className={cn(
-                    "flex w-16 shrink-0 flex-col items-center gap-1 px-1 py-3 text-[10px] font-semibold sm:w-[4.5rem] sm:text-xs",
-                    active ? "text-sky-700" : "text-slate-500",
+                    "relative flex w-[4.5rem] shrink-0 flex-col items-center gap-1 px-1 pb-2 pt-2 text-[11px] font-bold leading-tight sm:w-20 sm:text-xs",
+                    active ? "text-slate-900" : "text-slate-600",
                   )}
                 >
-                  <Icon size={28} strokeWidth={2.25} />
-                  <span className="max-w-full text-center leading-tight">{item.label}</span>
+                  <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg text-white shadow-sm", item.tone)}>
+                    <Icon size={18} strokeWidth={2.4} />
+                  </span>
+                  <span className="max-w-full text-center">{item.label}</span>
+                  {active && <span className="absolute inset-x-3 bottom-0 h-1 rounded-full bg-amber-400" />}
                 </button>
               );
             })}
@@ -175,11 +118,3 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl bg-white/10 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wide text-sky-100">{label}</div>
-      <div className="text-sm font-bold leading-tight">{value}</div>
-    </div>
-  );
-}

@@ -3,7 +3,7 @@ import { useAuth } from "@/lib/auth";
 import { useNetworkLoketSales, useProfiles, useTransactions, type TransactionRow } from "@/lib/hooks";
 import { supabase } from "@/lib/supabase";
 import { PageContainer } from "@/components/PageContainer";
-import { Card, CardHeader } from "@/components/ui/Card";
+import { DepositInfo } from "@/components/layout/DepositInfo";
 import { LineChart } from "@/components/dashboard/LineChart";
 import { buildThreeMonthSheets } from "@/lib/sheetChart";
 import { formatRupiah } from "@/lib/format";
@@ -101,6 +101,9 @@ export function OpsDashboardPage() {
 
   return (
     <PageContainer>
+      <div className="mb-6">
+        <DepositInfo />
+      </div>
       <div className="mb-5">
         <h1 className="text-lg font-bold text-slate-900">{brandLine(role, profile.city)}</h1>
         <p className="text-sm text-slate-500">{networkView ? "Ringkasan jaringan dan downline Anda." : `${profile.full_name || profile.username} memantau operasional jaringan.`}</p>
@@ -121,25 +124,19 @@ export function OpsDashboardPage() {
           );
         })}
       </div>
-      <Card>
-        <CardHeader
-          title="Transaksi Harian (3 Bulan Terakhir)"
-          subtitle={`${scopeText}, tiga bulan terakhir`}
-          action={
-            <div className="flex flex-wrap gap-3">
-              {chart.series.map((item) => (
-                <span key={item.name} className="inline-flex items-center gap-1.5 text-xs text-slate-600">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                  {item.name}
-                </span>
-              ))}
-            </div>
-          }
-        />
-        <div className="w-full overflow-visible px-2 pb-4 sm:px-4">
-          <LineChart labels={chart.labels} series={chart.series} formatValue={(value) => `${Math.round(value)} lembar`} height={288} emptyText="Kurva menunggu data transaksi." />
+      <section className="mr-auto w-full max-w-4xl overflow-visible text-left">
+        <h2 className="text-sm font-bold text-slate-900">Capaian Transaksi</h2>
+        <p className="text-xs text-slate-500">{scopeText}, tiga bulan terakhir</p>
+        <div className="mb-2 mt-2 flex flex-wrap gap-3">
+          {chart.series.map((item) => (
+            <span key={item.name} className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+              {item.name}
+            </span>
+          ))}
         </div>
-      </Card>
+        <LineChart labels={chart.labels} series={chart.series} formatValue={(value) => `${Math.round(value)} lembar`} height={288} emptyText="Kurva menunggu data transaksi." />
+      </section>
     </PageContainer>
   );
 }

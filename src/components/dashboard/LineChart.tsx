@@ -123,7 +123,7 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
       <svg
         viewBox={`0 0 ${width} ${chartHeight}`}
         className="h-full w-full"
-        preserveAspectRatio="xMidYMid meet"
+        preserveAspectRatio="xMinYMid meet"
         role="img"
         aria-label="Jumlah Transaksi (Lembar) per Tanggal (Hari ke-)"
       >

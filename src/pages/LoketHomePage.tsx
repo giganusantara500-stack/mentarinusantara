@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Landmark } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { DEPOSIT_ACCOUNTS } from "@/lib/banks";
+import { DepositInfo } from "@/components/layout/DepositInfo";
 import { useLoketRefresh } from "@/components/layout/LoketShell";
 import { LineChart } from "@/components/dashboard/LineChart";
 import { buildThreeMonthSheets } from "@/lib/sheetChart";
@@ -9,7 +8,6 @@ import { buildThreeMonthSheets } from "@/lib/sheetChart";
 interface SalePoint { amount: number; createdAt: string }
 
 export function LoketHomePage() {
-  const account = DEPOSIT_ACCOUNTS[0];
   const { tick } = useLoketRefresh();
   const [sales, setSales] = useState<SalePoint[]>([]);
 
@@ -30,16 +28,9 @@ export function LoketHomePage() {
 
   return (
     <div className="space-y-4">
-      <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-2 text-amber-600">
-          <Landmark size={18} />
-          <span className="text-sm font-bold">{account.bank}</span>
-        </div>
-        <div className="mt-3 font-mono text-xl font-semibold tracking-wide text-slate-900">{account.accountNumber}</div>
-        <div className="mt-1 text-sm text-slate-500">a.n. {account.holder}</div>
-      </article>
-      <section className="w-full overflow-visible rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-2 flex items-end justify-between gap-3">
+      <DepositInfo />
+      <section className="mr-auto w-full max-w-4xl overflow-visible text-left">
+        <div className="mb-2 flex items-end justify-start gap-8">
           <div>
             <h2 className="text-sm font-bold text-slate-900">Capaian Transaksi</h2>
             <p className="text-xs text-slate-500">Tiga bulan terakhir, per tanggal</p>
