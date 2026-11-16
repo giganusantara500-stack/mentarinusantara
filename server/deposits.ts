@@ -1,7 +1,7 @@
 import { DEPOSIT_ACCOUNTS } from "../src/lib/banks";
 import { networkLoketIds, touchActivity } from "./accountAdmin";
 import { cancelOwnTicket, createTicket, decideTicket, listNetworkSales, listTickets, pendingTransferCodes, recordLoketSale, walletBalance, type DepositTicket } from "./ledger";
-import { ensureLoketCode, listAuthUsers, makeTransferCode } from "./loketCode";
+import { ensureLoketCode, listAuthUsers, loketCodeFor, makeTransferCode } from "./loketCode";
 
 interface Env {
   supabaseUrl: string;
@@ -45,7 +45,8 @@ export async function loadCaller(authorization: string, env: Env): Promise<Calle
   const rows = await readJson(profileResponse);
   const profile = Array.isArray(rows) ? rows[0] : null;
   if (!profile || profile.is_active === false) return null;
-  const role = profile.role === "sub_mitra" ? "submitra" : profile.role;
+  const stored = String(profile.role ?? "").toLowerCase();
+  const role = stored === "sub_mitra" || stored === "submitra" ? "submitra" : stored === "superadmin" ? "super_admin" : stored;
   return { id: callerId, role, username: profile.username ?? null };
 }
 
@@ -139,7 +140,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       decidedAt: null,
     };
     const uniqueCode = makeTransferCode(pendingTransferCodes());
-    const loketCode = await ensureLoketCode(env, caller.id);
+    const loketCode = await loketCodeFor(env, caller.id).catch(() => "");
     ticket.loketCode = loketCode;
     ticket.baseAmount = ticket.amount;
     ticket.uniqueCode = uniqueCode;

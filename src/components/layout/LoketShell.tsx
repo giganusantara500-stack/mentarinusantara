@@ -21,13 +21,13 @@ export function useLoketRefresh() {
 }
 
 const MENU = [
-  { path: "/dashboard", label: "Beranda", icon: Home, tone: "bg-sky-500" },
-  { path: "/beli", label: "Transaksi", icon: Receipt, tone: "bg-amber-500" },
-  { path: "/kolektif", label: "Kolektif", icon: Layers, tone: "bg-violet-500" },
-  { path: "/transfer", label: "Transfer Uang", icon: Banknote, tone: "bg-emerald-500" },
-  { path: "/riwayat", label: "Status Transaksi", icon: ClipboardList, tone: "bg-cyan-600" },
-  { path: "/laporan", label: "Laporan", icon: FileBarChart, tone: "bg-rose-500" },
-  { path: "/pengaturan", label: "Setting", icon: Settings, tone: "bg-indigo-600" },
+  { path: "/dashboard", label: "Beranda", icon: Home },
+  { path: "/beli", label: "Transaksi", icon: Receipt },
+  { path: "/kolektif", label: "Kolektif", icon: Layers },
+  { path: "/transfer", label: "Transfer Uang", icon: Banknote },
+  { path: "/riwayat", label: "Status Transaksi", icon: ClipboardList },
+  { path: "/laporan", label: "Laporan", icon: FileBarChart },
+  { path: "/pengaturan", label: "Setting", icon: Settings },
 ];
 
 export const LOKET_BRAND = "Mentari Nusantara";
@@ -84,7 +84,7 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
       <div className="flex h-dvh w-screen flex-col overflow-hidden bg-white">
         <DeskHeader brand={LOKET_BRAND} stats={stats} onDeposit={() => setDepositOpen(true)} onRefresh={requestRefresh} onLogout={onLogout} />
         {notice && <div className="bg-emerald-50 px-4 py-1 text-xs font-semibold text-emerald-700">{notice}</div>}
-        <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden px-6 pt-3 md:px-10">
+        <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden px-6 pt-2 md:px-10">
           <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
           <div className="h-20 shrink-0" />
         </main>
@@ -103,7 +103,7 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
                     active ? "text-slate-900" : "text-slate-600",
                   )}
                 >
-                  <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg text-white shadow-sm", item.tone)}>
+                  <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg shadow-sm", active ? "bg-amber-400 text-neutral-950" : "bg-neutral-950 text-amber-400")}>
                     <Icon size={18} strokeWidth={2.4} />
                   </span>
                   <span className="max-w-full text-center">{item.label}</span>

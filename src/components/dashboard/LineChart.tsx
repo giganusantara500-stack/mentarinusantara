@@ -29,7 +29,7 @@ function niceMax(peak: number, emptyMax: number) {
 
 export function LineChart({ labels, series, formatValue, axisFormat, height = 288, emptyText = "Belum ada data.", emptyMax = 10 }: Props) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const chartHeight = Math.min(320, Math.max(192, height));
+  const chartHeight = Math.min(360, Math.max(192, height));
 
   const allValues = series.flatMap((s) => s.values).filter((value): value is number => value != null);
   const peak = allValues.length ? Math.max(...allValues, 0) : 0;
@@ -119,11 +119,11 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
   };
 
   return (
-    <div className="relative h-72 max-h-80 w-full overflow-visible" style={{ height: chartHeight }} onMouseLeave={() => setHoverIdx(null)}>
+    <div className="relative w-full overflow-visible" style={{ height: chartHeight }} onMouseLeave={() => setHoverIdx(null)}>
       <svg
         viewBox={`0 0 ${width} ${chartHeight}`}
         className="h-full w-full"
-        preserveAspectRatio="xMinYMid meet"
+        preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label="Jumlah Transaksi (Lembar) per Tanggal (Hari ke-)"
       >

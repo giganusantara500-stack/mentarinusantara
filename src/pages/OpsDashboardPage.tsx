@@ -124,7 +124,7 @@ export function OpsDashboardPage() {
           );
         })}
       </div>
-      <section className="mr-auto w-full max-w-4xl overflow-visible text-left">
+      <section className="mr-auto mt-28 w-full max-w-3xl overflow-visible rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
         <h2 className="text-sm font-bold text-slate-900">Capaian Transaksi</h2>
         <p className="text-xs text-slate-500">{scopeText}, tiga bulan terakhir</p>
         <div className="mb-2 mt-2 flex flex-wrap gap-3">
@@ -135,7 +135,7 @@ export function OpsDashboardPage() {
             </span>
           ))}
         </div>
-        <LineChart labels={chart.labels} series={chart.series} formatValue={(value) => `${Math.round(value)} lembar`} height={288} emptyText="Kurva menunggu data transaksi." />
+        <LineChart labels={chart.labels} series={chart.series} formatValue={(value) => `${Math.round(value)} lembar`} height={340} emptyText="Kurva menunggu data transaksi." />
       </section>
     </PageContainer>
   );

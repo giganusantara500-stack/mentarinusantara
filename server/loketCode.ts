@@ -81,6 +81,17 @@ export async function assignMissingLoketCodes(env: Env, users: AuthUser[], loket
   return codes;
 }
 
+export async function loketCodeFor(env: Env, userId: string) {
+  const response = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, { headers: headers(env) });
+  const payload = await response.json().catch(() => null) as { user?: AuthUser } & AuthUser | null;
+  const user = payload?.user?.id ? payload.user : payload;
+  const existing = codeFromMetadata(user?.user_metadata);
+  if (existing) return existing;
+  const code = makeLoketCode(new Set());
+  if (user?.id) await saveCode(env, user, code);
+  return code;
+}
+
 export async function ensureLoketCode(env: Env, userId: string) {
   const users = await listAuthUsers(env);
   const codes = await assignMissingLoketCodes(env, users, [userId]);

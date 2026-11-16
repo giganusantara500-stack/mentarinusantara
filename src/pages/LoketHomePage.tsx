@@ -27,9 +27,9 @@ export function LoketHomePage() {
   const monthTotal = current.values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
 
   return (
-    <div className="space-y-4">
+    <div>
       <DepositInfo />
-      <section className="mr-auto w-full max-w-4xl overflow-visible text-left">
+      <section className="mr-auto mt-28 w-full max-w-3xl overflow-visible rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
         <div className="mb-2 flex items-end justify-start gap-8">
           <div>
             <h2 className="text-sm font-bold text-slate-900">Capaian Transaksi</h2>
@@ -52,7 +52,7 @@ export function LoketHomePage() {
           labels={curve.labels}
           series={curve.series}
           formatValue={(value) => `${Math.round(value)} lembar`}
-          height={288}
+          height={340}
           emptyText="Kurva menunggu transaksi."
         />
       </section>

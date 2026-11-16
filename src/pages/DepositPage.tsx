@@ -31,8 +31,8 @@ const QUICK_AMOUNTS = [50000, 100000, 250000, 500000, 1000000];
 export function DepositModal({ open, onClose, tick, requestRefresh }: { open: boolean; onClose: () => void; tick: number; requestRefresh: () => void }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/45 p-4 pt-16" onClick={onClose}>
-      <div className="max-h-[80vh] w-full max-w-5xl overflow-auto rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/45 px-[1.5cm] pb-6 pt-16" onClick={onClose}>
+      <div className="max-h-[80vh] w-full max-w-xl overflow-auto rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <DepositPanel onClose={onClose} tick={tick} requestRefresh={requestRefresh} />
       </div>
     </div>
@@ -56,18 +56,20 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
   const [preview, setPreview] = useState(false);
 
   const load = async () => {
-    const session = await supabase.auth.getSession();
-    const response = await fetch("/api/deposits", {
-      headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
-    });
-    const body = await response.json();
-    if (!response.ok) { setError(body.error || "Tiket deposit gagal dimuat."); return; }
-    setBalance(Number(body.balance ?? 0));
-    setTickets(body.tickets ?? []);
-    const salesRes = await fetch("/api/loket-sales", {
-      headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
-    });
-    if (salesRes.ok) setSales((await salesRes.json()).sales ?? []);
+    try {
+      const session = await supabase.auth.getSession();
+      const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
+      const response = await fetch("/api/deposits", { headers });
+      const text = await response.text();
+      const body = text ? JSON.parse(text) : {};
+      if (!response.ok) return;
+      setBalance(Number(body.balance ?? 0));
+      setTickets(body.tickets ?? []);
+      const salesRes = await fetch("/api/loket-sales", { headers });
+      if (salesRes.ok) setSales((await salesRes.json()).sales ?? []);
+    } catch {
+      /* daftar lama tetap tampil bila penyegaran gagal */
+    }
   };
 
   useEffect(() => { load(); }, [tick]);
@@ -79,22 +81,35 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
   const create = async () => {
     setBusy(true);
     setError("");
-    const session = await supabase.auth.getSession();
-    const response = await fetch("/api/deposits", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.data.session?.access_token ?? ""}`,
-      },
-      body: JSON.stringify({ amount: Number(amount), bank }),
-    });
-    const body = await response.json();
-    setBusy(false);
-    if (!response.ok) { setError(body.error || "Tiket gagal dibuat."); return; }
-    setIssued(body.ticket ?? null);
-    setAmount("");
-    requestRefresh();
-    await load();
+    try {
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token ?? "";
+      if (!token) {
+        setError("Sesi login berakhir. Masuk kembali, lalu buat tiket.");
+        return;
+      }
+      const response = await fetch("/api/deposits", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount: Number(amount), bank }),
+      });
+      const text = await response.text();
+      let body: { error?: string; ticket?: Ticket } = {};
+      try { body = text ? JSON.parse(text) : {}; } catch { body = { error: "Server tidak mengembalikan tiket." }; }
+      if (!response.ok || !body.ticket?.uniqueCode) {
+        setError(body.error || "Tiket gagal dibuat.");
+        return;
+      }
+      const ticket = body.ticket;
+      setIssued(ticket);
+      setTickets((current) => [ticket, ...current.filter((item) => item.id !== ticket.id)]);
+      setAmount("");
+      requestRefresh();
+    } catch {
+      setError("Tiket gagal disimpan. Periksa koneksi, lalu coba lagi.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const refreshStatus = async () => {
@@ -154,30 +169,31 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
 
   return (
     <div>
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+      <div className="flex items-center justify-between border-b border-slate-100 px-[1.5cm] py-3">
         <div>
           <div className="text-sm font-semibold text-slate-900">Deposit</div>
           <div className="text-xs text-slate-500">Saldo {formatRupiah(balance)} · kode loket di header</div>
         </div>
         <button onClick={onClose} className="rounded-full px-3 py-1 text-xs font-semibold text-slate-500">Tutup</button>
       </div>
-      <div className="flex gap-1 overflow-x-auto border-b border-slate-100 px-3 py-2">
+      <div className="flex gap-1 overflow-x-auto border-b border-slate-100 px-[1.5cm] py-2">
         {([["request", "Request Tiket Deposit"], ["history", "History"], ["mutasi", "Mutasi Saldo"], ["pantauan", "Pantauan Setoran"]] as const).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${tab === key ? "bg-sky-700 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>
         ))}
       </div>
-      <div className="space-y-3 p-4">
+      <div className="space-y-3 px-[1.5cm] py-4">
 
       {issued && (
         <Card className="border-amber-300">
-          <CardBody className="space-y-2">
-            <div className="text-xs uppercase text-slate-500">Jam transfer</div>
-            <div className="text-sm font-semibold text-slate-900">{formatWaktu(issued.transferAt)}</div>
-            <div className="text-xs uppercase text-slate-500">Masa berlaku</div>
-            <div className={`font-mono text-2xl font-bold ${remain === 0 ? "text-rose-600" : "text-amber-600"}`}>{issued.status === "pending" ? remainLabel : statusLabel[issued.status]}</div>
-            {issued.status === "pending" && <div className="text-xs text-slate-500">Tiket berlaku 6 jam.</div>}
+          <CardBody className="space-y-1">
+            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Nomor Tiket</div>
+            <div className="font-mono text-3xl font-extrabold tracking-widest text-slate-950">{issued.uniqueCode}</div>
             <div className="text-sm text-slate-700">Total transfer <span className="font-bold">{formatRupiah(issued.transferAmount ?? issued.amount)}</span></div>
-            <div className="text-sm text-slate-700">Kode unik <span className="font-mono text-lg font-bold">{issued.uniqueCode}</span> · {issued.bank} {issued.accountNumber}</div>
+            <div className="text-sm leading-tight text-slate-700">{issued.bank} · No.Rekening : {issued.accountNumber}</div>
+            <div className="text-sm leading-tight text-slate-700">Atas Nama : {issued.accountHolder || "Aris Purwanto"}</div>
+            <div className="text-xs text-slate-500">Jam transfer {formatWaktu(issued.transferAt)}</div>
+            <div className={`font-mono text-lg font-bold ${remain === 0 ? "text-rose-600" : "text-amber-600"}`}>{issued.status === "pending" ? remainLabel : statusLabel[issued.status]}</div>
+            {issued.status === "pending" && <div className="text-xs text-slate-500">Tiket berlaku 6 jam.</div>}
             <div className="flex flex-wrap gap-2 pt-1">
               <Button size="sm" variant="outline" onClick={copyTicket}>Salin Semua Informasi</Button>
               <Button size="sm" variant="outline" onClick={refreshStatus}>Perbarui Status</Button>
