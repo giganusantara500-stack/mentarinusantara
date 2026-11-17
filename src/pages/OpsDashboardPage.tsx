@@ -1,14 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { useAuth } from "@/lib/auth";
+import { dbRoleToAppRole, useAuth } from "@/lib/auth";
 import { useNetworkLoketSales, useProfiles, useTransactions, type TransactionRow } from "@/lib/hooks";
 import { supabase } from "@/lib/supabase";
 import { PageContainer } from "@/components/PageContainer";
-import { DepositInfo } from "@/components/layout/DepositInfo";
-import { LineChart } from "@/components/dashboard/LineChart";
+import { CapaianChart } from "@/components/dashboard/CapaianChart";
 import { buildThreeMonthSheets } from "@/lib/sheetChart";
 import { formatRupiah } from "@/lib/format";
-import { brandLine } from "@/lib/territory";
-import { dbRoleToAppRole } from "@/lib/auth";
 import { Activity, CalendarDays, Landmark, BadgeAlert, Wallet } from "lucide-react";
 
 interface CmsTicket {
@@ -97,46 +94,31 @@ export function OpsDashboardPage() {
         { label: "CMS", value: cmsWaiting ? "—" : formatRupiah(cmsTotal), hint: "Setoran disetujui", href: "/setoran", icon: Landmark, tone: "from-amber-500 to-orange-600" },
         { label: "Total Outstanding", value: txWaiting ? "—" : formatRupiah(outstanding), hint: "Transaksi pending", href: "/outstanding", icon: BadgeAlert, tone: "from-rose-500 to-pink-600" },
       ];
-  const scopeText = role === "superadmin" ? "Agregat seluruh loket" : "Jaringan Anda";
-
   return (
-    <PageContainer>
-      <div className="mb-6">
-        <DepositInfo />
-      </div>
-      <div className="mb-5">
-        <h1 className="text-lg font-bold text-slate-900">{brandLine(role, profile.city)}</h1>
-        <p className="text-sm text-slate-500">{networkView ? "Ringkasan jaringan dan downline Anda." : `${profile.full_name || profile.username} memantau operasional jaringan.`}</p>
-      </div>
-      <div className={`mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 ${networkView ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
+    <PageContainer className="flex h-full min-h-0 flex-1 flex-col">
+      <div className={`grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2 ${networkView ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         {cards.map((card) => {
           const Icon = card.icon;
           return (
-            <article key={card.label} className={`flex flex-col rounded-2xl bg-gradient-to-br ${card.tone} p-4 text-white shadow-sm`}>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-wide text-white/80">{card.label}</span>
-                <Icon size={18} />
+            <article key={card.label} className={`flex flex-col rounded-xl bg-gradient-to-br ${card.tone} px-3.5 py-2.5 text-white shadow-sm`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-white/80">{card.label}</span>
+                <Icon size={16} />
               </div>
-              <div className="mt-3 text-2xl font-bold">{card.value}</div>
-              <div className="mt-1 text-xs text-white/80">{card.hint}</div>
-              <button type="button" onClick={() => { window.location.hash = card.href; }} className="mt-4 self-start text-xs font-bold underline decoration-white/50 underline-offset-2">Selengkapnya</button>
+              <div className="mt-1 text-xl font-bold leading-tight">{card.value}</div>
+              <div className="mt-0.5 truncate text-[11px] text-white/80">{card.hint}</div>
+              <button type="button" onClick={() => { window.location.hash = card.href; }} className="mt-1.5 self-start text-[11px] font-bold underline decoration-white/50 underline-offset-2">Selengkapnya</button>
             </article>
           );
         })}
       </div>
-      <section className="mr-auto mt-28 w-[min(100%,calc(50vw+7.5rem))] overflow-visible rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm">
-        <h2 className="text-sm font-bold text-slate-900">Capaian Transaksi</h2>
-        <p className="text-xs text-slate-500">{scopeText}, tiga bulan terakhir</p>
-        <div className="mb-2 mt-2 flex flex-wrap gap-3">
-          {chart.series.map((item) => (
-            <span key={item.name} className="inline-flex items-center gap-1.5 text-xs text-slate-600">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-              {item.name}
-            </span>
-          ))}
-        </div>
-        <LineChart labels={chart.labels} series={chart.series} formatValue={(value) => `${Math.round(value)} lembar`} height={340} emptyText="Kurva menunggu data transaksi." />
-      </section>
+      <CapaianChart
+        labels={chart.labels}
+        series={chart.series}
+        emptyText="Kurva menunggu data transaksi."
+        fill
+        className="mt-3 min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-left shadow-sm"
+      />
     </PageContainer>
   );
 }

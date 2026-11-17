@@ -29,7 +29,7 @@ function niceMax(peak: number, emptyMax: number) {
 
 export function LineChart({ labels, series, formatValue, axisFormat, height = 288, emptyText = "Belum ada data.", emptyMax = 10 }: Props) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const chartHeight = Math.min(360, Math.max(192, height));
+  const chartHeight = Math.max(140, height);
 
   const allValues = series.flatMap((s) => s.values).filter((value): value is number => value != null);
   const peak = allValues.length ? Math.max(...allValues, 0) : 0;
@@ -95,14 +95,14 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
 
   const linePath = (coords: ChartPoint[]) => {
     let path = "";
-    coords.forEach((point, index) => {
-      if (!point) return;
-      const prev = index > 0 ? coords[index - 1] : null;
-      if (!prev) path += `M ${point.x} ${point.y} `;
-      else {
-        const cpx = (prev.x + point.x) / 2;
-        path += `C ${cpx} ${prev.y} ${cpx} ${point.y} ${point.x} ${point.y} `;
+    let drawing = false;
+    coords.forEach((point) => {
+      if (!point) {
+        drawing = false;
+        return;
       }
+      path += `${drawing ? "L" : "M"} ${point.x} ${point.y} `;
+      drawing = true;
     });
     return path;
   };

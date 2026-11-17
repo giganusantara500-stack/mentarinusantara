@@ -82,9 +82,10 @@ interface HeaderProps {
   onDeposit: () => void;
   onRefresh: () => void;
   onLogout: () => void;
+  showStats?: boolean;
 }
 
-export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout }: HeaderProps) {
+export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showStats = true }: HeaderProps) {
   const { profile } = useAuth();
   if (!profile) return null;
   const code = stats.loketCode || profile.loket_code || "";
@@ -93,35 +94,37 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout }: Hea
 
   return (
     <header className="shrink-0">
-      <div className="flex h-14 items-center justify-between gap-3 bg-neutral-950 px-4 text-white md:px-6">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-neutral-950">
-            <SunMedium size={20} />
+      <div className="flex h-12 items-center justify-between gap-2 bg-neutral-950 px-3 text-white">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white text-neutral-950">
+            <SunMedium size={22} strokeWidth={2.6} />
           </span>
-          <span className="truncate text-sm font-bold tracking-tight">{brand}</span>
+          <span className="truncate text-base font-black tracking-tight">{brand}</span>
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-2">
-          <button onClick={onDeposit} className="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-3 py-1.5 text-xs font-bold text-slate-900">
-            <Landmark size={15} /> Deposit
+        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+          <button onClick={onDeposit} className="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-2.5 py-1 text-sm font-black text-slate-900">
+            <Landmark size={18} strokeWidth={2.6} /> Deposit
           </button>
-          <button onClick={onRefresh} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold">
-            <RefreshCw size={15} /> Update
+          <button onClick={onRefresh} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-sm font-black">
+            <RefreshCw size={18} strokeWidth={2.6} /> Update
           </button>
-          <button onClick={onRefresh} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-xs font-bold">
-            <RotateCw size={15} /> Refresh
+          <button onClick={onRefresh} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-sm font-black">
+            <RotateCw size={18} strokeWidth={2.6} /> Refresh
           </button>
-          <button onClick={onLogout} className="inline-flex items-center gap-1.5 rounded-full border border-white/30 px-3 py-1.5 text-xs font-bold" aria-label="Logout">
-            <LogOut size={15} /> Logout
+          <button onClick={onLogout} className="inline-flex items-center gap-1.5 rounded-full border border-white/30 px-2.5 py-1 text-sm font-black" aria-label="Logout">
+            <LogOut size={18} strokeWidth={2.6} /> Logout
           </button>
         </div>
       </div>
-      <div className="flex flex-wrap items-stretch justify-start border-b border-slate-200 bg-white text-slate-900">
-        <Stat icon={Wallet} tone="bg-cyan-400 text-sky-950" label="Saldo" value={formatRupiah(stats.balance)} nowrap />
-        <Stat icon={BadgeAlert} tone="bg-yellow-300 text-amber-950" label="OS" value={formatRupiah(stats.outstanding)} />
-        <Stat icon={Receipt} tone="bg-lime-400 text-green-950" label="Trx Hari Ini" value={`${stats.todayCount} · ${formatRupiah(stats.todayAmount)}`} />
-        <Stat icon={Store} tone="bg-sky-950 text-white" label="Loket" value={identity} hint={profile.username || deskName} />
-      </div>
-      <div className="h-7 overflow-hidden bg-orange-500 text-xs font-bold text-white">
+      {showStats && (
+        <div className="flex w-full items-stretch justify-start gap-2 overflow-x-auto border-b border-slate-200 bg-white px-3 py-2 text-slate-900">
+          <Stat icon={Wallet} tone="bg-cyan-400 text-sky-950" label="Saldo" value={formatRupiah(stats.balance)} className="w-[190px]" />
+          <Stat icon={BadgeAlert} tone="bg-yellow-300 text-amber-950" label="OS" value={formatRupiah(stats.outstanding)} className="w-[190px]" />
+          <Stat icon={Receipt} tone="bg-lime-400 text-green-950" label="Trx Hari Ini" value={`${stats.todayCount} · ${formatRupiah(stats.todayAmount)}`} className="w-[190px]" />
+          <Stat icon={Store} tone="bg-sky-950 text-white" label="Loket" value={identity} hint={profile.username || deskName} wrap className="min-w-[300px] max-w-[380px]" />
+        </div>
+      )}
+      <div className="h-7 overflow-hidden bg-orange-500 text-sm font-black text-white">
         <div className={cn("flex h-full items-center whitespace-nowrap px-4", stats.runText && "animate-ticker")}>
           {stats.runText || "Tidak ada pengumuman saat ini."}
         </div>
@@ -130,16 +133,16 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout }: Hea
   );
 }
 
-function Stat({ icon: Icon, tone, label, value, hint, nowrap }: { icon: typeof Wallet; tone: string; label: string; value: string; hint?: string; nowrap?: boolean }) {
+function Stat({ icon: Icon, tone, label, value, hint, wrap, className }: { icon: typeof Wallet; tone: string; label: string; value: string; hint?: string; wrap?: boolean; className?: string }) {
   return (
-    <div className={cn("flex items-center gap-2 border-r border-slate-200 px-4 py-2 last:border-r-0", nowrap ? "shrink-0" : "min-w-0")}>
+    <div className={cn("flex shrink-0 items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1.5", className)}>
       <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-md", tone)}>
-        <Icon size={16} strokeWidth={2.4} />
+        <Icon size={18} strokeWidth={2.6} />
       </span>
-      <span className={cn(nowrap ? "min-w-[12.5rem]" : "min-w-0")}>
-        <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</span>
-        <span className={cn("block text-sm font-bold leading-tight", nowrap ? "whitespace-nowrap" : "truncate")}>{value}</span>
-        {hint && <span className="block truncate text-[11px] font-medium text-slate-500">{hint}</span>}
+      <span className="min-w-0 flex-1">
+        <span className="block text-[11px] font-black uppercase tracking-wide text-slate-600">{label}</span>
+        <span className={cn("block text-sm font-black leading-tight tabular-nums", wrap ? "whitespace-normal break-words" : "truncate")}>{value}</span>
+        {hint && <span className={cn("mt-0.5 block text-xs font-bold text-slate-600", wrap ? "whitespace-normal break-words" : "truncate")}>{hint}</span>}
       </span>
     </div>
   );
