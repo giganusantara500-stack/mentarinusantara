@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from "react";
 import { PLATFORM_NAME } from "@/lib/brand";
-import { cn } from "@/lib/utils";
 import { Sidebar } from "./Sidebar";
 import { DeskHeader, useDeskStats } from "./DeskHeader";
 
@@ -16,8 +15,11 @@ export function AppShell({ current, onNavigate, onLogout, onSecurity, children }
   const [tick, setTick] = useState(0);
   const stats = useDeskStats(tick);
   const fitDashboard = current === "/dashboard";
+  const mainClass = fitDashboard
+    ? "flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden px-5 py-3 md:px-8"
+    : "w-full min-w-0 flex-1 overflow-y-auto px-6 py-6 md:px-10";
   return (
-    <div className="flex h-dvh overflow-hidden bg-white">
+    <div className="flex h-full min-h-0 overflow-hidden bg-white">
       <Sidebar current={current} onNavigate={onNavigate} onLogout={onLogout} onSecurity={onSecurity} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <DeskHeader
@@ -28,12 +30,9 @@ export function AppShell({ current, onNavigate, onLogout, onSecurity, children }
           onRefresh={() => setTick((value) => value + 1)}
           onLogout={onLogout}
         />
-        <main className={cn(
-          "w-full min-w-0 flex-1",
-          fitDashboard ? "flex min-h-0 flex-col overflow-hidden px-5 py-3 md:px-8" : "overflow-y-auto px-6 py-6 md:px-10",
-        )}>{children}</main>
+        <main className={mainClass}>{children}</main>
         <footer className="w-full border-t border-slate-200 px-6 py-4 text-center text-xs text-slate-400 md:px-10">
-          {PLATFORM_NAME} — Platform PPOB (autentikasi Supabase).
+          {PLATFORM_NAME} - Platform PPOB (autentikasi Supabase).
         </footer>
       </div>
     </div>

@@ -10,12 +10,14 @@ export function CapaianChart({
   labels,
   series,
   emptyText,
+  caption,
   className,
   fill = false,
 }: {
   labels: string[];
   series: LineSeries[];
   emptyText: string;
+  caption?: string;
   className?: string;
   fill?: boolean;
 }) {
@@ -36,7 +38,10 @@ export function CapaianChart({
   return (
     <section className={cn(className, fill && "flex min-h-0 flex-col")}>
       <div className={cn("relative flex items-center justify-center px-28", fill ? "mb-1 min-h-6 shrink-0" : "mb-2 min-h-7")}>
-        <h2 className={cn("text-center font-black text-slate-950", fill ? "text-sm" : "text-base")}>Capaian Transaksi</h2>
+        <div className="text-center">
+          <h2 className={cn("font-black text-slate-950", fill ? "text-sm" : "text-base")}>Capaian Transaksi</h2>
+          {caption && <div className="text-[11px] font-semibold text-slate-500">{caption}</div>}
+        </div>
         {current && (
           <div className={cn("absolute right-0 top-1/2 max-w-[11rem] -translate-y-1/2 text-right font-semibold leading-tight text-sky-700", fill ? "text-[11px]" : "text-xs")}>
             {current}

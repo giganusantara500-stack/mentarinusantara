@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth";
+import { accountInNetwork, networkAccountIds } from "./network";
 import type { Profile, AppRole } from "./supabase";
 
 export interface ProductRow {
@@ -98,10 +99,10 @@ export function useVisibleScope() {
         setLoading(false);
         return;
       }
-      const { data, error } = await supabase.rpc("descendant_ids", { p_ancestor: profile.id });
+      const loaded = await loadProfiles();
+      const ids = loaded.scoped ? networkAccountIds(profile, loaded.rows).filter((id) => id !== profile.id) : [];
       if (active) {
-        if (error) { setDescendantIds([]); }
-        else { setDescendantIds((data as string[]) ?? []); }
+        setDescendantIds(ids);
         setLoading(false);
       }
     })();
@@ -133,6 +134,7 @@ function mapProfileRow(row: Record<string, unknown>): Profile {
     city: (row.city as string | null) ?? null,
     role: canonicalRole(row.role) as AppRole,
     parent_id: (row.parent_id as string | null) ?? null,
+    mitra_id: (row.mitra_id as string | null) ?? null,
     status: active ? "active" : "suspended",
     must_change_password: Boolean(row.must_change_password),
     loket_type: (row.loket_type as Profile["loket_type"]) ?? null,
@@ -153,14 +155,6 @@ async function profileTableRows() {
   return { rows: (wide.data ?? []).map((row) => mapProfileRow(row as Record<string, unknown>)), error: null };
 }
 
-function mergeProfiles(primary: Profile[], extra: Profile[]) {
-  const byId = new Map(primary.map((row) => [row.id, row]));
-  extra.forEach((row) => {
-    if (!byId.has(row.id)) byId.set(row.id, row);
-  });
-  return [...byId.values()];
-}
-
 async function loadProfiles() {
   const session = await supabase.auth.getSession();
   const token = session.data.session?.access_token;
@@ -176,7 +170,7 @@ async function loadProfiles() {
     }
     if (response.ok && Array.isArray(body?.rows)) {
       const apiRows = (body.rows as Record<string, unknown>[]).map((row) => mapProfileRow(row));
-      return { rows: mergeProfiles(apiRows, table.rows), scoped: true, error: null as string | null };
+      return { rows: apiRows, scoped: true, error: null as string | null };
     }
     if (table.rows.length > 0) return { rows: table.rows, scoped: false, error: null };
     return { rows: [] as Profile[], scoped: true, error: body?.error || table.error || "Daftar akun gagal dimuat dari server." };
@@ -207,7 +201,8 @@ export function useProfiles() {
       setLoading(false);
       return;
     }
-    setProfiles(rows);
+    const visible = isSuperAdmin ? rows : rows.filter((row) => accountInNetwork(profile, row, [profile, ...rows]));
+    setProfiles(visible);
     setError(null);
     setLoading(false);
   }, [profile, isSuperAdmin]);
@@ -231,8 +226,10 @@ export function useAllProfiles() {
       const loaded = await loadProfiles();
       if (!isSuperAdmin && !loaded.scoped) {
         setProfiles(loaded.rows.filter((row) => row.id === profile.id));
-      } else {
+      } else if (isSuperAdmin) {
         setProfiles(loaded.rows);
+      } else {
+        setProfiles(loaded.rows.filter((row) => row.id === profile.id || accountInNetwork(profile, row, loaded.rows)));
       }
       setLoading(false);
     })();
@@ -313,7 +310,8 @@ export function useWallets() {
       query = query.in("user_id", ids);
     }
     const { data } = await query;
-    setWallets((data as WalletRow[]) ?? []);
+    const rows = (data as WalletRow[]) ?? [];
+    setWallets(isSuperAdmin ? rows : rows.filter((row) => row.user_id === profile.id || descendantIds.includes(row.user_id)));
     setLoading(false);
   }, [profile, isSuperAdmin, descendantIds]);
 
@@ -372,7 +370,27 @@ export function useLedger() {
       query = query.in("user_id", ids);
     }
     const { data } = await query;
-    setLedger((data as LedgerRow[]) ?? []);
+    const rows = (data as LedgerRow[]) ?? [];
+    const session = await supabase.auth.getSession();
+    const response = await fetch("/api/deposits", { headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` } });
+    const body = response.ok ? await response.json() : null;
+    const fromDeposits: LedgerRow[] = Array.isArray(body?.mutations) ? body.mutations.map((row: { id: string; accountId: string; direction: "credit" | "debit"; amount: number; balanceAfter: number; route: string; kind?: string; ticketId: string; note: string; actorId: string; at: string }) => ({
+      id: row.id,
+      wallet_id: row.accountId,
+      user_id: row.accountId,
+      entry_type: row.direction,
+      amount: row.amount,
+      balance_after: row.balanceAfter,
+      reference_type: row.kind === "distribusi" ? "distribusi" : row.route === "jaringan" ? "deposit_jaringan" : "deposit_pusat",
+      reference_id: row.ticketId,
+      description: row.note,
+      created_by: row.actorId,
+      created_at: row.at,
+    })) : [];
+    const scoped = isSuperAdmin ? rows : rows.filter((row) => row.user_id === profile.id || descendantIds.includes(row.user_id));
+    const merged = new Map<string, LedgerRow>();
+    for (const row of [...fromDeposits, ...scoped]) merged.set(row.id, row);
+    setLedger([...merged.values()].sort((a, b) => b.created_at.localeCompare(a.created_at)));
     setLoading(false);
   }, [profile, isSuperAdmin, descendantIds]);
 
@@ -397,7 +415,8 @@ export function useTransactions() {
       query = query.in("user_id", ids);
     }
     const { data } = await query;
-    setTx((data as TransactionRow[]) ?? []);
+    const rows = (data as TransactionRow[]) ?? [];
+    setTx(isSuperAdmin ? rows : rows.filter((row) => row.user_id === profile.id || descendantIds.includes(row.user_id)));
     setLoading(false);
   }, [profile, isSuperAdmin, descendantIds]);
 
@@ -472,7 +491,7 @@ export function useNetworkLoketSales() {
   const [rows, setRows] = useState<TransactionRow[]>([]);
 
   useEffect(() => {
-    if (!profile || profile.role === "loket") return;
+    if (!profile) return;
     let stop = false;
     const load = async () => {
       const session = await supabase.auth.getSession();
@@ -481,7 +500,7 @@ export function useNetworkLoketSales() {
       });
       const body = response.ok ? await response.json() : { sales: [] };
       if (stop) return;
-      setRows((body.sales ?? []).map((sale: { id: string; loketId: string; loketCode?: string; loketName?: string; category?: string; product: string; customerNumber: string; customerName?: string; amount: number; createdAt: string }) => ({
+      setRows((body.sales ?? []).filter((sale: { channel?: string; status?: string }) => sale.channel !== "simulation" && sale.status !== "simulated").map((sale: { id: string; loketId: string; loketCode?: string; loketName?: string; category?: string; product: string; customerNumber: string; customerName?: string; amount: number; createdAt: string; status?: string }) => ({
         id: sale.id,
         invoice_code: sale.loketCode || sale.id.slice(0, 8),
         user_id: sale.loketId,
@@ -493,7 +512,7 @@ export function useNetworkLoketSales() {
         cost_price: Number(sale.amount),
         sell_price: Number(sale.amount),
         profit: 0,
-        status: "success" as const,
+        status: (sale.status === "pending" || sale.status === "failed" || sale.status === "refunded" || sale.status === "success" ? sale.status : "success"),
         provider_reference: sale.loketName ?? null,
         note: sale.customerName ?? null,
         created_at: sale.createdAt,

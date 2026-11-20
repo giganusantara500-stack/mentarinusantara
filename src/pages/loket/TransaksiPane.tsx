@@ -194,8 +194,8 @@ export function LoketTransaksiPage() {
   useEffect(() => {
     (async () => {
       const response = await fetch("/api/loket-sales", { headers: await authHeader() });
-      const body = response.ok ? await response.json() : { sales: [] };
-      setSales(body.sales ?? []);
+      const body = response.ok ? await response.json() : { sales: [], simulations: [] };
+      setSales([...(body.simulations ?? []), ...(body.sales ?? [])]);
     })();
   }, [tick]);
 
@@ -216,17 +216,26 @@ export function LoketTransaksiPage() {
     }));
   };
 
-  const lookup = () => {
-    const found = inquire(number, product, appliedAdmin);
-    if (!found) { setError("Nomor minimal 5 digit."); return; }
-    if (category === "BPJS") {
+  const lookup = async () => {
+    const response = await fetch("/api/biller/inquiry", {
+      method: "POST",
+      headers: await authHeader(),
+      body: JSON.stringify({ mode: "simulation", category, product, customerNumber: number, adminFee: appliedAdmin, months, taxYear }),
+    });
+    const body = await response.json().catch(() => ({}));
+    const bill = body.bill as { customerName?: string; period?: string; amount?: number; denda?: number; adminFee?: number; collfee?: number; total?: number } | undefined;
+    const found = response.ok && bill
+      ? { name: bill.customerName || "Pelanggan", period: bill.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || 0, admin: Number(bill.adminFee) || 0, collfee: Number(bill.collfee) || 0, total: Number(bill.total) || 0 }
+      : inquire(number, product, appliedAdmin);
+    if (!found) { setError(body.error || "Nomor minimal 5 digit."); return; }
+    if (!response.ok && category === "BPJS") {
       const count = Number(months);
       found.amount *= count;
       found.denda *= count;
       found.total = found.amount + found.denda + found.admin + found.collfee;
       found.period = `${months} Bulan`;
     }
-    if (category === "Pajak PBB") found.period = taxYear;
+    if (!response.ok && category === "Pajak PBB") found.period = taxYear;
     setCart((rows) => [...rows, { ...found, key: crypto.randomUUID(), category, product, customerId: number.trim() }]);
     setError("");
     setMessage("");
@@ -234,7 +243,7 @@ export function LoketTransaksiPage() {
   };
 
   const pay = async () => {
-    if (rows.length === 0) return;
+    if (rows.length === 0 || busy) return;
     setBusy(true);
     setError("");
     let balance = 0;
@@ -243,6 +252,8 @@ export function LoketTransaksiPage() {
         method: "POST",
         headers: await authHeader(),
         body: JSON.stringify({
+          channel: "simulation",
+          clientRef: row.key,
           category: row.category,
           product: `${row.category} ${row.product}`,
           customerNumber: row.customerId,
@@ -267,30 +278,30 @@ export function LoketTransaksiPage() {
     }
     setBusy(false);
     setCart([]);
-    setMessage(`Pembayaran ${rows.length} tagihan tercatat. Saldo ${formatRupiah(balance)}.`);
+    setMessage(`Simulasi ${rows.length} tagihan tercatat. Status: Simulasi. Saldo produksi ${formatRupiah(balance)} tidak berubah.`);
     requestRefresh();
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden">
-      <div className="flex gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
+    <div className="flex h-full min-h-0 flex-col gap-1 overflow-hidden pb-6">
+      <div className="flex gap-1 overflow-x-auto rounded-md border border-slate-300 bg-white p-0.5">
         {CATEGORIES.map((item) => (
           <button
             key={item}
             onClick={() => openCategory(item)}
-            className={`shrink-0 rounded-lg px-3 py-2 text-xs font-bold uppercase ${category === item ? "bg-amber-500 text-white" : "text-slate-500 hover:bg-slate-50"}`}
+            className={`shrink-0 rounded px-2.5 py-1 text-sm font-black uppercase ${category === item ? "bg-amber-500 text-white" : "text-slate-700 hover:bg-slate-100"}`}
           >
             {item}
           </button>
         ))}
       </div>
       <div className="flex gap-2 border-b border-slate-200">
-        <button onClick={() => setMode("bayar")} className={`px-3 py-2 text-xs font-bold ${mode === "bayar" ? "border-b-2 border-amber-500 text-amber-600" : "text-slate-400"}`}>TRANSAKSI</button>
-        <button onClick={() => setMode("cetak")} className={`px-3 py-2 text-xs font-bold ${mode === "cetak" ? "border-b-2 border-amber-500 text-amber-600" : "text-slate-400"}`}>CETAK ULANG</button>
+        <button onClick={() => setMode("bayar")} className={`px-3 py-1.5 text-sm font-black ${mode === "bayar" ? "border-b-2 border-amber-500 text-amber-700" : "text-slate-500"}`}>TRANSAKSI</button>
+        <button onClick={() => setMode("cetak")} className={`px-3 py-1.5 text-sm font-black ${mode === "cetak" ? "border-b-2 border-amber-500 text-amber-700" : "text-slate-500"}`}>CETAK ULANG</button>
       </div>
-      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-300 bg-white">
         {mode === "bayar" ? (
-          <div className="grid h-[92px] shrink-0 grid-cols-4 items-end gap-3 overflow-visible p-4">
+          <div className="grid h-[78px] shrink-0 grid-cols-4 items-end gap-2 overflow-visible px-2 py-1.5">
             <Field label={productLabel}>
               {category === "PDAM" ? (
                 <AreaPicker value={product} onChange={setProduct} />
@@ -322,10 +333,10 @@ export function LoketTransaksiPage() {
             <Field label={idLabel}>
               <Input value={number} onChange={(event) => setNumber(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); lookup(); } }} placeholder={idLabel} />
             </Field>
-            <button type="button" onClick={lookup} className="h-10 rounded-lg bg-amber-500 px-4 text-sm font-semibold text-white">Inquiry</button>
+            <button type="button" onClick={lookup} className="h-9 rounded-md bg-amber-500 px-3 text-sm font-black text-slate-950">Inquiry</button>
           </div>
         ) : (
-          <div className="grid h-[92px] shrink-0 grid-cols-4 items-end gap-3 overflow-hidden p-4">
+          <div className="grid h-[78px] shrink-0 grid-cols-4 items-end gap-2 overflow-hidden px-2 py-1.5">
             <Field label="Customer ID"><Input value={reprintId} onChange={(event) => setReprintId(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); checkReprint(); } }} /></Field>
             <Field label="Tanggal Transaksi"><Input type="date" value={reprintDate} onChange={(event) => setReprintDate(event.target.value)} /></Field>
             <div />
@@ -360,10 +371,10 @@ export function LoketTransaksiPage() {
           ) : (
             <table className="w-full table-fixed text-left text-xs">
               <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
-                <tr>{["No", "Produk", "Cust.ID", "Nama", "Tanggal", "Total", "Status"].map((head) => <th key={head} className="px-3 py-2 font-semibold">{head}</th>)}</tr>
+                <tr>{["No", "Produk", "Cust.ID", "Nama", "Tanggal", "Total", "Status", "Aksi"].map((head) => <th key={head} className="px-3 py-2 font-semibold">{head}</th>)}</tr>
               </thead>
               <tbody>
-                {reprintHits.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">Belum ada list. Isi Customer ID atau tanggal, lalu tekan CEK.</td></tr>}
+                {reprintHits.length === 0 && <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Belum ada list. Isi Customer ID atau tanggal, lalu tekan CEK.</td></tr>}
                 {reprintHits.map((sale, index) => (
                   <tr key={sale.id} className="border-t border-slate-100 text-slate-700">
                     <td className="px-3 py-2">{index + 1}</td>
@@ -373,24 +384,35 @@ export function LoketTransaksiPage() {
                     <td className="px-3 py-2">{formatWaktu(sale.createdAt)}</td>
                     <td className="px-3 py-2 font-semibold">{formatRupiah(sale.amount)}</td>
                     <td className="px-3 py-2">{sale.status}</td>
+                    <td className="px-3 py-2">
+                      <button type="button" onClick={() => printReceipts(loadPrinterSettings(loketCode), [{
+                        id: sale.customerNumber,
+                        name: sale.customerName,
+                        product: sale.product,
+                        period: sale.period || formatWaktu(sale.createdAt),
+                        tagihan: Math.max(0, Number(sale.amount) - Number(sale.adminFee ?? 0)),
+                        admin: Number(sale.adminFee ?? 0),
+                        total: Number(sale.amount),
+                      }], `${loketCode} - ${loketName}`)} className="rounded-md bg-sky-700 px-2 py-1 text-[11px] font-bold text-white">Cetak Ulang</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
         </div>
-        <div className="flex h-14 shrink-0 items-center justify-between gap-2 bg-slate-800 px-4 text-white">
-          <div className="text-sm text-slate-200">{mode === "bayar" ? `${rows.length} tagihan` : `${reprintHits.length} list`}</div>
+        <div className="flex shrink-0 items-center justify-between gap-3 bg-slate-800 px-4 py-2.5 text-white">
+          <div className="shrink-0 text-sm font-black">{mode === "bayar" ? `${rows.length} tagihan` : `${reprintHits.length} list`}</div>
           {mode === "bayar" ? (
-            <div className="flex shrink-0 gap-2">
-              <Button variant="outline" disabled={rows.length === 0} onClick={() => printReceipts(loadPrinterSettings(loketCode), rows.map((row): ReceiptBill => ({ id: row.customerId, name: row.name, product: `${row.category} ${row.product}`, period: row.period, tagihan: row.amount + row.denda, admin: row.admin, total: row.total })), `${loketCode} - ${loketName}`)}>Cetak Info Tagihan</Button>
-              <Button variant="outline" onClick={() => { setCart([]); setNumber(""); setError(""); setMessage(""); }}>Hapus</Button>
-              <button onClick={pay} disabled={busy || rows.length === 0} className="rounded-lg bg-amber-500 px-5 py-2 text-sm font-bold text-white disabled:opacity-50">
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+              <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-3 font-black" disabled={rows.length === 0} onClick={() => printReceipts(loadPrinterSettings(loketCode), rows.map((row): ReceiptBill => ({ id: row.customerId, name: row.name, product: `${row.category} ${row.product}`, period: row.period, tagihan: row.amount + row.denda, admin: row.admin, total: row.total })), `${loketCode} - ${loketName}`)}>Cetak Info Tagihan</Button>
+              <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-4 font-black" onClick={() => { setCart([]); setNumber(""); setError(""); setMessage(""); }}>Hapus</Button>
+              <button onClick={pay} disabled={busy || rows.length === 0} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-50">
                 {busy ? "Memproses..." : `BAYAR ${formatRupiah(total)}`}
               </button>
             </div>
           ) : (
-            <button type="button" onClick={() => setReprintHits([])} className="rounded-lg border border-white/30 px-4 py-2 text-sm font-semibold text-white">Hapus Semua List</button>
+            <button type="button" onClick={() => setReprintHits([])} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/30 px-4 text-sm font-black text-white">Hapus Semua List</button>
           )}
         </div>
       </section>

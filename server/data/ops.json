@@ -1,5 +1,17 @@
 {
-  "runText": "bernari mencoba untuk masa depan yang lebih baik",
+  "runText": "",
+  "runNotices": [
+    {
+      "id": "72a5b11d-864d-48de-b835-8c60625aa055",
+      "text": "berani mencoba untuk hidup lebih baik",
+      "authorId": "241eabc9-68c9-4964-851f-2000b564bb93",
+      "authorRole": "super_admin",
+      "target": "all",
+      "mitraId": null,
+      "updatedAt": "2026-11-17T07:34:47.003Z",
+      "expiresAt": "2026-11-24T07:34:47.003Z"
+    }
+  ],
   "collectives": [
     {
       "id": "46dcde86-0c14-4bd5-b381-f280a028496b",

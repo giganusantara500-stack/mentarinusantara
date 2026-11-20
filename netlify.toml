@@ -5,7 +5,7 @@
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
-  included_files = ["server/data/ops.json"]
+  included_files = ["server/data/ops.json", "server/data/ledger.json"]
 
 [[redirects]]
   from = "/api/*"

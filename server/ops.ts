@@ -183,12 +183,17 @@ async function mitraScope(caller: { id: string; role: string }, env: { supabaseU
   return typeof parentBody?.user_metadata?.parent_id === "string" ? parentBody.user_metadata.parent_id : "";
 }
 
-function noticeVisible(item: RunNotice, callerRole: string, mitraId: string | null) {
-  if (callerRole === "super_admin") return true;
-  if (!mitraId) return false;
-  if (item.authorRole === "mitra") return item.authorId === mitraId;
-  if (item.target === "all") return true;
-  return item.mitraId === mitraId;
+function noticeVisible(item: RunNotice, callerRole: string, mitraId: string | null, callerId: string) {
+  if (item.authorRole === "super_admin") {
+    if (callerRole !== "mitra") return false;
+    if (item.target === "all") return true;
+    return item.mitraId === callerId;
+  }
+  if (item.authorRole === "mitra") {
+    if (callerRole !== "submitra" && callerRole !== "loket") return false;
+    return item.authorId === mitraId || item.mitraId === mitraId;
+  }
+  return false;
 }
 
 function mapMembers(body: Record<string, unknown>, previous: Member[] = []) {
@@ -322,15 +327,15 @@ export async function handleOpsRequest(
   if (pathname === "/api/runtext" && method === "GET") {
     const data = readOps();
     const mitraId = await mitraScope(caller, env);
-    const visible = activeNotices(data.runNotices).filter((item) => noticeVisible(item, caller.role, mitraId));
-    const legacy = data.runText.trim();
-    const texts = [...(legacy ? [legacy] : []), ...visible.map((item) => item.text)];
+    const visible = activeNotices(data.runNotices)
+      .filter((item) => noticeVisible(item, caller.role, mitraId, caller.id))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     const editable = caller.role === "super_admin"
       ? activeNotices(data.runNotices).filter((item) => item.authorRole === "super_admin")
       : caller.role === "mitra"
         ? activeNotices(data.runNotices).filter((item) => item.authorId === caller.id)
         : [];
-    return { status: 200, body: { text: texts.join("   •   "), notices: editable } };
+    return { status: 200, body: { text: visible[0]?.text ?? "", notices: editable } };
   }
   if (pathname === "/api/runtext" && method === "POST") {
     if (caller.role !== "super_admin" && caller.role !== "mitra") {
@@ -338,6 +343,7 @@ export async function handleOpsRequest(
     }
     const text = typeof body.text === "string" ? body.text.trim().slice(0, 240) : "";
     const data = readOps();
+    data.runText = "";
     const now = new Date();
     const expiresAt = new Date(now.getTime() + WEEK_MS).toISOString();
     if (caller.role === "mitra") {
@@ -379,7 +385,7 @@ export async function handleOpsRequest(
     return setManagedActive(authorization, String(body.userId ?? ""), body.active !== false, env);
   }
   if (pathname === "/api/balances" && method === "GET") {
-    const wallets = listWalletBalances();
+    const wallets = await listWalletBalances(env, caller.id);
     if (caller.role === "super_admin") return { status: 200, body: { wallets } };
     const scope = await networkLoketIds(authorization, env);
     const allowed = new Set([caller.id, ...(scope ?? [])]);

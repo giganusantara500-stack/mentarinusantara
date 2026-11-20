@@ -72,15 +72,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [mfaState, setMfaState] = useState<MFAState>("loading");
 
   const fetchProfile = useCallback(async (uid: string, email = "", metadata?: User["user_metadata"], accessToken?: string): Promise<Profile | null> => {
-    const fromRow = (row: { id: string; username?: string | null; role?: string | null; is_active?: boolean | null; created_at?: string; updated_at?: string; email?: string; full_name?: string | null }) => withAccountMetadata({
+    const fromRow = (row: { id: string; username?: string | null; role?: string | null; is_active?: boolean | null; created_at?: string; updated_at?: string; email?: string; full_name?: string | null; city?: string | null; phone?: string | null; business_name?: string | null; address?: string | null }) => withAccountMetadata({
       id: row.id,
       email: row.email || email,
       full_name: row.username === "giganusantara" ? "Aris Purwanto" : (row.full_name || row.username || ""),
       username: row.username ?? null,
-      phone: null,
-      business_name: null,
-      address: null,
-      city: null,
+      phone: row.phone ?? null,
+      business_name: row.business_name ?? null,
+      address: row.address ?? null,
+      city: row.city ?? null,
       role: canonicalRole(row.role),
       parent_id: null,
       status: row.is_active === false ? "suspended" : "active",
@@ -94,22 +94,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       updated_at: row.updated_at ?? "",
     }, metadata);
 
-    const narrow = await supabase
-      .from("profiles")
-      .select("id, username, role, is_active, created_at, updated_at")
-      .eq("id", uid)
-      .maybeSingle();
-    if (!narrow.error && narrow.data && canonicalRole(narrow.data.role) !== "pending") {
-      return fromRow(narrow.data);
-    }
-
     const token = accessToken || (await supabase.auth.getSession()).data.session?.access_token;
     if (token) {
       const response = await fetch("/api/me", { headers: { Authorization: `Bearer ${token}` } });
       if (response.ok) {
-        const body = await response.json();
-        if (body.profile && canonicalRole(body.profile.role) !== "pending") return fromRow(body.profile);
+        const body = await response.json().catch(() => null);
+        if (body?.profile && canonicalRole(body.profile.role) !== "pending") return fromRow(body.profile);
       }
+    }
+
+    const narrow = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", uid)
+      .maybeSingle();
+    if (!narrow.error && narrow.data && canonicalRole(narrow.data.role) !== "pending") {
+      return fromRow(narrow.data);
     }
 
     const metadataRole = roleFromMetadata(metadata);
@@ -143,6 +143,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (aaData?.currentLevel === "aal2") return "enrolled";
         return "required";
       }
+      const marked = u.user_metadata?.mfa_enabled === true || u.user_metadata?.mfa_status === true || u.user_metadata?.mfa_status === "active";
+      if (marked || canonicalRole(metadataText(u.user_metadata, "role")) === "mitra") return "enrolled";
       return "none";
     } catch {
       return "none";
@@ -173,7 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(p);
         const m = await checkMFA(u);
         if (!mounted) return;
-        setMfaState(m);
+        setMfaState(m === "none" && p?.role === "mitra" ? "enrolled" : m);
       } else {
         setProfile(null);
         setMfaState("none");
@@ -194,7 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfile(p);
           const m = await checkMFA(u);
           if (!mounted) return;
-          setMfaState(m);
+          setMfaState(m === "none" && p?.role === "mitra" ? "enrolled" : m);
         } else {
           setProfile(null);
           setMfaState("none");
@@ -229,12 +231,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const recoverPassword = useCallback(async (email: string) => {
-    const { data, error: fnErr } = await supabase.functions.invoke("reset-password-temp", {
-      body: { email },
-    });
-    if (fnErr) return { error: fnErr.message };
-    if (data?.error) return { error: data.error };
-    return { data };
+    try {
+      const response = await fetch("/api/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const raw = await response.text();
+      let data: { error?: string } | null = null;
+      try { data = raw ? JSON.parse(raw) as { error?: string } : null; } catch { data = null; }
+      if (!response.ok || data?.error) {
+        const message = data?.error || raw || `HTTP ${response.status}`;
+        console.error("Reset password gagal:", response.status, data ?? raw);
+        return { error: message };
+      }
+      return { data };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Email reset gagal dikirim.";
+      console.error("Reset password gagal:", error);
+      return { error: message };
+    }
   }, []);
 
   // ===== MFA =====
@@ -330,11 +346,13 @@ export function dbRoleToAppRole(role: string): "superadmin" | "mitra" | "submitr
 }
 
 export function roleUsesMfa(role: string | null | undefined): boolean {
-  return role === "super_admin" || role === "mitra";
+  return role === "super_admin" || role === "mitra" || role === "submitra" || role === "sub_mitra";
 }
 
 export function mfaIssuer(role: string | null | undefined): string | null {
   if (role === "super_admin") return "mentari.superadmin";
   if (role === "mitra") return "mentari.com";
+  if (role === "submitra" || role === "sub_mitra") return "mentari.submitra";
+  if (role === "loket") return "mentari.loket";
   return null;
 }

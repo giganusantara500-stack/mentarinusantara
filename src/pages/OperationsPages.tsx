@@ -10,11 +10,12 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
+import { ticketPhase } from "@/lib/depositStatus";
 import { ROLE_LABELS } from "@/lib/nav";
 import { CATEGORY_LABELS, type ProductCategory } from "@/lib/types";
 import { networkOwners, profileLabel, profilesWithSelf } from "@/lib/network";
 import { HierarchyPanel, useDrill } from "@/lib/hierarchy";
-import { Users, Pencil, Trash2, Plus, MoreHorizontal } from "lucide-react";
+import { Users, Pencil, Trash2, Plus } from "lucide-react";
 
 async function authHeader() {
   const session = await supabase.auth.getSession();
@@ -43,24 +44,52 @@ interface Ticket {
   accountNumber: string;
   accountHolder: string;
   transferAt: string;
+  expiresAt?: string;
+  claimedAt?: string | null;
   createdAt?: string;
   decidedAt?: string | null;
   status: "pending" | "approved" | "cancelled" | "reversed";
+  route?: "pusat" | "jaringan";
+  approverId?: string | null;
+  applicantRole?: string;
+  uplineName?: string;
+  uplineRole?: string;
+}
+
+interface FundMutation {
+  id: string;
+  at: string;
+  ticketId: string;
+  actorId: string;
+  accountId: string;
+  direction: "credit" | "debit";
+  amount: number;
+  balanceAfter: number;
+  route: "pusat" | "jaringan";
+  kind?: "distribusi";
+  note: string;
 }
 
 const statusLabel: Record<Ticket["status"], string> = {
-  pending: "Menunggu",
-  approved: "Sukses",
+  pending: "Menunggu Transfer",
+  approved: "Deposit Berhasil",
   cancelled: "Ditolak",
   reversed: "Dibatalkan",
 };
 
 const monitorLabel: Record<Ticket["status"], string> = {
-  pending: "Pending",
-  approved: "Approved",
+  pending: "Menunggu Transfer",
+  approved: "Deposit Berhasil",
   cancelled: "Ditolak",
   reversed: "Dibatalkan",
 };
+
+function roleText(role?: string) {
+  if (role === "mitra") return "Mitra";
+  if (role === "submitra" || role === "sub_mitra") return "Sub Mitra";
+  if (role === "super_admin" || role === "superadmin") return "Pusat";
+  return "Loket";
+}
 
 function cmsId(ticket: Ticket) {
   return ticket.id.replace(/-/g, "").slice(0, 8).toUpperCase();
@@ -76,10 +105,90 @@ function statusTrail(ticket: Ticket) {
   return trail;
 }
 
+function DistributeBalance({ ownerId, profiles, balance, mutations, onRefresh }: {
+  ownerId: string;
+  profiles: { id: string; role: string; full_name?: string | null; username?: string | null; loket_code?: string | null; parent_id?: string | null; mitra_id?: string | null; created_by?: string | null }[];
+  balance: number;
+  mutations: FundMutation[];
+  onRefresh: () => Promise<void>;
+}) {
+  const lokets = profiles.filter((item) => {
+    if (item.role !== "loket") return false;
+    if (item.mitra_id && item.mitra_id !== ownerId && item.created_by !== ownerId && item.parent_id !== ownerId) return false;
+    if (item.created_by && item.parent_id && item.created_by !== ownerId && item.parent_id !== ownerId && item.mitra_id !== ownerId) return false;
+    return true;
+  });
+  const [loketId, setLoketId] = useState(lokets[0]?.id ?? "");
+  const [amount, setAmount] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const history = mutations.filter((row) => row.kind === "distribusi");
+  const nameOf = (id: string) => {
+    const match = profiles.find((item) => item.id === id);
+    return match?.full_name || match?.username || "Loket";
+  };
+  const send = async () => {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    const response = await fetch("/api/distribute", {
+      method: "POST",
+      headers: await authHeader(),
+      body: JSON.stringify({ loketId, amount: Number(amount) }),
+    });
+    const body = await response.json().catch(() => null);
+    setBusy(false);
+    if (!response.ok) { setError(body?.error || "Saldo gagal dikirim."); return; }
+    setAmount("");
+    setMessage(`Terkirim ke ${nameOf(loketId)}. Saldo Anda ${formatRupiah(Number(body.balance))}. Saldo loket ${formatRupiah(Number(body.loketBalance))}.`);
+    await onRefresh();
+  };
+  return (
+    <Shell title="Distribusi Saldo" description={`Kirim sebagian saldo utama ke loket di jaringan Anda. Saldo Anda saat ini ${formatRupiah(balance)}. Loket mitra lain tidak dapat dipilih.`}>
+      <Card className="mb-4">
+        <CardHeader title="Transfer ke loket" subtitle="Saldo Mitra terpotong dan saldo loket bertambah saat ini juga." />
+        <div className="grid gap-3 p-4 sm:grid-cols-3">
+          <Field label="Loket tujuan">
+            <Select value={loketId} onChange={(event) => setLoketId(event.target.value)}>
+              {lokets.length === 0 && <option value="">Belum ada loket</option>}
+              {lokets.map((item) => <option key={item.id} value={item.id}>{item.loket_code ? `${item.loket_code} - ` : ""}{item.full_name || item.username || "Loket"}</option>)}
+            </Select>
+          </Field>
+          <Field label="Nominal">
+            <Input inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value.replace(/\D/g, ""))} placeholder="100000" />
+          </Field>
+          <div className="flex items-end">
+            <Button onClick={send} disabled={busy || !loketId || Number(amount) < 1000 || Number(amount) > balance}>{busy ? "Mengirim..." : "Kirim Saldo"}</Button>
+          </div>
+          {error && <div className="sm:col-span-3 text-sm text-rose-600">{error}</div>}
+          {message && <div className="sm:col-span-3 text-sm text-emerald-700">{message}</div>}
+        </div>
+      </Card>
+      <Card>
+        <CardHeader title="Riwayat distribusi" subtitle={`${history.length} mutasi pada akun Anda`} />
+        <div className="divide-y divide-slate-100">
+          {history.length === 0 && <div className="px-4 py-6 text-center text-sm text-slate-500">Belum ada pengiriman saldo.</div>}
+          {history.slice(0, 20).map((row) => (
+            <div key={row.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+              <div>
+                <div className="font-medium text-slate-800">{row.note}</div>
+                <div className="text-xs text-slate-500">{formatWaktu(row.at)} · sisa {formatRupiah(row.balanceAfter)}</div>
+              </div>
+              <div className="font-semibold text-rose-700">-{formatRupiah(row.amount)}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </Shell>
+  );
+}
+
 export function ManageSetoranPage() {
   const { isSuperAdmin, profile } = useAuth();
   const { profiles } = useProfiles();
   const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [mutations, setMutations] = useState<FundMutation[]>([]);
   const [status, setStatus] = useState("semua");
   const [bank, setBank] = useState("semua");
   const [date, setDate] = useState("");
@@ -88,8 +197,9 @@ export function ManageSetoranPage() {
   const [busyId, setBusyId] = useState("");
   const [pool, setPool] = useState(0);
   const [detail, setDetail] = useState<Ticket | null>(null);
-  const [menuId, setMenuId] = useState("");
   const globalQueue = isSuperAdmin;
+  const role = profile?.role;
+  const canRequest = role === "mitra" || role === "submitra";
   const networkIds = new Set(profiles.map((item) => item.id));
 
   const load = async () => {
@@ -99,6 +209,7 @@ export function ManageSetoranPage() {
     if (!response.ok) { setError(body.error || "Daftar setoran gagal dimuat."); return; }
     setError("");
     setTickets(body.tickets ?? []);
+    setMutations(body.mutations ?? []);
     const wallet = await fetch("/api/wallet", { headers });
     if (wallet.ok) setPool(Number((await wallet.json()).balance) || 0);
   };
@@ -130,8 +241,10 @@ export function ManageSetoranPage() {
     };
   };
   const banks = Array.from(new Set(tickets.map((ticket) => ticket.bank)));
+  const routeOf = (ticket: Ticket) => ticket.route === "jaringan" ? "jaringan" : "pusat";
+  const canDecide = (ticket: Ticket) => globalQueue && routeOf(ticket) === "pusat";
   const rows = tickets.filter((ticket) => {
-    if (!globalQueue && (!ticket.loketId || !networkIds.has(ticket.loketId))) return false;
+    if (!globalQueue && ticket.loketId !== profile?.id && ticket.approverId !== profile?.id && (!ticket.loketId || !networkIds.has(ticket.loketId))) return false;
     if (status !== "semua" && ticket.status !== status) return false;
     if (bank !== "semua" && ticket.bank !== bank) return false;
     if (globalQueue && date && !ticket.transferAt.slice(0, 10).startsWith(date)) return false;
@@ -144,13 +257,31 @@ export function ManageSetoranPage() {
     return true;
   });
 
+  const accountName = (id: string) => {
+    if (id === "__pusat__") return "Kas Pusat";
+    const match = profiles.find((item) => item.id === id);
+    return match?.full_name || match?.username || id.slice(0, 8);
+  };
+
+  if (role === "mitra") {
+    return <DistributeBalance ownerId={profile?.id ?? ""} profiles={profiles} balance={pool} mutations={mutations.filter((row) => row.accountId === profile?.id)} onRefresh={load} />;
+  }
+
   return (
     <Shell
-      title="Manage Setoran"
+      title="Persetujuan Deposit"
       description={globalQueue
-        ? `Antrean seluruh loket. Approve mengubah status menjadi Sukses dan menambah saldo loket. Tolak menjadi Ditolak tanpa mengubah saldo. Dari Sukses, saldo ditarik kembali. Saldo Super Admin ${formatRupiah(pool)}.`
-        : "Setoran loket dan sub mitra di jaringan Anda. Persetujuan tetap dilakukan Super Admin."}
+        ? `Antrean deposit Loket, Sub Mitra, dan Mitra. Menyetujui tiket memindahkan Saldo Utama ke pemohon tepat satu kali. Saldo Utama saat ini ${formatRupiah(pool)}.`
+        : "Pantauan setoran di jaringan Anda. Persetujuan tiket rekening pusat hanya dilakukan Super Admin."}
     >
+      {canRequest && (
+        <Card className="mb-4">
+          <CardHeader title="Ajukan tiket deposit" subtitle="Kode unik, hitung mundur, dan status ada di menu Tiket Deposit." />
+          <div className="p-4">
+            <Button onClick={() => { window.location.hash = "/deposit"; }}>Buka Tiket Deposit</Button>
+          </div>
+        </Card>
+      )}
       {error && <div className="mb-3 text-sm text-rose-600">{error}</div>}
       <div className={`mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-3 ${globalQueue ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
         <Field label="Status">
@@ -178,56 +309,38 @@ export function ManageSetoranPage() {
         </Field>
       </div>
       <Card>
-        <CardHeader title={globalQueue ? "Antrean setoran seluruh loket" : "Setoran jaringan Anda"} subtitle={`${rows.length} tiket · ${profile?.full_name || profile?.username || "Jaringan"}`} />
+        <CardHeader title={globalQueue ? "Antrean rekening pusat" : "Antrean jaringan Anda"} subtitle={`${rows.length} tiket · ${profile?.full_name || profile?.username || "Jaringan"}`} />
         <div className="w-full max-w-full">
           <table className="w-full table-fixed text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
               <tr>
-                {(globalQueue
-                  ? ["Jam transfer", "Kode loket", "Kode unik", "Transfer", "Saldo masuk", "Rekening", "Status", "Aksi"]
-                  : ["ID CMS", "Loket", "Sumber", "Nominal", "Status", ""]
-                ).map((head) => <th key={head || "aksi"} className="px-3 py-2">{head}</th>)}
+                {["Pemohon", "Peran", "Jaringan", "Bank", "Transfer", "Status", "Aksi"].map((head) => <th key={head} className="px-3 py-2">{head}</th>)}
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <tr><td colSpan={globalQueue ? 8 : 6} className="px-3 py-8 text-center text-slate-500">Belum ada setoran pada filter ini.</td></tr>}
-              {globalQueue && rows.map((ticket) => (
-                <tr key={ticket.id} className="border-t border-slate-100">
-                  <td className="px-3 py-2">{formatWaktu(ticket.transferAt)}</td>
-                  <td className="px-3 py-2"><div className="font-semibold text-slate-900">{loketOf(ticket).name}</div><div className="text-xs text-slate-500">{loketOf(ticket).code ? `Kode ${loketOf(ticket).code}` : ticket.loketName}</div></td>
-                  <td className="px-3 py-2 font-mono font-bold">{ticket.uniqueCode || "—"}</td>
-                  <td className="px-3 py-2 font-semibold">{formatRupiah(ticket.transferAmount ?? ticket.amount)}</td>
-                  <td className="px-3 py-2">{formatRupiah(ticket.baseAmount ?? ticket.amount)}</td>
-                  <td className="px-3 py-2">{ticket.bank} · {ticket.accountNumber}<div className="text-xs text-slate-500">{ticket.accountHolder}</div></td>
-                  <td className="px-3 py-2"><Badge tone={ticket.status === "approved" ? "success" : ticket.status === "pending" ? "warning" : ticket.status === "reversed" ? "info" : "danger"}>{statusLabel[ticket.status]}</Badge></td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap gap-2">
-                      {ticket.status === "pending" && <Button size="sm" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "approve")}>Approve</Button>}
-                      {ticket.status === "pending" && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "cancel")}>Tolak</Button>}
-                      {ticket.status === "approved" && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "pending")}>Kembalikan ke Pending</Button>}
-                      {ticket.status === "approved" && <Button size="sm" variant="danger" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "void")}>Tarik Kembali</Button>}
-                      {(ticket.status === "cancelled" || ticket.status === "reversed") && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "pending")}>Kembalikan ke Pending</Button>}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!globalQueue && rows.map((ticket) => {
+              {rows.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-500">Belum ada setoran pada filter ini.</td></tr>}
+              {rows.map((ticket) => {
                 const loket = loketOf(ticket);
+                const allowed = canDecide(ticket);
                 return (
-                  <tr key={ticket.id} className="cursor-pointer border-t border-slate-100 hover:bg-slate-50" onClick={() => { setMenuId(""); setDetail(ticket); }}>
-                    <td className="px-3 py-2 font-mono text-xs font-semibold text-slate-800">{cmsId(ticket)}</td>
-                    <td className="px-3 py-2"><div className="font-semibold leading-5 text-slate-900">{loket.name}</div>{loket.code && <div className="text-xs leading-4 text-slate-500">Kode {loket.code}</div>}</td>
-                    <td className="px-3 py-2">{ticket.bank}</td>
-                    <td className="px-3 py-2 font-semibold">{formatRupiah(ticket.baseAmount ?? ticket.amount)}</td>
-                    <td className="px-3 py-2"><Badge tone={ticket.status === "approved" ? "success" : ticket.status === "pending" ? "warning" : ticket.status === "reversed" ? "info" : "danger"}>{monitorLabel[ticket.status]}</Badge></td>
-                    <td className="relative px-3 py-2 text-right" onClick={(event) => event.stopPropagation()}>
-                      <button type="button" aria-label="Menu setoran" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100" onClick={() => setMenuId(menuId === ticket.id ? "" : ticket.id)}>
-                        <MoreHorizontal size={16} />
-                      </button>
-                      {menuId === ticket.id && (
-                        <button type="button" className="absolute right-3 z-10 mt-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs font-semibold text-slate-700 shadow" onClick={() => { setMenuId(""); setDetail(ticket); }}>
-                          Detail setoran
-                        </button>
+                  <tr key={ticket.id} className="border-t border-slate-100">
+                    <td className="px-3 py-2"><div className="font-semibold text-slate-900">{loket.name}</div><div className="text-xs text-slate-500">{loket.code ? `Kode ${loket.code}` : formatWaktu(ticket.transferAt)}</div></td>
+                    <td className="px-3 py-2">{roleText(ticket.applicantRole)}</td>
+                    <td className="px-3 py-2">{ticket.uplineName || "Pusat"}<div className="text-xs text-slate-500">{roleText(ticket.uplineRole)}</div></td>
+                    <td className="px-3 py-2">{ticket.bank}<div className="text-xs text-slate-500">{ticket.accountNumber}</div></td>
+                    <td className="px-3 py-2 font-semibold">{formatRupiah(ticket.transferAmount ?? ticket.amount)}<div className="font-mono text-xs text-slate-500">kode {ticket.uniqueCode || "—"} · masuk {formatRupiah(ticket.baseAmount ?? ticket.amount)}</div></td>
+                    <td className="px-3 py-2"><Badge tone={ticketPhase(ticket).tone}>{ticketPhase(ticket).label}</Badge></td>
+                    <td className="px-3 py-2">
+                      {allowed ? (
+                        <div className="flex flex-wrap gap-2">
+                          {ticket.status === "pending" && <Button size="sm" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "approve")}>Approve</Button>}
+                          {ticket.status === "pending" && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "cancel")}>Tolak</Button>}
+                          {ticket.status === "approved" && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "pending")}>Kembalikan</Button>}
+                          {ticket.status === "approved" && <Button size="sm" variant="danger" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "void")}>Tarik Kembali</Button>}
+                          {(ticket.status === "cancelled" || ticket.status === "reversed") && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "pending")}>Kembalikan</Button>}
+                        </div>
+                      ) : (
+                        <button type="button" className="text-xs font-semibold text-sky-700" onClick={() => setDetail(ticket)}>{routeOf(ticket) === "pusat" ? "Menunggu Super Admin" : "Detail"}</button>
                       )}
                     </td>
                   </tr>
@@ -235,6 +348,21 @@ export function ManageSetoranPage() {
               })}
             </tbody>
           </table>
+        </div>
+      </Card>
+      <Card className="mt-4">
+        <CardHeader title="Riwayat mutasi dana" subtitle={globalQueue ? "Kas pusat dan saldo pemohon" : "Mutasi di jaringan Anda"} />
+        <div className="divide-y divide-slate-100">
+          {mutations.length === 0 && <div className="px-4 py-6 text-center text-sm text-slate-500">Belum ada mutasi deposit.</div>}
+          {mutations.slice(0, 30).map((row) => (
+            <div key={row.id} className="flex items-center justify-between gap-3 px-4 py-3 text-sm">
+              <div>
+                <div className="font-medium text-slate-800">{row.note}</div>
+                <div className="text-xs text-slate-500">{formatWaktu(row.at)} · {accountName(row.accountId)} · {row.route === "jaringan" ? "Jaringan" : "Pusat"}</div>
+              </div>
+              <div className={`font-semibold ${row.direction === "credit" ? "text-emerald-700" : "text-rose-700"}`}>{row.direction === "credit" ? "+" : "-"}{formatRupiah(row.amount)}</div>
+            </div>
+          ))}
         </div>
       </Card>
       <Modal open={!!detail} onClose={() => setDetail(null)} title="Detail Setoran" subtitle={detail ? cmsId(detail) : ""}>
@@ -295,6 +423,7 @@ export function BalanceAllocationPage() {
           <Field label="Akun tujuan">
             <Select value={userId} onChange={(event) => setUserId(event.target.value)}>
               <option value="">Pilih akun</option>
+              <option value="__pusat__">Saldo Utama (modal H2H)</option>
               {[...targets].sort((a, b) => (a.role === "loket" ? 0 : 1) - (b.role === "loket" ? 0 : 1)).map((profile) => (
                 <option key={profile.id} value={profile.id}>
                   {profile.role === "loket" && profile.loket_code ? `${profile.loket_code} - ${profileLabel(profile)}` : `${profileLabel(profile)} · ${ROLE_LABELS[roleToUi(profile.role)]}`}
@@ -415,6 +544,7 @@ export function OutstandingPage() {
 }
 
 export function RecapPage() {
+  const { isSuperAdmin } = useAuth();
   const { transactions, loading } = useTransactions();
   const networkSales = useNetworkLoketSales();
   const { profiles } = useProfiles();
@@ -424,16 +554,17 @@ export function RecapPage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const scopedSales = useMemo(() => {
-    const seen = new Set(transactions.map((row) => row.id));
-    return [...transactions, ...networkSales.filter((row) => !seen.has(row.id))].filter((row) => {
+    const seen = new Set(networkSales.map((row) => row.id));
+    const archive = isSuperAdmin ? [...networkSales, ...transactions.filter((row) => !seen.has(row.id))] : networkSales;
+    return archive.filter((row) => {
       if (row.status !== "success") return false;
-      if (!drill.loketIds.includes(row.user_id)) return false;
+      if (drill.canBack && !drill.loketIds.includes(row.user_id)) return false;
       const day = row.created_at.slice(0, 10);
       if (from && day < from) return false;
       if (to && day > to) return false;
       return true;
     });
-  }, [transactions, networkSales, drill.loketIds, from, to]);
+  }, [transactions, networkSales, drill.loketIds, drill.canBack, from, to, isSuperAdmin]);
   const rows = useMemo(() => {
     const grouped = new Map<string, { count: number; amount: number }>();
     scopedSales.forEach((row) => {
@@ -465,8 +596,8 @@ export function RecapPage() {
         <Input type="date" value={from} onChange={(event) => setFrom(event.target.value)} />
         <Input type="date" value={to} onChange={(event) => setTo(event.target.value)} />
       </div>
-      {drill.showNodes ? null : <Card>
-        <CardHeader title="Rekap" subtitle={loading ? "Memuat..." : `${rows.length} baris`} />
+      <Card>
+        <CardHeader title="Rekap" subtitle={loading && networkSales.length === 0 ? "Memuat..." : `${rows.length} baris`} />
         <div className="w-full max-w-full">
           <table className="w-full table-fixed text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -484,7 +615,7 @@ export function RecapPage() {
             </tbody>
           </table>
         </div>
-      </Card>}
+      </Card>
     </Shell>
   );
 }
@@ -833,7 +964,7 @@ export function RunTextPage() {
   };
 
   return (
-    <Shell title="Running Text" description={isSuper ? "Kirim teks berjalan ke semua mitra atau satu mitra. Teks hilang setelah 7 hari." : "Teks ini hanya tampil di jaringan Anda dan hilang setelah 7 hari."}>
+    <Shell title="Running Text" description={isSuper ? "Teks tampil hanya di dashboard Mitra yang dipilih, selama 7 hari. Teks baru menggantikan teks lama pada tujuan yang sama." : "Teks tampil hanya di dashboard Sub Mitra dan Loket jaringan Anda, selama 7 hari. Menyimpan lagi menggantikan teks sebelumnya."}>
       <Card>
         <div className="space-y-3 p-4">
           {error && <p className="text-sm text-rose-600">{error}</p>}

@@ -13,6 +13,7 @@ export function useDeskStats(tick: number) {
   const [outstanding, setOutstanding] = useState(0);
   const [loketCode, setLoketCode] = useState("");
   const [runText, setRunText] = useState("");
+  const [ticketHint, setTicketHint] = useState("");
 
   useEffect(() => {
     if (!profile) return;
@@ -39,6 +40,12 @@ export function useDeskStats(tick: number) {
       setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0));
       setOutstanding(pending);
       setLoketCode(String(wallet?.loketCode || salesBody.loketCode || profile.loket_code || ""));
+      if (profile.role === "loket") {
+        const depositRes = await fetch("/api/deposits", { headers });
+        const depositBody = depositRes.ok ? await depositRes.json() : null;
+        const ticket = (depositBody?.tickets ?? [])[0] as { status?: string; uniqueCode?: string } | undefined;
+        setTicketHint(ticket?.status === "pending" ? `Menunggu Transfer · kode ${ticket.uniqueCode || ""}` : ticket?.status === "approved" ? "Deposit Berhasil" : "");
+      }
       const runBody = runRes.ok ? await runRes.json() : null;
       setRunText(String(runBody?.text ?? ""));
     })();
@@ -51,14 +58,25 @@ export function useDeskStats(tick: number) {
       void (async () => {
         const session = await supabase.auth.getSession();
         const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
-        const [walletRes, salesRes] = await Promise.all([
+        const [walletRes, salesRes, runRes] = await Promise.all([
           fetch("/api/wallet", { headers }),
           fetch("/api/loket-sales", { headers }),
+          fetch("/api/runtext", { headers }),
         ]);
         if (walletRes.ok) {
           const wallet = await walletRes.json();
           setBalance(Number(wallet.balance ?? 0));
           if (wallet.loketCode) setLoketCode(String(wallet.loketCode));
+        }
+        if (runRes.ok) {
+          const runBody = await runRes.json();
+          setRunText(String(runBody?.text ?? ""));
+        }
+        if (profile.role === "loket") {
+          const depositRes = await fetch("/api/deposits", { headers });
+          const depositBody = depositRes.ok ? await depositRes.json() : null;
+          const ticket = (depositBody?.tickets ?? [])[0] as { status?: string; uniqueCode?: string } | undefined;
+          setTicketHint(ticket?.status === "pending" ? `Menunggu Transfer · kode ${ticket.uniqueCode || ""}` : ticket?.status === "approved" ? "Deposit Berhasil" : "");
         }
         if (salesRes.ok) {
           const body = await salesRes.json();
@@ -69,11 +87,11 @@ export function useDeskStats(tick: number) {
           setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0));
         }
       })();
-    }, 15000);
+    }, 5000);
     return () => window.clearInterval(timer);
   }, [profile]);
 
-  return { balance, todayCount, todayAmount, outstanding, loketCode, runText };
+  return { balance, todayCount, todayAmount, outstanding, loketCode, runText, ticketHint };
 }
 
 interface HeaderProps {
@@ -86,8 +104,9 @@ interface HeaderProps {
 }
 
 export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showStats = true }: HeaderProps) {
-  const { profile } = useAuth();
+  const { profile, user } = useAuth();
   if (!profile) return null;
+  const mfaOn = profile.role === "mitra" || user?.user_metadata?.mfa_enabled === true || user?.user_metadata?.mfa_status === true || user?.user_metadata?.mfa_status === "active";
   const code = stats.loketCode || profile.loket_code || "";
   const deskName = profile.business_name || profile.full_name || profile.username || "Loket";
   const identity = code ? `${code} - ${deskName}` : deskName;
@@ -111,6 +130,9 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showS
           <button onClick={onRefresh} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-sm font-black">
             <RotateCw size={18} strokeWidth={2.6} /> Refresh
           </button>
+          {mfaOn && profile.role === "mitra" && (
+            <span className="inline-flex items-center rounded-full bg-emerald-400 px-2.5 py-1 text-sm font-black text-slate-950">2FA Aktif</span>
+          )}
           <button onClick={onLogout} className="inline-flex items-center gap-1.5 rounded-full border border-white/30 px-2.5 py-1 text-sm font-black" aria-label="Logout">
             <LogOut size={18} strokeWidth={2.6} /> Logout
           </button>
@@ -118,17 +140,19 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showS
       </div>
       {showStats && (
         <div className="flex w-full items-stretch justify-start gap-2 overflow-x-auto border-b border-slate-200 bg-white px-3 py-2 text-slate-900">
-          <Stat icon={Wallet} tone="bg-cyan-400 text-sky-950" label="Saldo" value={formatRupiah(stats.balance)} className="w-[190px]" />
+          <Stat icon={Wallet} tone="bg-cyan-400 text-sky-950" label="Saldo" value={formatRupiah(stats.balance)} hint={stats.ticketHint || undefined} className="w-[220px]" />
           <Stat icon={BadgeAlert} tone="bg-yellow-300 text-amber-950" label="OS" value={formatRupiah(stats.outstanding)} className="w-[190px]" />
           <Stat icon={Receipt} tone="bg-lime-400 text-green-950" label="Trx Hari Ini" value={`${stats.todayCount} · ${formatRupiah(stats.todayAmount)}`} className="w-[190px]" />
           <Stat icon={Store} tone="bg-sky-950 text-white" label="Loket" value={identity} hint={profile.username || deskName} wrap className="min-w-[300px] max-w-[380px]" />
         </div>
       )}
-      <div className="h-7 overflow-hidden bg-orange-500 text-sm font-black text-white">
-        <div className={cn("flex h-full items-center whitespace-nowrap px-4", stats.runText && "animate-ticker")}>
-          {stats.runText || "Tidak ada pengumuman saat ini."}
+      {stats.runText && (
+        <div className="h-7 overflow-hidden bg-orange-500 text-sm font-black text-white">
+          <div className="animate-ticker flex h-full items-center whitespace-nowrap px-4">
+            {stats.runText}
+          </div>
         </div>
-      </div>
+      )}
     </header>
   );
 }

@@ -47,10 +47,13 @@ export function TransactionsPage({ riwayat = false }: { riwayat?: boolean }) {
   const directory = profilesWithSelf(profiles, profile);
 
   const filtered = useMemo(() => {
-    const seen = new Set(transactions.map((row) => row.id));
-    const merged = [...transactions, ...networkSales.filter((row) => !seen.has(row.id))];
-    return merged.filter((t) => {
-      if (role !== "loket" && !drill.loketIds.includes(t.user_id)) return false;
+    const seen = new Set(networkSales.map((row) => row.id));
+    const archive = role === "superadmin"
+      ? [...networkSales, ...transactions.filter((row) => !seen.has(row.id))]
+      : networkSales;
+    const narrowed = drill.canBack;
+    return archive.filter((t) => {
+      if (narrowed && !drill.loketIds.includes(t.user_id)) return false;
       if (statusFilter !== "semua" && t.status !== statusFilter) return false;
       if (catFilter !== "semua" && t.category_slug_snapshot !== catFilter) return false;
       const day = t.created_at.slice(0, 10);
@@ -75,7 +78,7 @@ export function TransactionsPage({ riwayat = false }: { riwayat?: boolean }) {
       }
       return true;
     });
-  }, [transactions, networkSales, statusFilter, catFilter, search, directory, from, to, mitraId, loketId, operatorId, product, drill.loketIds, role]);
+  }, [transactions, networkSales, statusFilter, catFilter, search, directory, from, to, mitraId, loketId, operatorId, product, drill.loketIds, drill.canBack, role]);
 
   const totalBerhasil = filtered.filter((t) => t.status === "success").reduce((s, t) => s + Number(t.amount), 0);
   const totalGagal = filtered.filter((t) => t.status === "failed").length;
@@ -230,10 +233,10 @@ export function TransactionsPage({ riwayat = false }: { riwayat?: boolean }) {
         </div>
       </Card>
 
-      {role === "loket" || !drill.showNodes ? <Card>
-        <CardHeader title={riwayat ? "Riwayat Lengkap" : "Daftar Transaksi"} subtitle={loading ? "Memuat..." : `${filtered.length} transaksi`} />
-        <Table columns={columns} data={filtered} rowKey={(t) => t.id} empty={loading ? "Memuat data..." : "Belum ada transaksi."} />
-      </Card> : null}
+      <Card>
+        <CardHeader title={riwayat ? "Riwayat Lengkap" : "Daftar Transaksi"} subtitle={loading && networkSales.length === 0 ? "Memuat..." : `${filtered.length} transaksi arsip server`} />
+        <Table columns={columns} data={filtered} rowKey={(t) => t.id} empty={loading && networkSales.length === 0 ? "Memuat data..." : "Belum ada transaksi."} />
+      </Card>
     </PageContainer>
   );
 }

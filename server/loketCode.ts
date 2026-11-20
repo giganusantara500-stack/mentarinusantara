@@ -37,11 +37,14 @@ export function makeLoketCode(taken: Set<string>) {
 }
 
 export function makeTransferCode(used: Set<string>) {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const code = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
-    if (code !== "000" && !used.has(code)) return code;
+  const start = Math.floor(Math.random() * 999);
+  for (let step = 0; step < 999; step += 1) {
+    const code = String(((start + step) % 999) + 1).padStart(3, "0");
+    if (!used.has(code)) return code;
   }
-  return String((Date.now() % 999) + 1).padStart(3, "0");
+  let cursor = 1;
+  while (used.has(String(cursor).padStart(3, "0")) && cursor < 1000) cursor += 1;
+  return String(cursor === 1000 ? 1 : cursor).padStart(3, "0");
 }
 
 export async function listAuthUsers(env: Env): Promise<AuthUser[]> {

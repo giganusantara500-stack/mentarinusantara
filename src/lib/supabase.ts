@@ -28,6 +28,7 @@ export interface Profile {
   city: string | null;
   role: AppRole;
   parent_id: string | null;
+  mitra_id?: string | null;
   status: "pending" | "active" | "suspended";
   must_change_password: boolean;
   loket_type: string | null;

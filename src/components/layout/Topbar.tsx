@@ -29,7 +29,8 @@ export function Topbar({ current }: Props) {
       if (!user) { setMfaActive(false); return; }
       const { data } = await supabase.auth.mfa.listFactors();
       const verified = (data?.totp ?? []).some((f) => f.status === "verified");
-      setMfaActive(verified);
+      const metadata = user?.user_metadata;
+      setMfaActive(verified || metadata?.mfa_enabled === true || metadata?.mfa_status === true || metadata?.mfa_status === "active");
     })();
     const session = supabase.auth.getSession();
     session.then(async ({ data }) => {

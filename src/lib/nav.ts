@@ -15,6 +15,7 @@ import {
   ScrollText,
   Ban,
   BadgeAlert,
+  ShieldCheck,
   QrCode,
   History,
   Percent,
@@ -45,7 +46,8 @@ function managementNav(role: Role): NavSection[] {
     { path: "/qris", label: "Laporan QRIS", icon: QrCode },
   ];
   const monitoring: NavItem[] = [
-    { path: "/setoran", label: "Manage Setoran", icon: Landmark },
+    ...(role === "mitra" || role === "submitra" || role === "superadmin" ? [{ path: "/deposit", label: "Tiket Deposit", icon: Landmark }] : []),
+    { path: "/setoran", label: role === "mitra" ? "Distribusi Saldo" : role === "superadmin" ? "Persetujuan Deposit" : "Pantauan Setoran", icon: role === "mitra" ? Share2 : Landmark },
     { path: "/saldo", label: "Saldo Mitra/Loket", icon: Wallet },
     { path: "/outstanding", label: "Monitoring OS", icon: BadgeAlert },
   ];
@@ -64,6 +66,7 @@ function managementNav(role: Role): NavSection[] {
       { path: "/pembagian", label: "Share Fee", icon: Share2 },
     );
   }
+  if (role === "superadmin" || role === "mitra") admin.push({ path: "/keamanan", label: "Keamanan (2FA)", icon: ShieldCheck });
   admin.push({ path: "/pengaturan", label: "Pengaturan", icon: Settings });
   return [
     { category: "Dashboard", icon: LayoutDashboard, items: [dashboard] },

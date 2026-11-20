@@ -57,6 +57,37 @@ interface CreatedAccount {
   emailError: string | null;
   tempPassword: string | null;
   loketCode: string | null;
+  mfaActive: boolean;
+}
+
+function plainResetEmailError(value: unknown) {
+  let text = typeof value === "string" ? value.trim() : "";
+  if (/<!doctype|<html/i.test(text)) text = "Layanan email menolak pengiriman.";
+  if (/\.env|belum ada di file/i.test(text)) text = "Pengiriman email ditolak oleh layanan email Supabase.";
+  return text || "Email belum terkirim. Fungsi tidak memberi alasan.";
+}
+
+async function invokePayload(data: unknown, error: unknown) {
+  if (data && typeof data === "object") return data as Record<string, unknown>;
+  const context = (error as { context?: Response })?.context;
+  if (context && typeof context.json === "function") {
+    try {
+      const body = await context.json();
+      if (body && typeof body === "object") return body as Record<string, unknown>;
+    } catch {
+      // respons bukan JSON
+    }
+  }
+  return null;
+}
+
+function readableApiError(status: number, data: { error?: string; message?: string; msg?: string } | null, raw: string) {
+  const text = data?.error || data?.message || data?.msg || "";
+  if (!data || /<!doctype|<html/i.test(raw) || /<!doctype|<html/i.test(text)) {
+    if (status === 404) return "Layanan belum dikonfigurasi. Username dan password tidak dapat dibuat saat ini.";
+    return "Server tidak mengembalikan data akun. Coba lagi.";
+  }
+  return text || `HTTP ${status}`;
 }
 
 function emptyAddForm(parentId: string) {
@@ -88,19 +119,6 @@ function emptyEditForm() {
     status: "active" as Profile["status"],
     loketType: "",
   };
-}
-
-async function readFunctionError(err: unknown): Promise<string> {
-  const context = (err as { context?: Response })?.context;
-  if (context && typeof context.json === "function") {
-    try {
-      const body = await context.json();
-      if (body?.error) return String(body.error);
-    } catch {
-      // body bukan JSON, gunakan pesan umum di bawah
-    }
-  }
-  return err instanceof Error ? err.message : "Permintaan gagal. Coba lagi.";
 }
 
 export function ManageUsersPage({ targetRole, onNavigate }: Props) {
@@ -189,9 +207,11 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
   const visibleTargets = useMemo(() => {
     return profiles.filter((p) => {
       const role = (p.role as string) === "sub_mitra" ? "submitra" : p.role;
-      return role === targetRoleDb;
+      if (role !== targetRoleDb) return false;
+      if (!profile || myRole === "superadmin") return true;
+      return p.parent_id === profile.id || p.created_by === profile.id || p.mitra_id === profile.id || profiles.some((parent) => parent.id === p.parent_id && (parent.parent_id === profile.id || parent.created_by === profile.id || parent.id === profile.id));
     });
-  }, [profiles, targetRoleDb]);
+  }, [profiles, targetRoleDb, profile, myRole]);
 
   const filtered = useMemo(() => {
     return visibleTargets.filter((p) => {
@@ -294,9 +314,10 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
     if (!af.fullName.trim()) { setError("Nama wajib diisi."); return; }
     if (!af.phone.trim()) { setError("Nomor HP wajib diisi."); return; }
     if (!af.city.trim()) { setError("Kota atau wilayah wajib diisi."); return; }
+    if (!af.email.trim()) { setError("Email wajib diisi."); return; }
     if (targetRole !== "loket") {
-      const required = [af.email, af.businessName, af.address];
-      if (required.some((v) => !v.trim())) { setError("Email, nama usaha, dan alamat wajib diisi."); return; }
+      const required = [af.businessName, af.address];
+      if (required.some((v) => !v.trim())) { setError("Nama usaha dan alamat wajib diisi."); return; }
     }
     if (!parentId) { setError("Atasan langsung belum ditentukan."); return; }
 
@@ -305,25 +326,40 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
     if (!token) { setError("Sesi tidak valid. Silakan login ulang."); setBusy(false); return; }
-    const response = await fetch("/api/create-account", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        role: targetRole === "submitra" ? "sub_mitra" : targetRoleDb,
-        fullName: af.fullName,
-        email: af.email,
-        phone: af.phone,
-        businessName: af.businessName,
-        address: af.address,
-        city: af.city,
-        status: af.status,
-        parentId,
-        loketType: targetRole === "loket" ? af.loketType : undefined,
-      }),
-    });
-    const data = await response.json().catch(() => null);
+    let response: Response;
+    let raw = "";
+    try {
+      response = await fetch("/api/create-account", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          role: targetRole === "submitra" ? "sub_mitra" : targetRoleDb,
+          fullName: af.fullName,
+          email: af.email,
+          phone: af.phone,
+          businessName: af.businessName,
+          address: af.address,
+          city: af.city,
+          status: af.status,
+          parentId,
+          loketType: targetRole === "loket" ? af.loketType : undefined,
+        }),
+      });
+      raw = await response.text();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Koneksi ke server gagal.";
+      console.error("Tambah akun gagal:", error);
+      window.alert(message);
+      setError(message);
+      setBusy(false);
+      return;
+    }
+    const data = raw ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : null;
     if (!response.ok || !data?.success || !data?.user_id) {
-      setError(data?.error || "Akun belum tersimpan. Coba lagi.");
+      const detail = readableApiError(response.status, data, raw);
+      console.error("Supabase/API tambah akun gagal:", { status: response.status, body: data ?? raw });
+      window.alert(detail);
+      setError(detail);
       setBusy(false);
       return;
     }
@@ -334,9 +370,12 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
       email: af.email.trim().toLowerCase(),
       userId: data.user_id,
       emailSent: !!data.email_sent,
-      emailError: data.email_error ?? null,
+      emailError: data.email_error && /<!doctype|<html/i.test(String(data.email_error))
+        ? "Layanan email belum dikonfigurasi. Username dan password sementara tetap tersedia di layar."
+        : data.email_error ?? null,
       tempPassword: data.temp_password ?? null,
       loketCode: data.loket_code ?? null,
+      mfaActive: targetRole === "mitra" || targetRole === "submitra",
     });
     setAf(emptyAddForm(profile.id));
     setShowAdd(false);
@@ -424,29 +463,31 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
 
   const doResetPassword = async () => {
     if (!confirmReset) return;
+    const email = confirmReset.email.trim().toLowerCase();
     setBusy(true);
-    const session = await supabase.auth.getSession();
-    const response = await fetch("/api/reset-password", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.data.session?.access_token ?? ""}`,
-      },
-      body: JSON.stringify({ userId: confirmReset.id }),
+    const { data, error } = await supabase.functions.invoke("reset-password-temp", {
+      body: { email, user_id: confirmReset.id },
     });
-    const data = await response.json().catch(() => null);
+    const payload = await invokePayload(data, error);
     setBusy(false);
-    if (!response.ok) {
-      alert(data?.error || "Password gagal diperbarui.");
+    const tempPassword = typeof payload?.temp_password === "string" ? payload.temp_password : "";
+    if (!tempPassword) {
+      const detail = payload?.error
+        ? plainResetEmailError(payload.error)
+        : "Reset password gagal. Fungsi tidak mengembalikan password sementara.";
+      console.error("Reset password gagal:", payload ?? error);
+      alert(detail);
       return;
     }
+    const sentTo = typeof payload?.email === "string" && payload.email.includes("@") ? payload.email : email;
+    const emailSent = payload?.email_sent === true;
     setConfirmReset(null);
     setResetResult({
-      name: confirmReset.full_name || confirmReset.email,
-      email: confirmReset.email,
-      tempPassword: data?.temp_password ?? null,
-      emailSent: !!data?.email_sent,
-      emailError: data?.email_error ?? null,
+      name: confirmReset.full_name || sentTo,
+      email: sentTo,
+      tempPassword,
+      emailSent,
+      emailError: emailSent ? null : plainResetEmailError(payload?.email_error || payload?.message),
     });
   };
 
@@ -831,6 +872,7 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
             <>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Nama Loket"><Input value={addForm[0].fullName} onChange={(e) => addForm[1]({ ...addForm[0], fullName: e.target.value })} placeholder="cth: Loket Maju Jaya" /></Field>
+                <Field label="Email"><Input type="email" value={addForm[0].email} onChange={(e) => addForm[1]({ ...addForm[0], email: e.target.value })} placeholder="nama@perusahaan.id" /></Field>
                 <Field label="No HP"><Input type="tel" value={addForm[0].phone} onChange={(e) => addForm[1]({ ...addForm[0], phone: e.target.value })} placeholder="cth: 081234567890" /></Field>
                 <Field label="Kota / Wilayah"><Input value={addForm[0].city} onChange={(e) => addForm[1]({ ...addForm[0], city: e.target.value })} placeholder="cth: Sragen" /></Field>
                 <Field label="Jenis">
@@ -906,20 +948,26 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
               {created.loketCode && <DetailRow label="Kode Loket" value={created.loketCode} />}
               <DetailRow label="Email" value={created.email} />
             </div>
-            {created.tempPassword && (
-              <div className="rounded-xl border-2 border-blue-200 bg-blue-50/50 p-4 space-y-3">
-                <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Kredensial Login</div>
-                <CopyableCredential label="Username" value={created.username} />
-                <CopyableCredential label="Password Sementara" value={created.tempPassword} mono />
-                <p className="text-xs text-slate-500">
-                  Berikan username dan password sementara 6 digit ini kepada pengguna. Password harus diganti saat login pertama.
-                </p>
+            <div className="rounded-xl border-2 border-blue-200 bg-blue-50/50 p-4 space-y-3">
+              <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Kredensial Login</div>
+              <CopyableCredential label="Username" value={created.username || "—"} />
+              <CopyableCredential label="Password Sementara" value={created.tempPassword || "—"} mono />
+              <p className="text-xs text-slate-500">
+                Password sementara berupa 6 digit angka. Berikan username dan password ini kepada pengguna, lalu minta diganti saat login pertama.
+              </p>
+              {created.mfaActive && (
+                <p className="text-xs font-semibold text-emerald-700">Keamanan 2FA: Aktif</p>
+              )}
+            </div>
+            {created.emailSent ? (
+              <div className="flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
+                <span>Email berisi username dan password sementara sudah dikirim ke {created.email}.</span>
               </div>
-            )}
-            {created.tempPassword && (
-              <div className="flex items-start gap-2 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-emerald-600" />
-                <span>Akun sudah tersimpan. Salin username dan password sementara 6 digit sebelum menutup jendela ini.</span>
+            ) : (
+              <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                <AlertCircle size={14} className="mt-0.5 shrink-0" />
+                <span>{created.emailError || "Email belum terkirim. Salin password sementara di atas."}</span>
               </div>
             )}
           </div>
@@ -1019,8 +1067,8 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
       <ConfirmDialog
         open={!!confirmReset}
         title="Reset Password"
-        message={`Reset password "${confirmReset?.full_name || confirmReset?.email}"? Password baru 6 digit dikirim dari Giga Mentari Nusantara ke email terdaftar.`}
-        confirmLabel="Kirim Email"
+        message={`Reset password "${confirmReset?.full_name || confirmReset?.username || confirmReset?.email}"? Password sementara 6 digit akan tampil di layar ini. Email tetap dikirim jika alamatnya bisa menerima pesan.`}
+        confirmLabel="Reset Password"
         variant="warning"
         onConfirm={doResetPassword}
         onClose={() => setConfirmReset(null)}
@@ -1031,36 +1079,25 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
       <Modal
         open={!!resetResult}
         onClose={() => setResetResult(null)}
-        title="Reset Password Berhasil"
+        title="Password Sementara"
         subtitle={resetResult?.name}
+        size="lg"
         footer={<Button variant="outline" onClick={() => setResetResult(null)}>Tutup</Button>}
       >
         {resetResult && (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 text-sm">
-              <DetailRow label="Nama" value={resetResult.name} />
-              <DetailRow label="Email" value={resetResult.email} />
-            </div>
-            {resetResult.tempPassword && (
-              <div className="rounded-xl border-2 border-blue-200 bg-blue-50/50 p-4 space-y-3">
-                <div className="text-xs font-semibold text-blue-700 uppercase tracking-wider">Password Sementara</div>
-                <CopyableCredential label="Kode Sandi" value={resetResult.tempPassword} mono />
-                <p className="text-xs text-slate-500">
-                  Berikan kode sandi ini kepada pengguna. Password harus diganti saat login pertama.
-                </p>
-              </div>
-            )}
+          <div className="space-y-5">
+            <LargeCopyField label="Email terdaftar" value={resetResult.email} />
+            <LargeCopyField label="Password sementara 6 digit" value={resetResult.tempPassword || ""} emphasis />
+            <p className="text-base leading-relaxed text-slate-600">Simpan password ini untuk petugas yang tidak membuka email. Minta diganti setelah berhasil login.</p>
             {resetResult.emailSent ? (
-              <div className="flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
-                <span>Email berisi kode sandi sementara telah dikirim ke pengguna.</span>
+              <div className="flex items-start gap-3 text-base text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                <CheckCircle2 size={22} className="mt-0.5 shrink-0" />
+                <span>Email terkirim ke {resetResult.email}.</span>
               </div>
             ) : (
-              <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <span>
-                  Email belum terkirim{resetResult.emailError ? `: ${resetResult.emailError}` : "."} Password sementara sudah berhasil dibuat dan ditampilkan di atas. Anda dapat menyampaikan kode sandi ini langsung kepada pengguna.
-                </span>
+              <div className="flex items-start gap-3 text-base text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                <AlertCircle size={22} className="mt-0.5 shrink-0" />
+                <span>Email gagal dikirim. {resetResult.emailError || "Fungsi tidak memberi alasan."}</span>
               </div>
             )}
           </div>
@@ -1075,6 +1112,30 @@ function DetailRow({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between px-4 py-2.5">
       <span className="text-slate-500">{label}</span>
       <span className="font-medium text-slate-800">{value}</span>
+    </div>
+  );
+}
+
+function LargeCopyField({ label, value, emphasis }: { label: string; value: string; emphasis?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // salin manual tetap bisa dari teks yang tampil
+    }
+  };
+  return (
+    <div className={`rounded-2xl border-2 p-4 ${emphasis ? "border-blue-700 bg-blue-50" : "border-slate-200 bg-white"}`}>
+      <div className="text-base font-semibold text-slate-600">{label}</div>
+      <div className="mt-2 flex items-center gap-3">
+        <div className={`min-w-0 flex-1 text-slate-900 ${emphasis ? "overflow-x-auto whitespace-nowrap font-mono text-4xl font-black tracking-[0.25em]" : "break-all text-2xl font-bold"}`}>{value}</div>
+        <button type="button" onClick={copy} className="shrink-0 rounded-xl bg-slate-900 px-4 py-3 text-base font-bold text-white">
+          {copied ? "Tersalin" : "Salin"}
+        </button>
+      </div>
     </div>
   );
 }

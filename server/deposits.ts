@@ -1,6 +1,7 @@
 import { DEPOSIT_ACCOUNTS } from "../src/lib/banks";
 import { networkLoketIds, touchActivity } from "./accountAdmin";
-import { cancelOwnTicket, createTicket, decideTicket, listNetworkSales, listTickets, pendingTransferCodes, recordLoketSale, walletBalance, type DepositTicket } from "./ledger";
+import { requestedMode, runBillerPayment } from "./biller";
+import { cancelOwnTicket, claimTicket, createTicket, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, PUSAT_ACCOUNT, walletBalance, type DepositTicket } from "./ledger";
 import { ensureLoketCode, listAuthUsers, loketCodeFor, makeTransferCode } from "./loketCode";
 
 interface Env {
@@ -17,6 +18,15 @@ interface Caller {
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function canonRole(value: unknown) {
+  const stored = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (stored === "super_admin" || stored === "superadmin") return "super_admin";
+  if (stored === "mitra") return "mitra";
+  if (stored === "submitra" || stored === "sub_mitra") return "submitra";
+  if (stored === "loket" || stored === "role_loket") return "loket";
+  return "";
 }
 
 async function readJson(response: Response) {
@@ -46,16 +56,8 @@ export async function loadCaller(authorization: string, env: Env): Promise<Calle
   const profile = Array.isArray(rows) ? rows[0] : null;
   if (!profile || profile.is_active === false) return null;
   const meta = (callerAuth?.user_metadata ?? {}) as Record<string, unknown>;
-  const canon = (value: unknown) => {
-    const stored = String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-    if (stored === "super_admin" || stored === "superadmin") return "super_admin";
-    if (stored === "mitra") return "mitra";
-    if (stored === "submitra" || stored === "sub_mitra") return "submitra";
-    if (stored === "loket" || stored === "role_loket") return "loket";
-    return "";
-  };
   const loketCode = typeof meta.loket_code === "string" && /^\d{7}$/.test(meta.loket_code);
-  const role = canon(profile.role) || canon(meta.role) || (loketCode || meta.loket_type ? "loket" : "");
+  const role = canonRole(profile.role) || canonRole(meta.role) || (loketCode || meta.loket_type ? "loket" : "");
   if (!role) return null;
   return { id: callerId, role, username: profile.username ?? null };
 }
@@ -64,23 +66,37 @@ function accountFor(bank: string) {
   return DEPOSIT_ACCOUNTS.find((account) => account.bank === bank);
 }
 
+async function profileRow(env: Env, id: string) {
+  if (!id) return null;
+  const response = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${id}&select=id,role,parent_id,mitra_id,created_by`, {
+    headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
+  });
+  const rows = await readJson(response);
+  return Array.isArray(rows) ? rows[0] as { role?: string; parent_id?: string | null; mitra_id?: string | null; created_by?: string | null } : null;
+}
+
 export async function handleDepositRequest(method: string, pathname: string, body: Record<string, unknown>, caller: Caller, env: Env, authorization = "") {
   if (pathname === "/api/deposits" && method === "GET") {
-    const scope = caller.role === "loket" || caller.role === "super_admin" ? null : await networkLoketIds(authorization, env);
     const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
-    return { status: 200, body: { tickets: listTickets(caller.id, caller.role, scope), accounts: DEPOSIT_ACCOUNTS, balance: walletBalance(caller.id), loketCode } };
+    const [tickets, mutations, balance] = await Promise.all([
+      listTickets(env, caller.id),
+      listMutations(env, caller.id),
+      walletBalance(env, caller.id),
+    ]);
+    return { status: 200, body: { tickets, mutations, accounts: DEPOSIT_ACCOUNTS, balance, loketCode } };
   }
 
   if (pathname === "/api/loket-sales" && method === "GET") {
-    if (caller.role === "loket") {
-      const loketCode = await loketCodeFor(env, caller.id).catch(() => "");
-      return { status: 200, body: { sales: listNetworkSales([caller.id]), balance: walletBalance(caller.id), loketCode } };
-    }
-    if (!["super_admin", "mitra", "submitra"].includes(caller.role)) {
+    if (!["loket", "super_admin", "mitra", "submitra"].includes(caller.role)) {
       return { status: 403, body: { error: "Anda tidak dapat melihat transaksi loket." } };
     }
-    const scope = caller.role === "super_admin" ? null : await networkLoketIds(authorization, env);
-    return { status: 200, body: { sales: listNetworkSales(scope), balance: walletBalance(caller.id) } };
+    const [sales, simulations, balance] = await Promise.all([
+      listNetworkSales(env, caller.id),
+      listSimulations(env, caller.id),
+      walletBalance(env, caller.id),
+    ]);
+    const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
+    return { status: 200, body: { sales, simulations, balance, loketCode } };
   }
 
   if (pathname === "/api/loket-sales" && method === "POST") {
@@ -89,14 +105,16 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     const category = clean(body.category);
     const product = clean(body.product);
     const customerNumber = clean(body.customerNumber);
+    const clientRef = clean(body.clientRef);
+    if (!clientRef) return { status: 400, body: { error: "Transaksi tidak memiliki kunci unik." } };
     if (!category || !product || !customerNumber) return { status: 400, body: { error: "Kategori, produk, dan nomor pelanggan wajib diisi." } };
     if (!Number.isFinite(amount) || amount < 1000) return { status: 400, body: { error: "Nominal pembayaran minimal Rp1.000." } };
+    const mode = requestedMode(body.channel);
     const loketCode = await ensureLoketCode(env, caller.id);
     const users = await listAuthUsers(env);
     const self = users.find((user) => user.id === caller.id);
     const parentId = typeof self?.user_metadata?.parent_id === "string" ? self.user_metadata.parent_id : "";
-    const result = recordLoketSale({
-      loketId: caller.id,
+    const result = await runBillerPayment(env, caller.id, mode, {
       loketCode,
       loketName: clean(body.loketName) || caller.username || "Loket",
       category,
@@ -110,89 +128,119 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       collfee: Number(body.collfee) || 0,
       period: clean(body.period),
       parentId,
+      clientRef,
     });
-    if (result.error || !("sale" in result)) return { status: result.status, body: { error: result.error } };
+    if (result.error || !result.sale) return { status: result.status, body: { error: result.error } };
     await touchActivity(caller.id, env).catch(() => undefined);
-    const headers = { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}`, "Content-Type": "application/json" };
-    await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${caller.id}`, {
-      method: "PUT",
-      headers,
-      body: JSON.stringify({ user_metadata: { ...(self?.user_metadata ?? {}), wallet_balance: result.balance } }),
-    });
-    return { status: 200, body: { sale: result.sale, balance: result.balance } };
+    return { status: 200, body: { sale: result.sale, balance: result.balance, channel: result.sale.channel, statusText: result.sale.status } };
   }
 
   if (pathname === "/api/wallet" && method === "GET") {
     const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
-    return { status: 200, body: { balance: walletBalance(caller.id), loketCode } };
+    const own = await walletBalance(env, caller.id);
+    const mainBalance = caller.role === "super_admin" ? await walletBalance(env, caller.id, PUSAT_ACCOUNT) : own;
+    return { status: 200, body: { balance: caller.role === "super_admin" ? mainBalance : own, mainBalance, loketCode } };
   }
 
   if (pathname === "/api/deposits" && method === "POST") {
-    if (caller.role !== "loket") return { status: 403, body: { error: "Hanya Loket yang dapat membuat tiket deposit." } };
+    if (!["loket", "mitra", "submitra"].includes(caller.role)) return { status: 403, body: { error: "Hanya Mitra, Sub Mitra, atau Loket yang dapat membuat tiket deposit." } };
     const amount = Number(body.amount);
-    const bank = clean(body.bank);
-    const account = accountFor(bank);
+    const requested = "pusat";
+    if (clean(body.route) === "jaringan") return { status: 400, body: { error: "Setoran deposit hanya ke rekening pusat. Saldo loket diisi langsung oleh Mitra." } };
     if (!Number.isFinite(amount) || amount < 10000) return { status: 400, body: { error: "Nominal deposit minimal Rp10.000." } };
+    const open = (await listTickets(env, caller.id)).find((ticket) => ticket.loketId === caller.id && ticket.status === "pending" && (ticket.route === "jaringan" ? "jaringan" : "pusat") === requested);
+    if (open) return { status: 409, body: { error: "Masih ada tiket pada jalur yang sama yang menunggu keputusan." } };
+    const users = await listAuthUsers(env);
+    const self = users.find((user) => user.id === caller.id);
+    const meta = (self?.user_metadata ?? {}) as Record<string, unknown>;
+    const selfProfile = await profileRow(env, caller.id);
+    const parentId = (typeof meta.parent_id === "string" && meta.parent_id) || selfProfile?.parent_id || "";
+    const parent = users.find((user) => user.id === parentId);
+    const parentMeta = (parent?.user_metadata ?? {}) as Record<string, unknown>;
+    const parentProfile = await profileRow(env, parentId);
+    const parentRole = canonRole(parentMeta.role) || canonRole(parentProfile?.role);
+    const bank = clean(body.bank);
+    const account = accountFor(bank || DEPOSIT_ACCOUNTS[0].bank);
     if (!account) return { status: 400, body: { error: "Pilih rekening tujuan." } };
     const createdAt = new Date();
+    const uniqueCode = makeTransferCode(new Set((await listTickets(env, caller.id)).filter((ticket) => ticket.status === "pending" && ticket.uniqueCode).map((ticket) => ticket.uniqueCode as string)));
+    const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
+    const baseAmount = Math.round(amount);
     const ticket: DepositTicket = {
-      id: crypto.randomUUID(),
+      id: globalThis.crypto?.randomUUID?.() ?? `${createdAt.getTime()}-${uniqueCode}`,
       loketId: caller.id,
-      loketName: caller.username || "Loket",
-      amount: Math.round(amount),
+      loketName: clean(meta.full_name) || caller.username || (caller.role === "loket" ? "Loket" : "Mitra"),
+      loketCode,
+      amount: baseAmount,
+      baseAmount,
+      uniqueCode,
+      transferAmount: baseAmount + Number(uniqueCode),
       bank: account.bank,
       accountNumber: account.accountNumber,
       accountHolder: account.holder,
       transferAt: createdAt.toISOString(),
       expiresAt: new Date(createdAt.getTime() + 6 * 60 * 60 * 1000).toISOString(),
       status: "pending",
+      route: requested,
+      approverId: null,
+      applicantRole: caller.role,
+      uplineName: parentId ? (clean(parentMeta.full_name) || clean(parentMeta.username) || "Upline") : "Pusat",
+      uplineRole: parentRole || "super_admin",
       createdAt: createdAt.toISOString(),
       decidedAt: null,
     };
-    const uniqueCode = makeTransferCode(pendingTransferCodes());
-    const loketCode = await loketCodeFor(env, caller.id).catch(() => "");
-    ticket.loketCode = loketCode;
-    ticket.baseAmount = ticket.amount;
-    ticket.uniqueCode = uniqueCode;
-    ticket.transferAmount = ticket.amount + Number(uniqueCode);
     try {
-      const created = createTicket(ticket);
+      const created = await createTicket(env, caller.id, ticket);
+      if (created.error || !created.ticket) return { status: created.status, body: { error: created.error } };
       await touchActivity(caller.id, env).catch(() => undefined);
-      return { status: 200, body: { ticket: created } };
+      return { status: 200, body: { ticket: created.ticket } };
     } catch {
       return { status: 500, body: { error: "Tiket gagal disimpan." } };
     }
   }
 
+  if (pathname === "/api/distribute" && method === "POST") {
+    if (caller.role !== "mitra") return { status: 403, body: { error: "Hanya Mitra yang dapat mendistribusikan saldo ke loketnya." } };
+    const loketId = clean(body.loketId);
+    const amount = Number(body.amount);
+    const scope = await networkLoketIds(authorization, env);
+    if (!loketId || !scope?.includes(loketId)) return { status: 403, body: { error: "Loket ini tidak berada di jaringan Anda." } };
+    const target = await profileRow(env, loketId);
+    if (canonRole(target?.role) !== "loket") return { status: 403, body: { error: "Saldo hanya dapat dikirim ke loket di jaringan Anda." } };
+    const owns = target?.created_by === caller.id || target?.parent_id === caller.id || target?.mitra_id === caller.id;
+    if (target?.mitra_id && target.mitra_id !== caller.id && !owns) return { status: 403, body: { error: "Loket ini milik mitra lain." } };
+    if (!owns && target?.created_by && target.created_by !== caller.id && target?.parent_id && target.parent_id !== caller.id) {
+      return { status: 403, body: { error: "Saldo hanya dapat dikirim ke loket buatan jaringan Anda." } };
+    }
+    const users = await listAuthUsers(env);
+    const loketUser = users.find((user) => user.id === loketId);
+    const loketName = clean(loketUser?.user_metadata?.full_name) || clean(loketUser?.user_metadata?.username) || "Loket";
+    const result = await distributeBalance(env, caller.id, loketId, amount, loketName);
+    if (result.error || result.fromBalance === undefined || result.toBalance === undefined) return { status: result.status, body: { error: result.error } };
+    return { status: 200, body: { id: result.id, balance: result.fromBalance, loketBalance: result.toBalance } };
+  }
+
+  if (pathname === "/api/deposits/claim" && method === "POST") {
+    const result = await claimTicket(env, caller.id, clean(body.id));
+    if (result.error || !result.ticket) return { status: result.status, body: { error: result.error } };
+    return { status: 200, body: { ticket: result.ticket } };
+  }
+
   if (pathname === "/api/deposits/cancel" && method === "POST") {
-    if (caller.role !== "loket") return { status: 403, body: { error: "Hanya Loket yang dapat membatalkan tiketnya sendiri." } };
-    const result = cancelOwnTicket(clean(body.id), caller.id);
+    if (!["loket", "mitra", "submitra"].includes(caller.role)) return { status: 403, body: { error: "Hanya pemohon yang dapat membatalkan tiketnya sendiri." } };
+    const result = await cancelOwnTicket(env, caller.id, clean(body.id));
     if (result.error || !result.ticket) return { status: result.status, body: { error: result.error } };
     return { status: 200, body: { ticket: result.ticket } };
   }
 
   if (pathname === "/api/deposits/decide" && method === "POST") {
-    if (caller.role !== "super_admin") return { status: 403, body: { error: "Hanya Super Admin yang dapat memutuskan tiket deposit." } };
+    if (caller.role !== "super_admin") return { status: 403, body: { error: "Hanya Super Admin yang dapat menyetujui tiket deposit ke rekening pusat." } };
     const action = body.action === "approve" || body.action === "cancel" || body.action === "pending" || body.action === "void"
       ? body.action
       : "";
     if (!action) return { status: 400, body: { error: "Aksi tidak valid." } };
-    const result = decideTicket(clean(body.id), action, caller.id);
+    const result = await decideTicket(env, caller.id, clean(body.id), action);
     if (result.error || !result.ticket) return { status: result.status, body: { error: result.error } };
-    const syncWallet = async (userId: string, balance: number) => {
-      const headers = { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}`, "Content-Type": "application/json" };
-      const current = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, { headers });
-      const user = await current.json();
-      await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, {
-        method: "PUT",
-        headers,
-        body: JSON.stringify({ user_metadata: { ...(user.user_metadata ?? {}), wallet_balance: balance } }),
-      });
-    };
-    if (action === "approve" || action === "void" || action === "pending") {
-      await syncWallet(result.ticket.loketId, result.balance ?? 0);
-      if (result.funderId) await syncWallet(result.funderId, result.poolBalance ?? 0);
-    }
     return { status: 200, body: { ticket: result.ticket, balance: result.balance } };
   }
 

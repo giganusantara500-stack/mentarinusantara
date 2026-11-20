@@ -26,6 +26,28 @@ export function belongsToNetwork(userId: string, ancestorId: string, profiles: P
   return ancestorChain(userId, profiles).some((profile) => profile.id === ancestorId);
 }
 
+function roleName(role: string) {
+  return role === "sub_mitra" ? "submitra" : role;
+}
+
+export function accountInNetwork(caller: Profile, row: Profile, profiles: Profile[]) {
+  if (row.id === caller.id) return true;
+  const callerRole = roleName(caller.role);
+  if (callerRole === "super_admin") return true;
+  if (callerRole === "mitra") {
+    if (row.parent_id === caller.id || row.created_by === caller.id || row.mitra_id === caller.id) return true;
+    if (!row.parent_id) return false;
+    const parent = profiles.find((item) => item.id === row.parent_id);
+    return !!parent && (parent.parent_id === caller.id || parent.created_by === caller.id || parent.mitra_id === caller.id || parent.id === caller.id);
+  }
+  if (callerRole === "submitra") return row.parent_id === caller.id || row.created_by === caller.id;
+  return false;
+}
+
+export function networkAccountIds(caller: Profile, profiles: Profile[]) {
+  return profiles.filter((row) => accountInNetwork(caller, row, profiles)).map((row) => row.id);
+}
+
 export function networkOwners(userId: string, profiles: Profile[]) {
   const chain = ancestorChain(userId, profiles);
   const roleOf = (profile: Profile) => {

@@ -351,7 +351,7 @@ export function LoketKolektifPage() {
         const response = await fetch("/api/loket-sales", {
           method: "POST",
           headers: await authHeader(),
-          body: JSON.stringify({ category: "Kolektif", product: `${row.product || "Kolektif"} ${active.name}`, customerNumber: row.number, customerName: row.name, amount: row.total, period: row.period, loketName }),
+          body: JSON.stringify({ channel: "simulation", clientRef: `kolektif:${active.id}:${row.number}:${row.period}`, category: "Kolektif", product: `${row.product || "Kolektif"} ${active.name}`, customerNumber: row.number, customerName: row.name, amount: row.total, period: row.period, loketName }),
         });
         const parsed = await readApi(response);
         if (!parsed.ok) { stopped = parsed.body.error || "Batch berhenti."; break; }
@@ -417,8 +417,8 @@ export function LoketKolektifPage() {
     let stop = false;
     (async () => {
       const response = await fetch("/api/loket-sales", { headers: await authHeader() });
-      const body = response.ok ? await response.json() : { sales: [] };
-      if (!stop) setHistorySales(body.sales ?? []);
+      const body = response.ok ? await response.json() : { sales: [], simulations: [] };
+      if (!stop) setHistorySales([...(body.simulations ?? []), ...(body.sales ?? [])]);
     })();
     return () => { stop = true; };
   }, [historyOpen, tick]);
@@ -462,8 +462,8 @@ export function LoketKolektifPage() {
   const statusText = (status: GroupBill["status"]) => status === "BL LNS" ? "BL LUNAS" : status === "LAINNYA" ? "Perlu Diperiksa" : "LUNAS";
 
   return (
-    <div className="grid w-full min-w-0 gap-3 lg:grid-cols-[240px_minmax(0,1fr)]">
-      <aside className="flex min-h-[560px] max-h-[calc(100vh-11rem)] flex-col rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+    <div className="grid w-full min-w-0 gap-2 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <aside className="flex min-h-[520px] max-h-[calc(100vh-9.5rem)] flex-col rounded-md border border-slate-300 bg-white p-2">
         <div className="mb-2 text-xs font-bold uppercase text-slate-500">Kolektor</div>
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
           {groups.length === 0 && <p className="text-xs text-slate-400">Belum ada kolektor.</p>}
@@ -690,34 +690,38 @@ export function LoketTransferPage() {
   const [amount, setAmount] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [sending, setSending] = useState(false);
 
   const send = async () => {
+    if (sending) return;
+    setSending(true);
     const response = await fetch("/api/loket-sales", {
       method: "POST",
       headers: await authHeader(),
-      body: JSON.stringify({ category: "Transfer", product: `Transfer ${bank}`, customerNumber: account, customerName: holder || bank, amount: Number(amount) }),
+      body: JSON.stringify({ channel: "simulation", clientRef: `transfer:${crypto.randomUUID()}`, category: "Transfer", product: `Transfer ${bank}`, customerNumber: account, customerName: holder || bank, amount: Number(amount) }),
     });
     const body = await response.json();
-    if (!response.ok) { setError(body.error || "Transfer gagal."); setMessage(""); return; }
+    if (!response.ok) { setError(body.error || "Transfer gagal."); setMessage(""); setSending(false); return; }
     setError("");
-    setMessage(`Transfer ${bank} tercatat. Saldo ${formatRupiah(Number(body.balance))}.`);
+    setMessage(`Simulasi transfer ${bank} tercatat. Status: Simulasi. Saldo produksi ${formatRupiah(Number(body.balance))} tidak berubah.`);
     requestRefresh();
+    setSending(false);
   };
 
   return (
-    <section className="rounded-2xl bg-white p-4 shadow-sm space-y-3">
-      <h1 className="font-semibold">Transfer Uang</h1>
+    <section className="space-y-2 rounded-md border border-slate-300 bg-white p-3">
+      <h1 className="text-lg font-black">Transfer Uang</h1>
       <div className="flex flex-wrap gap-2">
         {BANKS.map((item) => (
           <button key={item} onClick={() => setBank(item)} className={`rounded-full px-3 py-1.5 text-sm font-semibold ${bank === item ? "bg-sky-700 text-white" : "bg-slate-100"}`}>{item}</button>
         ))}
       </div>
       <div className="max-w-xl space-y-3">
-        <Field label="Nomor rekening tujuan"><Input className="h-10" value={account} onChange={(event) => setAccount(event.target.value)} /></Field>
-        <Field label="Nama pemilik"><Input className="h-10" value={holder} onChange={(event) => setHolder(event.target.value)} /></Field>
-        <Field label="Nominal"><Input className="h-10" inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value.replace(/\D/g, ""))} /></Field>
+        <Field label="Nomor rekening tujuan"><Input className="h-9 text-base font-black" value={account} onChange={(event) => setAccount(event.target.value)} /></Field>
+        <Field label="Nama pemilik"><Input className="h-9 font-black" value={holder} onChange={(event) => setHolder(event.target.value)} /></Field>
+        <Field label="Nominal"><Input className="h-9 text-base font-black" inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value.replace(/\D/g, ""))} /></Field>
       </div>
-      <Button onClick={send} disabled={account.trim().length < 6 || Number(amount) < 10000}>Kirim Transfer</Button>
+      <Button onClick={send} disabled={sending || account.trim().length < 6 || Number(amount) < 10000}>{sending ? "Mengirim..." : "Kirim Transfer"}</Button>
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {message && <p className="text-sm text-emerald-700">{message}</p>}
     </section>
@@ -728,6 +732,8 @@ function statusLabel(status: string) {
   const key = status.toLowerCase();
   if (key === "success") return "Success";
   if (key === "pending") return "Pending";
+  if (key === "simulated" || key === "simulasi") return "Simulasi";
+  if (key === "refunded" || key === "refund") return "Refund";
   if (key === "gagal" || key === "failed" || key === "cancelled") return "Gagal";
   return status;
 }
@@ -746,11 +752,15 @@ export function LoketStatusPage() {
 
   const load = async () => {
     const response = await fetch("/api/loket-sales", { headers: await authHeader() });
-    const body = response.ok ? await response.json() : { sales: [] };
-    setSales(body.sales ?? []);
+    const body = response.ok ? await response.json() : { sales: [], simulations: [] };
+    setSales([...(body.simulations ?? []), ...(body.sales ?? [])]);
   };
 
-  useEffect(() => { load(); }, [tick]);
+  useEffect(() => {
+    load();
+    const timer = window.setInterval(load, 5000);
+    return () => window.clearInterval(timer);
+  }, [tick]);
 
   const rows = useMemo(() => sales.filter((sale) => {
     const needle = appliedQuery.trim().toLowerCase();
@@ -771,31 +781,41 @@ export function LoketStatusPage() {
     load();
   };
 
+  const billFromSale = (sale: Sale) => ({
+    id: sale.customerNumber,
+    name: sale.customerName,
+    product: sale.product,
+    period: sale.period || formatWaktu(sale.createdAt),
+    tagihan: sale.tagihan ?? Math.max(0, Number(sale.amount) - Number(sale.adminFee ?? 0)),
+    admin: Number(sale.adminFee ?? 0),
+    total: Number(sale.amount),
+  });
+
+  const reprintOne = (sale: Sale) => {
+    printReceipts(loadPrinterSettings(loketCode), [billFromSale(sale)], identityLine(loketCode, profile?.full_name || profile?.username || "Loket"));
+  };
+
   const reprint = () => {
     if (selected.length === 0) return;
-    printReceipts(loadPrinterSettings(loketCode), selected.map((sale) => ({
-      id: sale.customerNumber,
-      name: sale.customerName,
-      product: sale.product,
-      period: formatWaktu(sale.createdAt),
-      tagihan: Math.max(0, Number(sale.amount) - Number(sale.adminFee ?? 0)),
-      admin: Number(sale.adminFee ?? 0),
-      total: Number(sale.amount),
-    })), identityLine(loketCode, profile?.full_name || profile?.username || "Loket"));
+    printReceipts(loadPrinterSettings(loketCode), selected.map(billFromSale), identityLine(loketCode, profile?.full_name || profile?.username || "Loket"));
   };
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-slate-300 bg-white">
       <div className="flex shrink-0 gap-2 border-b border-slate-200 px-4">
         <button onClick={() => setTab("list")} className={`px-3 py-3 text-xs font-bold ${tab === "list" ? "border-b-2 border-amber-500 text-amber-600" : "text-slate-400"}`}>List Transaksi</button>
         <button onClick={() => setTab("manual")} className={`px-3 py-3 text-xs font-bold ${tab === "manual" ? "border-b-2 border-amber-500 text-amber-600" : "text-slate-400"}`}>Cetak Ulang Manual</button>
       </div>
-      <div className="grid h-[76px] shrink-0 grid-cols-[1.4fr_12rem_auto] items-end gap-3 overflow-hidden p-4">
+      <div className="grid h-[68px] shrink-0 grid-cols-[1.4fr_12rem_auto] items-end gap-2 overflow-hidden px-2 py-1.5">
         <Field label="Cari nomor pelanggan"><Input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") search(); }} placeholder="Cari nomor pelanggan" /></Field>
         <Field label="Status">
           <Select value={status} onChange={(event) => setStatus(event.target.value)}>
             <option value="semua">Semua</option>
             <option value="success">Success</option>
+            <option value="simulasi">Simulasi</option>
+            <option value="pending">Pending</option>
+            <option value="gagal">Gagal</option>
+            <option value="refund">Refund</option>
             <option value="pending">Pending</option>
             <option value="gagal">Gagal</option>
           </Select>
@@ -814,7 +834,10 @@ export function LoketStatusPage() {
               return (
                 <tr key={sale.id} className={`border-t border-slate-100 text-slate-700 ${on ? "bg-amber-50" : ""}`}>
                   <td className="px-3 py-2">
-                    <button type="button" onClick={() => setPicked((rows) => rows.includes(sale.id) ? rows.filter((id) => id !== sale.id) : [...rows, sale.id])} className={`rounded-md px-2 py-1 text-[11px] font-bold ${on ? "bg-amber-500 text-white" : "bg-slate-800 text-white"}`}>{on ? "DIPILIH" : "PILIH"}</button>
+                    <div className="flex flex-wrap gap-1">
+                      <button type="button" onClick={() => setPicked((rows) => rows.includes(sale.id) ? rows.filter((id) => id !== sale.id) : [...rows, sale.id])} className={`rounded-md px-2 py-1 text-[11px] font-bold ${on ? "bg-amber-500 text-white" : "bg-slate-800 text-white"}`}>{on ? "DIPILIH" : "PILIH"}</button>
+                      <button type="button" onClick={() => reprintOne(sale)} className="rounded-md bg-sky-700 px-2 py-1 text-[11px] font-bold text-white">Cetak Ulang</button>
+                    </div>
                   </td>
                   <td className="px-3 py-2">{sale.product}</td>
                   <td className="px-3 py-2 font-mono">{sale.customerNumber}</td>
@@ -836,11 +859,11 @@ export function LoketStatusPage() {
           ))}
         </div>
       </div>
-      <div className="flex h-14 shrink-0 items-center justify-between gap-2 bg-slate-800 px-4 text-white">
-        <div className="text-sm text-slate-200">{tab === "manual" ? `${selected.length} transaksi dipilih · Total ${formatRupiah(selectedTotal)}` : `${rows.length} transaksi`}</div>
+      <div className="flex h-12 shrink-0 items-center justify-between gap-2 bg-slate-800 px-3 text-white">
+        <div className="text-base font-black">{tab === "manual" ? `${selected.length} transaksi dipilih · Total ${formatRupiah(selectedTotal)}` : `${rows.length} transaksi`}</div>
         {tab === "manual" ? (
           <button type="button" onClick={reprint} disabled={selected.length === 0} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 disabled:opacity-40">Cetak Ulang ({selected.length})</button>
-        ) : <span className="text-xs text-slate-400">Pilih baris untuk ditandai</span>}
+        ) : <span className="text-xs text-slate-400">Cetak ulang memakai data struk di server</span>}
       </div>
     </section>
   );
@@ -870,7 +893,8 @@ export function LoketReportPage() {
         fetch("/api/loket-sales", { headers }),
         fetch("/api/deposits", { headers }),
       ]);
-      setSales(salesRes.ok ? (await salesRes.json()).sales ?? [] : []);
+      const salesBody = salesRes.ok ? await salesRes.json() : { sales: [], simulations: [] };
+      setSales([...(salesBody.simulations ?? []), ...(salesBody.sales ?? [])]);
       setTickets(depositRes.ok ? (await depositRes.json()).tickets ?? [] : []);
     })();
   }, [tick]);
@@ -907,14 +931,14 @@ export function LoketReportPage() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       <div className="flex gap-2">
         <button onClick={() => { setMenu("rekap"); setPreview(""); }} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${menu === "rekap" ? "bg-sky-700 text-white" : "bg-white"}`}>Rekap / Detil Laporan</button>
         <button onClick={() => { setMenu("setoran"); setPreview(""); }} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${menu === "setoran" ? "bg-sky-700 text-white" : "bg-white"}`}>Pantauan Setoran</button>
       </div>
       {menu === "rekap" && (
-        <section className="space-y-3 rounded-2xl bg-white p-4 shadow-sm">
-          <h1 className="font-semibold">Rekap / Detil Laporan</h1>
+        <section className="space-y-2 rounded-md border border-slate-300 bg-white p-3">
+          <h1 className="text-lg font-black">Rekap / Detil Laporan</h1>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Biller">
               <Select value={biller} onChange={(event) => { setBiller(event.target.value); setProduct("semua"); }}>
@@ -947,9 +971,9 @@ export function LoketReportPage() {
         </section>
       )}
       {menu === "setoran" && (
-        <section className="rounded-2xl bg-white p-4 shadow-sm">
-          <h1 className="font-semibold">Pantauan Setoran</h1>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <section className="rounded-md border border-slate-300 bg-white p-3">
+          <h1 className="text-lg font-black">Pantauan Setoran</h1>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <Field label="Bulan">
               <Select value={month} onChange={(event) => setMonth(event.target.value)}>
                 {Array.from({ length: 12 }, (_, index) => <option key={index + 1} value={index + 1}>{new Date(2026, index, 1).toLocaleDateString("id-ID", { month: "long" })}</option>)}
@@ -1029,15 +1053,15 @@ export function LoketSettingPage() {
   const previewSlip = previewPage.pages[0]?.[0];
 
   return (
-    <div className="grid w-full min-w-0 overflow-hidden rounded-2xl bg-white shadow-sm md:grid-cols-[220px_minmax(0,1fr)]">
-      <aside className="border-b border-slate-100 p-3 md:border-b-0 md:border-r">
-        <button onClick={() => setPanel("password")} className={`mb-1 block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${panel === "password" ? "bg-sky-700 text-white" : "text-slate-600"}`}>Ubah Password</button>
-        <button onClick={() => setPanel("printer")} className={`block w-full rounded-xl px-3 py-2 text-left text-sm font-semibold ${panel === "printer" ? "bg-sky-700 text-white" : "text-slate-600"}`}>Setting Printer</button>
+    <div className="grid w-full min-w-0 overflow-hidden rounded-md border border-slate-300 bg-white md:grid-cols-[200px_minmax(0,1fr)]">
+      <aside className="border-b border-slate-200 p-2 md:border-b-0 md:border-r">
+        <button onClick={() => setPanel("password")} className={`mb-1 block w-full rounded-md px-2 py-1.5 text-left text-sm font-black ${panel === "password" ? "bg-sky-700 text-white" : "text-slate-700"}`}>Ubah Password</button>
+        <button onClick={() => setPanel("printer")} className={`block w-full rounded-md px-2 py-1.5 text-left text-sm font-black ${panel === "printer" ? "bg-sky-700 text-white" : "text-slate-700"}`}>Setting Printer</button>
       </aside>
-      <section className="space-y-3 p-4">
+      <section className="space-y-2 p-3">
         {panel === "password" && (
           <>
-            <h1 className="font-semibold">Ubah Password</h1>
+            <h1 className="text-lg font-black">Ubah Password</h1>
             <div className="max-w-lg space-y-3">
               <Field label="Password Lama"><Input className="h-10" type="password" value={oldPassword} onChange={(event) => setOldPassword(event.target.value)} /></Field>
               <Field label="Password Baru"><Input className="h-10" type="password" value={nextPassword} onChange={(event) => setNextPassword(event.target.value)} /></Field>
@@ -1048,7 +1072,7 @@ export function LoketSettingPage() {
         )}
         {panel === "printer" && (
           <>
-            <h1 className="font-semibold">Setting Printer</h1>
+            <h1 className="text-lg font-black">Setting Printer</h1>
             <p className="text-xs text-slate-500">Pengaturan ini berlaku untuk loket ini. Nama printer Windows dipilih lewat dialog cetak saat Tes Print.</p>
             <Field label="Nama printer" className="max-w-lg">
               <div className="flex gap-2">

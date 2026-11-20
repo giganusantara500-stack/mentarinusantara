@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useAuth, mfaIssuer, roleUsesMfa } from "@/lib/auth";
+import { dbRoleToAppRole, mfaIssuer, roleUsesMfa, useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
@@ -68,8 +68,12 @@ export function SecurityPage() {
   };
 
   const issuer = mfaIssuer(profile?.role);
-  const showMfa = roleUsesMfa(profile?.role);
+  const appRole = profile ? dbRoleToAppRole(profile.role) : "pending";
   const verified = factors.filter((f) => f.status === "verified");
+  const marked = user?.user_metadata?.mfa_enabled === true || user?.user_metadata?.mfa_status === true || user?.user_metadata?.mfa_status === "active";
+  const enrolled = verified.length > 0;
+  const mfaActive = enrolled;
+  const showMfa = appRole === "superadmin" || appRole === "mitra" || (appRole === "loket" && marked) || (roleUsesMfa(profile?.role) && (enrolled || marked));
 
   // Ganti password state
   const [showPwd, setShowPwd] = useState(false);
@@ -134,21 +138,21 @@ export function SecurityPage() {
         <CardBody>
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-3">
-              <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${verified.length > 0 ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}>
+              <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${mfaActive ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"}`}>
                 <KeyRound size={20} />
               </div>
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-semibold text-slate-900">Verifikasi Dua Langkah (TOTP)</h3>
-                  {verified.length > 0 ? <Badge tone="success"><CheckCircle2 size={11} /> Aktif</Badge> : <Badge tone="warning">Belum aktif</Badge>}
+                  {mfaActive ? <Badge tone="success"><CheckCircle2 size={11} /> Aktif</Badge> : <Badge tone="warning">Belum aktif</Badge>}
                 </div>
                 <p className="text-sm text-slate-500 mt-1 max-w-md">
                   Wajib untuk peran ini. Aplikasi authenticator menampilkan penerbit <b>{issuer}</b> dan kode OTP 6 digit.
                 </p>
               </div>
             </div>
-            <Button onClick={startEnroll} disabled={verified.length >= 1}>
-              <Plus size={16} /> {verified.length >= 1 ? "Sudah Aktif" : "Aktifkan 2FA"}
+            <Button onClick={startEnroll} disabled={mfaActive}>
+              <Plus size={16} /> {mfaActive ? "2FA Aktif" : "Aktifkan 2FA"}
             </Button>
           </div>
           {setupError && !showSetup && (

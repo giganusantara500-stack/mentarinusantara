@@ -19,6 +19,9 @@ const refLabel: Record<string, string> = {
   refund: "Refund",
   adjustment: "Penyesuaian",
   fee: "Biaya",
+  deposit_pusat: "Deposit Pusat",
+  deposit_jaringan: "Deposit Jaringan",
+  distribusi: "Distribusi Saldo",
 };
 
 export function MutationsPage() {
@@ -61,6 +64,7 @@ export function MutationsPage() {
   });
 
   const userName = (uid: string) => {
+    if (uid === "__pusat__") return "Kas Pusat";
     const p = profiles.find((x) => x.id === uid);
     return p ? (p.full_name || p.email) : "—";
   };

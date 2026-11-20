@@ -1,6 +1,3 @@
-import fs from "node:fs";
-import path from "node:path";
-
 export interface DepositTicket {
   id: string;
   loketId: string;
@@ -16,9 +13,33 @@ export interface DepositTicket {
   transferAt: string;
   expiresAt?: string;
   status: "pending" | "approved" | "cancelled" | "reversed";
+  route?: "pusat" | "jaringan";
+  approverId?: string | null;
+  applicantRole?: string;
+  uplineName?: string;
+  uplineRole?: string;
   fundedBy?: string;
+  decidedBy?: string | null;
   createdAt: string;
   decidedAt: string | null;
+  claimedAt?: string | null;
+}
+
+export const PUSAT_ACCOUNT = "__pusat__";
+
+export interface FundMutation {
+  id: string;
+  at: string;
+  ticketId: string;
+  actorId: string;
+  accountId: string;
+  counterpartyId: string | null;
+  direction: "credit" | "debit";
+  amount: number;
+  balanceAfter: number;
+  route: "pusat" | "jaringan" | "produksi";
+  kind?: "distribusi";
+  note: string;
 }
 
 export interface LoketSale {
@@ -37,178 +58,154 @@ export interface LoketSale {
   collfee?: number;
   period?: string;
   parentId?: string;
-  status: "success";
+  status: "pending" | "success" | "failed" | "refunded" | "simulated";
+  channel?: "production" | "simulation";
   createdAt: string;
 }
 
-interface LedgerFile {
-  wallets: Record<string, number>;
-  tickets: DepositTicket[];
-  sales: LoketSale[];
+export interface LedgerEnv {
+  supabaseUrl: string;
+  serviceRoleKey: string;
 }
 
-const filePath = path.join(process.cwd(), "server", "data", "ledger.json");
-
-function emptyLedger(): LedgerFile {
-  return { wallets: {}, tickets: [], sales: [] };
+interface LedgerResult {
+  error?: string;
+  status: number;
+  balance?: number;
+  poolBalance?: number;
+  funderId?: string;
+  ticket?: DepositTicket;
+  tickets?: DepositTicket[];
+  mutations?: FundMutation[];
+  sales?: LoketSale[];
+  simulations?: LoketSale[];
+  wallets?: Record<string, number>;
+  marks?: Record<string, number>;
+  sale?: LoketSale;
+  id?: string;
+  fromBalance?: number;
+  toBalance?: number;
+  imported?: boolean;
 }
 
-function readLedger(): LedgerFile {
+async function ledgerApi(env: LedgerEnv, action: string, actorId: string, payload: Record<string, unknown> = {}): Promise<LedgerResult> {
+  if (!env.supabaseUrl || !env.serviceRoleKey) {
+    return { error: "Konfigurasi database belum lengkap.", status: 500 };
+  }
+  let response: Response;
   try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as LedgerFile;
-    return {
-      wallets: parsed.wallets ?? {},
-      tickets: Array.isArray(parsed.tickets) ? parsed.tickets : [],
-      sales: Array.isArray(parsed.sales) ? parsed.sales : [],
-    };
+    response = await fetch(`${env.supabaseUrl}/rest/v1/rpc/ledger_api`, {
+      method: "POST",
+      headers: {
+        apikey: env.serviceRoleKey,
+        Authorization: `Bearer ${env.serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_action: action, p_actor: actorId, p_payload: payload }),
+    });
   } catch {
-    return emptyLedger();
+    return { error: "Database saldo tidak dapat dihubungi.", status: 500 };
   }
-}
-
-function writeLedger(ledger: LedgerFile) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(ledger, null, 2));
-}
-
-export function cancelOwnTicket(ticketId: string, loketId: string) {
-  const ledger = readLedger();
-  const ticket = ledger.tickets.find((item) => item.id === ticketId && item.loketId === loketId);
-  if (!ticket) return { error: "Tiket deposit tidak ditemukan.", status: 404 };
-  if (ticket.status !== "pending") return { error: "Hanya tiket yang masih menunggu yang dapat dibatalkan.", status: 409 };
-  ticket.status = "cancelled";
-  ticket.decidedAt = new Date().toISOString();
-  writeLedger(ledger);
-  return { ticket, status: 200 };
-}
-
-export function pendingTransferCodes() {
-  return new Set(
-    readLedger().tickets
-      .filter((ticket) => ticket.status === "pending" && ticket.uniqueCode)
-      .map((ticket) => ticket.uniqueCode as string),
-  );
-}
-
-export function listTickets(userId: string, role: string, loketIds: string[] | null = null) {
-  const ledger = readLedger();
-  const tickets = role === "loket"
-    ? ledger.tickets.filter((ticket) => ticket.loketId === userId)
-    : loketIds
-      ? ledger.tickets.filter((ticket) => loketIds.includes(ticket.loketId))
-      : ledger.tickets;
-  return tickets.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-
-export function walletBalance(userId: string) {
-  return readLedger().wallets[userId] ?? 0;
-}
-
-export function listWalletBalances() {
-  return readLedger().wallets;
-}
-
-export function latestLedgerActivity() {
-  const ledger = readLedger();
-  const marks = new Map<string, number>();
-  const note = (id: string, at: string) => {
-    const time = Date.parse(at);
-    if (!id || !Number.isFinite(time)) return;
-    marks.set(id, Math.max(marks.get(id) ?? 0, time));
-  };
-  for (const sale of ledger.sales) note(sale.loketId, sale.createdAt);
-  for (const ticket of ledger.tickets) note(ticket.loketId, ticket.createdAt);
-  return marks;
-}
-
-export function createTicket(ticket: DepositTicket) {
-  const ledger = readLedger();
-  ledger.tickets.unshift(ticket);
-  writeLedger(ledger);
-  return ticket;
-}
-
-export function decideTicket(ticketId: string, action: "approve" | "cancel" | "pending" | "void", superAdminId: string) {
-  const ledger = readLedger();
-  const ticket = ledger.tickets.find((item) => item.id === ticketId);
-  if (!ticket) return { error: "Tiket deposit tidak ditemukan.", status: 404 };
-  let balance = ledger.wallets[ticket.loketId] ?? 0;
-  const wasApproved = ticket.status === "approved";
-  const funderId = ticket.fundedBy || superAdminId;
-  const rollbackCredit = () => {
-    if (balance < ticket.amount) return "Saldo loket tidak cukup untuk menarik kembali setoran ini.";
-    if (ticket.fundedBy) ledger.wallets[ticket.fundedBy] = (ledger.wallets[ticket.fundedBy] ?? 0) + ticket.amount;
-    balance -= ticket.amount;
-    ticket.fundedBy = undefined;
-    return "";
-  };
-
-  if (action === "approve") {
-    if (ticket.status !== "pending") return { error: "Hanya setoran menunggu yang dapat disetujui.", status: 409 };
-    const pool = ledger.wallets[superAdminId] ?? 0;
-    if (pool < ticket.amount) return { error: "Saldo Super Admin tidak cukup untuk menyetujui setoran ini.", status: 409 };
-    ledger.wallets[superAdminId] = pool - ticket.amount;
-    ticket.fundedBy = superAdminId;
-    ticket.status = "approved";
-    balance += ticket.amount;
-  } else if (action === "cancel") {
-    if (ticket.status !== "pending") return { error: "Hanya setoran menunggu yang dapat ditolak.", status: 409 };
-    ticket.status = "cancelled";
-  } else if (action === "void") {
-    if (!wasApproved) return { error: "Hanya setoran sukses yang dapat ditarik menjadi dibatalkan.", status: 409 };
-    const rollbackError = rollbackCredit();
-    if (rollbackError) return { error: rollbackError, status: 409 };
-    ticket.status = "reversed";
-  } else if (action === "pending") {
-    if (ticket.status === "pending") return { ticket, balance, poolBalance: ledger.wallets[funderId] ?? 0, funderId, status: 200 };
-    if (wasApproved) {
-      const rollbackError = rollbackCredit();
-      if (rollbackError) return { error: rollbackError, status: 409 };
-    }
-    ticket.status = "pending";
-    ticket.decidedAt = null;
-  } else {
-    return { error: "Aksi tidak valid.", status: 400 };
+  const body = await response.json().catch(() => null) as LedgerResult & { message?: string; code?: string } | null;
+  if (!response.ok || !body || typeof body !== "object") {
+    const missing = String(body?.message ?? "").includes("ledger_api");
+    return { error: missing ? "Fungsi saldo di database belum terpasang. Jalankan migrasi terbaru, lalu muat ulang." : "Database saldo menolak permintaan.", status: 500 };
   }
-
-  if (action !== "pending") ticket.decidedAt = new Date().toISOString();
-  ledger.wallets[ticket.loketId] = balance;
-  writeLedger(ledger);
-  return { ticket, balance, poolBalance: ledger.wallets[funderId] ?? 0, funderId, status: 200 };
+  if (body.error && !body.status) return { error: body.message || body.error, status: 500 };
+  return body;
 }
 
-export function listLoketSales(loketId: string) {
-  return listNetworkSales([loketId]);
+export function importLedgerSnapshot(env: LedgerEnv, snapshot: Record<string, unknown>) {
+  return ledgerApi(env, "import", "00000000-0000-0000-0000-000000000000", snapshot);
 }
 
-export function listNetworkSales(loketIds: string[] | null) {
-  const sales = readLedger().sales;
-  const rows = loketIds ? sales.filter((sale) => loketIds.includes(sale.loketId)) : sales;
-  return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+export async function walletBalance(env: LedgerEnv, actorId: string, userId = actorId) {
+  const result = await ledgerApi(env, "balance", actorId, { userId });
+  return result.balance ?? 0;
 }
 
-export function recordLoketSale(sale: Omit<LoketSale, "id" | "status" | "createdAt">) {
-  const paid = creditWallet(sale.loketId, -Math.abs(sale.amount));
-  if (paid.error || paid.balance === undefined) return paid;
-  const ledger = readLedger();
-  const stored: LoketSale = {
-    ...sale,
-    amount: Math.abs(Math.round(sale.amount)),
-    id: crypto.randomUUID(),
-    status: "success",
-    createdAt: new Date().toISOString(),
-  };
-  ledger.sales.unshift(stored);
-  writeLedger(ledger);
-  return { sale: stored, balance: paid.balance, status: 200 };
+export async function listWalletBalances(env: LedgerEnv, actorId: string) {
+  const result = await ledgerApi(env, "balances", actorId);
+  return result.wallets ?? {};
 }
 
-export function creditWallet(userId: string, amount: number) {
-  if (!Number.isFinite(amount) || amount === 0) return { error: "Nominal tidak valid.", status: 400 };
-  const ledger = readLedger();
-  const next = (ledger.wallets[userId] ?? 0) + Math.round(amount);
-  if (next < 0) return { error: "Saldo tidak boleh menjadi minus.", status: 409 };
-  ledger.wallets[userId] = next;
-  writeLedger(ledger);
-  return { balance: next, status: 200 };
+export async function latestLedgerActivity(env: LedgerEnv, actorId: string) {
+  const result = await ledgerApi(env, "activity", actorId);
+  return new Map(Object.entries(result.marks ?? {}).map(([id, at]) => [id, Number(at)]));
+}
+
+export async function listTickets(env: LedgerEnv, actorId: string) {
+  const result = await ledgerApi(env, "tickets", actorId);
+  return result.tickets ?? [];
+}
+
+export async function listMutations(env: LedgerEnv, actorId: string) {
+  const result = await ledgerApi(env, "mutations", actorId);
+  return result.mutations ?? [];
+}
+
+export async function listNetworkSales(env: LedgerEnv, actorId: string) {
+  const result = await ledgerApi(env, "sales", actorId);
+  return result.sales ?? [];
+}
+
+export async function listSimulations(env: LedgerEnv, actorId: string) {
+  const result = await ledgerApi(env, "simulations", actorId);
+  return result.simulations ?? [];
+}
+
+export function createTicket(env: LedgerEnv, actorId: string, ticket: DepositTicket) {
+  return ledgerApi(env, "create_ticket", actorId, {
+    amount: ticket.amount,
+    uniqueCode: ticket.uniqueCode,
+    bank: ticket.bank,
+    accountNumber: ticket.accountNumber,
+    accountHolder: ticket.accountHolder,
+    loketName: ticket.loketName,
+    loketCode: ticket.loketCode,
+    uplineName: ticket.uplineName,
+    uplineRole: ticket.uplineRole,
+    route: "pusat",
+  });
+}
+
+export function cancelOwnTicket(env: LedgerEnv, actorId: string, ticketId: string) {
+  return ledgerApi(env, "cancel_ticket", actorId, { id: ticketId });
+}
+
+export function claimTicket(env: LedgerEnv, actorId: string, ticketId: string) {
+  return ledgerApi(env, "claim_ticket", actorId, { id: ticketId });
+}
+
+export function decideTicket(env: LedgerEnv, actorId: string, ticketId: string, action: "approve" | "cancel" | "pending" | "void") {
+  return ledgerApi(env, "decide_ticket", actorId, { id: ticketId, action });
+}
+
+export function distributeBalance(env: LedgerEnv, actorId: string, toId: string, amount: number, toName: string) {
+  return ledgerApi(env, "distribute", actorId, { loketId: toId, amount, loketName: toName });
+}
+
+export function creditWallet(env: LedgerEnv, actorId: string, userId: string, amount: number) {
+  return ledgerApi(env, "credit", actorId, { userId, amount, note: "Penyesuaian saldo Super Admin" });
+}
+
+export function recordLoketSale(env: LedgerEnv, actorId: string, sale: {
+  category: string;
+  product: string;
+  customerNumber: string;
+  customerName?: string;
+  amount: number;
+  tagihan?: number;
+  denda?: number;
+  adminFee?: number;
+  collfee?: number;
+  period?: string;
+  parentId?: string;
+  loketName?: string;
+  loketCode?: string;
+  channel?: "production" | "simulation";
+  outcome?: "pending" | "success" | "failed" | "refund";
+  clientRef: string;
+}) {
+  return ledgerApi(env, "record_sale", actorId, { ...sale });
 }

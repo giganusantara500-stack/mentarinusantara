@@ -20,12 +20,12 @@ function asRole(role: string) {
 export function loketsUnder(id: string, profiles: Profile[]) {
   const self = profiles.find((profile) => profile.id === id);
   if (self && asRole(self.role) === "loket") return [self];
-  const submitraIds = new Set(profiles.filter((profile) => asRole(profile.role) === "submitra" && profile.parent_id === id).map((profile) => profile.id));
-  return profiles.filter((profile) => asRole(profile.role) === "loket" && (profile.parent_id === id || (profile.parent_id ? submitraIds.has(profile.parent_id) : false)));
+  const submitraIds = new Set(profiles.filter((profile) => asRole(profile.role) === "submitra" && (profile.parent_id === id || profile.created_by === id || profile.mitra_id === id)).map((profile) => profile.id));
+  return profiles.filter((profile) => asRole(profile.role) === "loket" && (profile.parent_id === id || profile.created_by === id || profile.mitra_id === id || (profile.parent_id ? submitraIds.has(profile.parent_id) : false)));
 }
 
 function childrenOf(parentId: string, profiles: Profile[]) {
-  return profiles.filter((profile) => profile.parent_id === parentId && ["submitra", "loket"].includes(asRole(profile.role)));
+  return profiles.filter((profile) => ["submitra", "loket"].includes(asRole(profile.role)) && (profile.parent_id === parentId || (profile.created_by === parentId && !profile.parent_id)));
 }
 
 function toNode(profile: Profile, profiles: Profile[]): DrillNode {
@@ -50,15 +50,15 @@ export function useDrill(profiles: Profile[]) {
       : role === "superadmin"
         ? profiles.filter((item) => asRole(item.role) === "mitra")
         : role === "mitra"
-          ? profiles.filter((item) => item.parent_id === selfId && ["submitra", "loket"].includes(asRole(item.role)))
-          : profiles.filter((item) => item.parent_id === selfId && asRole(item.role) === "loket");
+          ? profiles.filter((item) => ["submitra", "loket"].includes(asRole(item.role)) && (item.parent_id === selfId || (item.created_by === selfId && !item.parent_id) || (asRole(item.role) === "loket" && item.mitra_id === selfId && !item.parent_id)))
+          : profiles.filter((item) => asRole(item.role) === "loket" && (item.parent_id === selfId || item.created_by === selfId));
     return rows.map((item) => toNode(item, profiles));
   }, [profile, profiles, role, selfId, stack]);
 
   const loketIds = useMemo(() => {
     if (leaf) return [leaf];
     const focus = stack[stack.length - 1];
-    if (!focus) return profiles.filter((item) => asRole(item.role) === "loket" && (role === "superadmin" || item.parent_id === selfId || profiles.some((parent) => parent.id === item.parent_id && parent.parent_id === selfId))).map((item) => item.id);
+    if (!focus) return profiles.filter((item) => asRole(item.role) === "loket" && (role === "superadmin" || item.parent_id === selfId || item.created_by === selfId || item.mitra_id === selfId || profiles.some((parent) => parent.id === item.parent_id && (parent.parent_id === selfId || parent.created_by === selfId)))).map((item) => item.id);
     return loketsUnder(focus, profiles).map((item) => item.id);
   }, [leaf, stack, profiles, role, selfId]);
 

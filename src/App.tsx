@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AuthProvider, useAuth, canonicalRole, roleUsesMfa } from "@/lib/auth";
+import { AuthProvider, canonicalRole, useAuth } from "@/lib/auth";
 import { AppShell } from "@/components/layout/AppShell";
 import { LoketShell } from "@/components/layout/LoketShell";
 import { LoginPage } from "@/pages/LoginPage";
@@ -27,6 +27,7 @@ import { ReportsPage } from "@/pages/ReportsPage";
 import { AnnouncementsPage } from "@/pages/AnnouncementsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { OpsDashboardPage } from "@/pages/OpsDashboardPage";
+import { PusatDepositPage } from "@/pages/DepositPage";
 import {
   BalanceAllocationPage,
   BalanceMonitorPage,
@@ -38,6 +39,15 @@ import {
   RecapPage,
   RunTextPage,
 } from "@/pages/OperationsPages";
+
+function ensureHashRoute() {
+  if (window.location.hash && window.location.hash !== "#") return;
+  const path = window.location.pathname.replace(/\/index\.html$/, "") || "/";
+  if (path === "/") return;
+  window.history.replaceState(null, "", `/#${path}${window.location.search}`);
+}
+
+ensureHashRoute();
 
 function ProtectedApp() {
   const { user, profile, loading, mfaState, isSuperAdmin, signOut } = useAuth();
@@ -87,15 +97,15 @@ function ProtectedApp() {
     return <LoginPage />;
   }
 
-  const mfaRequired = roleUsesMfa(profile?.role);
+  const mfaMarkedActive = user?.user_metadata?.mfa_enabled === true || user?.user_metadata?.mfa_status === true || user?.user_metadata?.mfa_status === "active";
+  const mfaRequired = profile?.role === "super_admin" || profile?.role === "mitra" || mfaMarkedActive;
 
   // 2FA wajib untuk Super Admin dan Mitra jika sudah terdaftar tetapi sesi belum AAL2.
   if (mfaRequired && mfaState === "required") {
     return <MFAVerifyPage />;
   }
 
-  // Peran yang sudah dikenali, termasuk loket, langsung masuk. Akun nonaktif atau tanpa peran tetap tertahan.
-  if (!profile || canonicalRole(profile.role) === "pending" || profile.status === "suspended") {
+  if (profile?.status === "suspended") {
     return <PendingPage />;
   }
 
@@ -114,6 +124,12 @@ function ProtectedApp() {
     );
   }
 
+  if (!profile) {
+    return (
+      <div className="flex h-dvh items-center justify-center bg-white text-sm text-slate-500">Memuat profil akun...</div>
+    );
+  }
+
   const render = () => {
     // Detail pages: /mitra/detail/:id, /submitra/detail/:id, /loket/detail/:id
     const detailMatch = path.match(/^\/(mitra|submitra|loket)\/detail\/(.+)$/);
@@ -124,8 +140,8 @@ function ProtectedApp() {
 
     switch (path) {
       case "/dashboard":
-        if (isSuperAdmin || profile?.role === "mitra" || profile?.role === "submitra") return <OpsDashboardPage />;
-        if (profile?.role === "loket") return <LoketHomePage />;
+        if (isSuperAdmin || canonicalRole(profile?.role) === "mitra" || canonicalRole(profile?.role) === "submitra") return <OpsDashboardPage />;
+        if (canonicalRole(profile?.role) === "loket") return <LoketHomePage />;
         return <DashboardPage onNavigate={navigate} />;
       case "/keamanan": return <SecurityPage />;
       case "/beli": return profile?.role === "loket" ? <LoketTransaksiPage /> : <BuyPage />;
@@ -134,11 +150,12 @@ function ProtectedApp() {
       case "/loket": return <ManageUsersPage targetRole="loket" onNavigate={navigate} />;
       case "/produk": return <ProductsPage />;
       case "/harga": return <PricingPage />;
-      case "/transaksi": return <TransactionsPage />;
+      case "/transaksi": return canonicalRole(profile?.role) === "loket" ? <LoketStatusPage /> : <TransactionsPage />;
       case "/riwayat": return profile?.role === "loket" ? <LoketStatusPage /> : <TransactionsPage riwayat />;
       case "/mutasi": return <MutationsPage />;
       case "/deposit":
-        return profile.role === "loket" ? null : <ManageSetoranPage />;
+        if (profile.role === "loket") return null;
+        return <PusatDepositPage />;
       case "/kolektif":
         return profile.role === "loket" ? <LoketKolektifPage /> : <DashboardPage onNavigate={navigate} />;
       case "/transfer":
@@ -166,13 +183,13 @@ function ProtectedApp() {
       case "/pengumuman": return <AnnouncementsPage />;
       case "/pengaturan": return profile?.role === "loket" ? <LoketSettingPage /> : <SettingsPage />;
       default:
-        if (isSuperAdmin || profile?.role === "mitra" || profile?.role === "submitra") return <OpsDashboardPage />;
-        if (profile?.role === "loket") return <LoketHomePage />;
+        if (isSuperAdmin || canonicalRole(profile?.role) === "mitra" || canonicalRole(profile?.role) === "submitra") return <OpsDashboardPage />;
+        if (canonicalRole(profile?.role) === "loket") return <LoketHomePage />;
         return <DashboardPage onNavigate={navigate} />;
     }
   };
 
-  if (profile.role === "loket") {
+  if (canonicalRole(profile.role) === "loket") {
     return (
       <LoketShell current={path} onNavigate={navigate} onLogout={() => signOut()}>
         {render()}

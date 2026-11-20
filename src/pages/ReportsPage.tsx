@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/Badge";
 import { formatRupiah } from "@/lib/format";
 import { CATEGORY_LABELS, CATEGORY_COLORS, type ProductCategory, type Role } from "@/lib/types";
 import { ROLE_LABELS } from "@/lib/nav";
-import { networkOwners, profileLabel, profilesWithSelf } from "@/lib/network";
+import { accountInNetwork, networkOwners, profileLabel, profilesWithSelf } from "@/lib/network";
 import { TrendingUp, BarChart3, PieChart, Wallet } from "lucide-react";
 
 export function ReportsPage() {
@@ -21,7 +21,12 @@ export function ReportsPage() {
   const role = dbRoleToAppRole(profile.role);
   const directory = profilesWithSelf(profiles, profile);
 
-  const visibleTx = [...transactions, ...networkSales.filter((row) => !transactions.some((item) => item.id === row.id))].filter((t) => t.status === "success");
+  const visibleTx = [...networkSales, ...transactions.filter((row) => !networkSales.some((item) => item.id === row.id))].filter((t) => {
+    if (t.status !== "success") return false;
+    if (role === "superadmin") return true;
+    const owner = directory.find((item) => item.id === t.user_id);
+    return owner ? accountInNetwork(profile, owner, directory) : networkSales.some((sale) => sale.id === t.id);
+  });
 
   const byCategory = useMemo(() => {
     const map: Record<string, { count: number; total: number }> = {};

@@ -103,6 +103,7 @@ export function Sidebar({ current, onNavigate, onLogout, onSecurity }: Props) {
                       >
                         <Icon size={16} />
                         <span className="flex-1 text-left">{item.label}</span>
+                        {item.path === "/keamanan" && role === "mitra" && <span className="rounded-full bg-emerald-400/20 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200">Aktif</span>}
                       </button>
                     );
                   })}
@@ -115,13 +116,17 @@ export function Sidebar({ current, onNavigate, onLogout, onSecurity }: Props) {
 
       {/* Footer */}
       <div className="px-3 py-3 border-t border-purple-900/60 space-y-0.5">
-        {roleUsesMfa(profile.role) && (
+        {(role === "superadmin" || role === "mitra" || role === "submitra" || roleUsesMfa(profile.role)) && (
           <button
             onClick={() => { onSecurity(); setOpen(false); }}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-purple-300 hover:bg-purple-900/60 hover:text-white transition"
+            className={cn(
+              "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition",
+              current === "/keamanan" ? "bg-gradient-to-r from-purple-600 to-violet-600 text-white shadow-sm" : "text-purple-300 hover:bg-purple-900/60 hover:text-white",
+            )}
           >
             <ShieldCheck size={18} />
-            <span>Keamanan (2FA)</span>
+            <span className="flex-1 text-left">Keamanan (2FA)</span>
+            {role === "mitra" && <span className="rounded-full bg-emerald-400/20 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-200">Aktif</span>}
           </button>
         )}
         <button
@@ -140,20 +145,20 @@ export function Sidebar({ current, onNavigate, onLogout, onSecurity }: Props) {
       {/* Mobile toggle */}
       <button
         onClick={() => setOpen(true)}
-        className="lg:hidden fixed top-3 left-3 z-30 p-2 rounded-lg bg-white border border-slate-200 shadow-sm text-slate-700"
+        className="md:hidden fixed top-3 left-3 z-30 p-2 rounded-lg bg-white border border-slate-200 shadow-sm text-slate-700"
         aria-label="Buka menu"
       >
         <Menu size={20} />
       </button>
 
       {/* Desktop */}
-      <aside className="hidden lg:block w-64 shrink-0 h-screen sticky top-0">
+      <aside className="hidden h-full w-64 shrink-0 md:block">
         {content}
       </aside>
 
       {/* Mobile drawer */}
       {open && (
-        <div className="lg:hidden fixed inset-0 z-40">
+        <div className="md:hidden fixed inset-0 z-40">
           <div className="absolute inset-0 bg-purple-950/70 backdrop-blur-sm" onClick={() => setOpen(false)} />
           <div className="absolute left-0 top-0 bottom-0 w-64 shadow-2xl">
             <button

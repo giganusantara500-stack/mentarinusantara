@@ -21,8 +21,10 @@ export default async (request: Request) => {
       status: result.status,
       headers: { "content-type": "application/json" },
     });
-  } catch {
-    return new Response(JSON.stringify({ error: "Permintaan kolektif gagal diproses." }), {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Permintaan gagal diproses.";
+    console.error("API gagal diproses:", error);
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { "content-type": "application/json" },
     });

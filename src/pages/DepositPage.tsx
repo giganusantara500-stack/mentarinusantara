@@ -1,32 +1,69 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth";
+import { dbRoleToAppRole, useAuth } from "@/lib/auth";
 import { DEPOSIT_ACCOUNTS } from "@/lib/banks";
-import { setoranDays, setoranLines } from "@/lib/setoranReport";
-import { Card, CardBody, CardHeader } from "@/components/ui/Card";
+import { PageContainer } from "@/components/PageContainer";
+import { Card, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Field, Input, Select } from "@/components/ui/Form";
+import { Field, Input } from "@/components/ui/Form";
 import { Badge } from "@/components/ui/Badge";
 import { formatRupiah, formatWaktu } from "@/lib/format";
+import { openDepositTicket, ticketPhase } from "@/lib/depositStatus";
+import { TicketTransferCard } from "@/components/deposit/TicketTransferCard";
 
 interface Ticket {
   id: string;
+  loketId?: string;
   amount: number;
   baseAmount?: number;
   uniqueCode?: string;
   transferAmount?: number;
+  loketName?: string;
   loketCode?: string;
+  applicantRole?: string;
   bank: string;
   accountNumber: string;
   accountHolder?: string;
   status: "pending" | "approved" | "cancelled" | "reversed";
+  route?: "pusat" | "jaringan";
   transferAt: string;
   expiresAt?: string;
   createdAt: string;
+  claimedAt?: string | null;
 }
 
-const statusLabel = { pending: "Menunggu", approved: "Sukses", cancelled: "Ditolak", reversed: "Dibatalkan" } as const;
 const QUICK_AMOUNTS = [50000, 100000, 250000, 500000, 1000000];
+
+function roleText(role?: string) {
+  if (role === "super_admin" || role === "superadmin") return "Super Admin";
+  if (role === "mitra") return "Mitra";
+  if (role === "submitra" || role === "sub_mitra") return "Sub Mitra";
+  if (role === "loket") return "Loket";
+  return "Pemohon";
+}
+
+function scopeText(role: string) {
+  if (role === "superadmin") return "Seluruh pengajuan di sistem.";
+  if (role === "mitra") return "Milik Anda, plus Sub Mitra dan Loket di bawah Anda.";
+  if (role === "submitra") return "Milik Anda, plus Loket di bawah Anda.";
+  return "Hanya milik loket ini.";
+}
+
+function normalizeTicket(ticket: Ticket): Ticket {
+  const uniqueCode = String(ticket.uniqueCode ?? "").replace(/\D/g, "").padStart(3, "0").slice(-3);
+  const baseAmount = Number(ticket.baseAmount ?? ticket.amount) || 0;
+  const createdAt = ticket.createdAt || new Date().toISOString();
+  const expiresAt = ticket.expiresAt || new Date(new Date(createdAt).getTime() + 6 * 60 * 60 * 1000).toISOString();
+  return {
+    ...ticket,
+    uniqueCode,
+    baseAmount,
+    amount: Number(ticket.amount) || baseAmount,
+    transferAmount: Number(ticket.transferAmount) || baseAmount + Number(uniqueCode),
+    createdAt,
+    expiresAt,
+  };
+}
 
 export function DepositModal({ open, onClose, tick, requestRefresh }: { open: boolean; onClose: () => void; tick: number; requestRefresh: () => void }) {
   if (!open) return null;
@@ -39,21 +76,38 @@ export function DepositModal({ open, onClose, tick, requestRefresh }: { open: bo
   );
 }
 
-function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; tick: number; requestRefresh: () => void }) {
+interface MutationRow {
+  id: string;
+  at: string;
+  note: string;
+  direction: string;
+  amount: number;
+  balanceAfter?: number;
+  accountId?: string;
+}
+
+function openingBalance(row: MutationRow) {
+  const after = Number(row.balanceAfter ?? 0);
+  const value = Number(row.amount) || 0;
+  return row.direction === "credit" ? after - value : after + value;
+}
+
+function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose: () => void; tick: number; requestRefresh: () => void; page?: boolean }) {
   const { profile } = useAuth();
+  const role = profile ? dbRoleToAppRole(profile.role) : "loket";
+  const canCreate = role === "loket" || role === "mitra" || role === "submitra";
   const [tab, setTab] = useState<"request" | "history" | "mutasi" | "pantauan">("request");
   const [balance, setBalance] = useState(0);
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [sales, setSales] = useState<{ id: string; product: string; amount: number; createdAt: string }[]>([]);
+  const [mutations, setMutations] = useState<MutationRow[]>([]);
   const [amount, setAmount] = useState("");
   const bank = DEPOSIT_ACCOUNTS[0].bank;
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now());
-  const [issued, setIssued] = useState<Ticket | null>(null);
+  const receiptRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
-  const [month, setMonth] = useState(String(new Date().getMonth() + 1));
-  const [year, setYear] = useState(String(new Date().getFullYear()));
-  const [preview, setPreview] = useState(false);
+  const [decideId, setDecideId] = useState("");
+  const decideLock = useRef("");
 
   const load = async () => {
     try {
@@ -64,15 +118,18 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
       const body = text ? JSON.parse(text) : {};
       if (!response.ok) return;
       setBalance(Number(body.balance ?? 0));
-      setTickets(body.tickets ?? []);
-      const salesRes = await fetch("/api/loket-sales", { headers });
-      if (salesRes.ok) setSales((await salesRes.json()).sales ?? []);
+      setMutations(body.mutations ?? []);
+      setTickets(((body.tickets ?? []) as Ticket[]).map(normalizeTicket));
     } catch {
       /* daftar lama tetap tampil bila penyegaran gagal */
     }
   };
 
   useEffect(() => { load(); }, [tick]);
+  useEffect(() => {
+    const timer = window.setInterval(load, 8000);
+    return () => window.clearInterval(timer);
+  }, []);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
@@ -91,20 +148,20 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
       const response = await fetch("/api/deposits", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ amount: Number(amount), bank }),
+        body: JSON.stringify({ amount: Number(amount), bank, route: "pusat" }),
       });
       const text = await response.text();
       let body: { error?: string; ticket?: Ticket } = {};
-      try { body = text ? JSON.parse(text) : {}; } catch { body = { error: "Server tidak mengembalikan tiket." }; }
-      const ticket = body.ticket;
-      if (!response.ok || !ticket?.id || !ticket.uniqueCode) {
-        setError(body.error || "Tiket gagal dibuat.");
+      try { body = text ? JSON.parse(text) : {}; } catch { body = { error: response.status === 431 ? "Sesi login terlalu besar untuk dikirim. Muat ulang server, lalu coba lagi." : "Server tidak mengembalikan tiket." }; }
+      const ticket = body.ticket ? normalizeTicket(body.ticket) : null;
+      if (!response.ok || !ticket?.id || !ticket.uniqueCode || ticket.uniqueCode === "000") {
+        setError(body.error || (response.status === 431 ? "Sesi login terlalu besar untuk dikirim. Muat ulang server, lalu coba lagi." : "Tiket gagal dibuat."));
         return;
       }
-      setIssued(ticket);
       setTickets((current) => [ticket, ...current.filter((item) => item.id !== ticket.id)]);
       setAmount("");
       requestRefresh();
+      window.setTimeout(() => receiptRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 30);
     } catch {
       setError("Tiket gagal disimpan. Periksa koneksi, lalu coba lagi.");
     } finally {
@@ -112,59 +169,64 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
     }
   };
 
+  const ownTickets = tickets.filter((ticket) => ticket.loketId === profile?.id);
+  const openTicket = canCreate ? openDepositTicket(ownTickets, now) : null;
+  const account = DEPOSIT_ACCOUNTS[0];
+  const waiting = tickets.filter((ticket) => ticket.status === "pending" && ticketPhase(ticket, now).label !== "Kedaluwarsa");
+  const archive = tickets.filter((ticket) => !waiting.some((item) => item.id === ticket.id));
+
   const refreshStatus = async () => {
     await load();
     requestRefresh();
   };
 
   const cancelTicket = async () => {
-    if (!issued) return;
+    if (!openTicket) return;
     const session = await supabase.auth.getSession();
     const response = await fetch("/api/deposits/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
-      body: JSON.stringify({ id: issued.id }),
+      body: JSON.stringify({ id: openTicket.id }),
     });
     const body = await response.json();
     if (!response.ok) { setError(body.error || "Tiket gagal dibatalkan."); return; }
-    setIssued(body.ticket ?? null);
     await load();
     requestRefresh();
   };
 
-  const copyTicket = async () => {
-    if (!issued) return;
-    const text = [
-      "MENTARI NUSANTARA",
-      `Kode loket ${issued.loketCode || "-"}`,
-      `Bank ${issued.bank}`,
-      `No. rekening ${issued.accountNumber}`,
-      `a.n. ${issued.accountHolder || "Aris Purwanto"}`,
-      `Total transfer ${formatRupiah(issued.transferAmount ?? issued.amount)}`,
-      `Kode unik ${issued.uniqueCode || "-"}`,
-      `Jam transfer ${formatWaktu(issued.transferAt)}`,
-    ].join("\n");
-    await navigator.clipboard.writeText(text);
+  const claimTicket = async () => {
+    if (!openTicket) return;
+    const session = await supabase.auth.getSession();
+    const response = await fetch("/api/deposits/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
+      body: JSON.stringify({ id: openTicket.id }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) { setError(body?.error || "Status tiket gagal diperbarui."); return; }
+    await load();
   };
 
-  const remain = issued?.expiresAt ? Math.max(0, new Date(issued.expiresAt).getTime() - now) : 0;
-  const remainLabel = [Math.floor(remain / 3600000), Math.floor((remain % 3600000) / 60000), Math.floor((remain % 60000) / 1000)].map((part) => String(part).padStart(2, "0")).join(":");
-  const account = DEPOSIT_ACCOUNTS[0];
-  const periodLabel = new Date(Number(year), Number(month) - 1, 1).toLocaleDateString("id-ID", { month: "long", year: "numeric" });
-  const days = setoranDays(
-    Number(year),
-    Number(month),
-    sales.map((sale) => ({ amount: sale.amount, at: sale.createdAt })),
-    tickets.map((ticket) => ({ amount: ticket.baseAmount ?? ticket.amount, at: ticket.transferAt, status: ticket.status })),
-  );
-  const printSetoran = () => {
-    const identity = `${profile?.loket_code || "-"} - ${profile?.full_name || profile?.username || "Loket"}`;
-    const popup = window.open("", "setoran", "width=980,height=720");
-    if (!popup) return;
-    popup.document.write(`<pre style="font-family:ui-monospace,monospace;font-size:12px">${setoranLines(identity, periodLabel, days, formatRupiah).join("\n")}</pre>`);
-    popup.document.close();
-    popup.focus();
-    popup.print();
+  const decide = async (id: string, action: "approve" | "cancel") => {
+    const lock = id + action;
+    if (decideLock.current) return;
+    decideLock.current = lock;
+    setDecideId(lock);
+    setError("");
+    try {
+      const session = await supabase.auth.getSession();
+      const response = await fetch("/api/deposits/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
+        body: JSON.stringify({ id, action }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) { setError(body?.error || "Keputusan gagal disimpan."); return; }
+      await load();
+    } finally {
+      decideLock.current = "";
+      setDecideId("");
+    }
   };
 
   return (
@@ -172,9 +234,9 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
       <div className="flex items-center justify-between border-b border-slate-100 px-[1.5cm] py-3">
         <div>
           <div className="text-sm font-semibold text-slate-900">Deposit</div>
-          <div className="text-xs text-slate-500">Saldo {formatRupiah(balance)} · kode loket di header</div>
+          <div className="text-xs text-slate-500">Saldo {formatRupiah(balance)} · {scopeText(role)}</div>
         </div>
-        <button onClick={onClose} className="rounded-full px-3 py-1 text-xs font-semibold text-slate-500">Tutup</button>
+        <button onClick={onClose} className="rounded-full px-3 py-1 text-xs font-semibold text-slate-500">{page ? "Kembali" : "Tutup"}</button>
       </div>
       <div className="flex gap-1 overflow-x-auto border-b border-slate-100 px-[1.5cm] py-2">
         {([["request", "Request Tiket Deposit"], ["history", "History"], ["mutasi", "Mutasi Saldo"], ["pantauan", "Pantauan Setoran"]] as const).map(([key, label]) => (
@@ -182,32 +244,16 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
         ))}
       </div>
       <div className="space-y-3 px-[1.5cm] py-4">
-
-      {issued && (
-        <Card className="border-neutral-950">
-          <CardBody className="space-y-1">
-            <div className="rounded-xl bg-neutral-950 px-4 py-3 text-white">
-              <div className="text-[11px] font-bold uppercase tracking-wide text-amber-300">Kode unik transfer</div>
-              <div className="font-mono text-4xl font-black tracking-[0.18em]">{issued.uniqueCode}</div>
-              <div className="mt-1 text-sm">Nominal {formatRupiah(issued.baseAmount ?? issued.amount)} + kode {issued.uniqueCode}</div>
-              <div className="text-sm font-bold">Total transfer {formatRupiah(issued.transferAmount ?? issued.amount)}</div>
-              <div className="mt-3 text-[11px] font-bold uppercase tracking-wide text-amber-300">Hitungan mundur</div>
-              <div className={`font-mono text-3xl font-black ${remain === 0 && issued.status === "pending" ? "text-rose-300" : "text-white"}`}>{issued.status === "pending" ? remainLabel : statusLabel[issued.status]}</div>
-              {issued.status === "pending" && <div className="text-xs text-white/70">{remain === 0 ? "Tiket kedaluwarsa." : "Tiket berlaku 6 jam sejak dibuat."}</div>}
-            </div>
-            <div className="pt-1 text-sm leading-tight text-slate-700">{issued.bank} · No.Rekening : {issued.accountNumber}</div>
-            <div className="text-sm leading-tight text-slate-700">Atas Nama : {issued.accountHolder || "Aris Purwanto"}</div>
-            <div className="text-xs text-slate-500">Jam transfer {formatWaktu(issued.transferAt)}</div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button size="sm" variant="outline" onClick={copyTicket}>Salin Semua Informasi</Button>
-              <Button size="sm" variant="outline" onClick={refreshStatus}>Perbarui Status</Button>
-              <Button size="sm" variant="danger" onClick={cancelTicket} disabled={issued.status !== "pending"}>Batalkan Tiket</Button>
-            </div>
-          </CardBody>
-        </Card>
-      )}
+      {error && tab !== "request" && <p className="text-sm text-rose-600">{error}</p>}
 
       {tab === "request" && <div className="space-y-3">
+        {!openTicket && <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">Tidak ada tiket yang sedang berjalan. Tiket dibatalkan dan kedaluwarsa tidak menghalangi pengajuan baru.</p>}
+        {openTicket && (
+          <div ref={receiptRef}>
+            <TicketTransferCard ticket={openTicket} now={now} onRefresh={refreshStatus} onCancel={cancelTicket} onClaim={claimTicket} />
+          </div>
+        )}
+        {canCreate ? <div className="space-y-3">
         <div className="flex flex-wrap gap-2">
           {QUICK_AMOUNTS.map((value) => (
             <button key={value} onClick={() => setAmount(String(value))} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${amount === String(value) ? "bg-amber-400 text-slate-900" : "bg-slate-100 text-slate-600"}`}>{formatRupiah(value)}</button>
@@ -218,91 +264,80 @@ function DepositPanel({ onClose, tick, requestRefresh }: { onClose: () => void; 
             <Input inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))} placeholder="100000" />
           </Field>
           <Field label="Rekening tujuan">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">{account.bank} · {account.accountNumber}<div className="text-xs text-slate-500">a.n. {account.holder}</div></div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">{account.bank} · {account.accountNumber}<div className="text-xs text-slate-500">a.n. {account.holder}. Disetujui Super Admin.</div></div>
           </Field>
           {error && <div className="sm:col-span-2 text-sm text-rose-600">{error}</div>}
-          <div className="sm:col-span-2">
-            <Button onClick={create} disabled={busy || Number(amount) < 10000}>{busy ? "Menyimpan..." : "Buat Tiket Deposit"}</Button>
+          <div className="sm:col-span-2 space-y-2">
+            {openTicket && <p className="text-sm text-amber-800">Masih ada tiket yang berjalan ({ticketPhase(openTicket, now).label}). Selesaikan atau batalkan tiket itu dulu. Tombol buat tiket baru baru bisa dipakai setelah tiket ini berhasil, kedaluwarsa, atau dibatalkan.</p>}
+            <Button onClick={create} disabled={busy || !!openTicket || Number(amount) < 10000}>{busy ? "Menyimpan..." : "Buat Tiket Deposit"}</Button>
           </div>
         </div>
+        </div> : <p className="text-sm text-slate-600">Super Admin tidak membuat tiket. Buka tab Pantauan Setoran untuk menyetujui atau menolak pengajuan.</p>}
       </div>}
 
       {tab === "history" && <Card>
-        <CardHeader title="Tiket saya" subtitle={`${tickets.length} tiket`} />
+        <CardHeader title="Riwayat tiket yang sudah selesai" subtitle={`${archive.length} tiket selesai, dibatalkan, atau kedaluwarsa · ${scopeText(role)}`} />
         <div className="divide-y divide-slate-100">
-          {tickets.length === 0 && <div className="p-6 text-sm text-center text-slate-500">Belum ada tiket deposit.</div>}
-          {tickets.map((ticket) => (
+          {archive.length === 0 && <div className="p-6 text-sm text-center text-slate-500">Belum ada riwayat. Tiket yang masih berjalan ada di tab Request atau Pantauan.</div>}
+          {archive.map((ticket) => (
             <div key={ticket.id} className="flex items-center justify-between gap-3 px-5 py-3">
               <div>
-                <div className="text-sm font-medium text-slate-800">{formatRupiah(ticket.amount)}</div>
-                <div className="text-xs text-slate-500">{ticket.bank} • transfer {formatWaktu(ticket.transferAt)}</div>
+                <div className="text-sm font-medium text-slate-800">{ticket.loketName || "Pemohon"} · {roleText(ticket.applicantRole)}</div>
+                <div className="text-xs text-slate-500">Kode {ticket.uniqueCode || "-"} · {formatRupiah(ticket.transferAmount ?? ticket.amount)} · {formatWaktu(ticket.transferAt)}</div>
               </div>
-              <Badge tone={ticket.status === "approved" ? "success" : ticket.status === "pending" ? "warning" : ticket.status === "reversed" ? "info" : "danger"}>{statusLabel[ticket.status]}</Badge>
+              <Badge tone={ticketPhase(ticket, now).tone}>{ticketPhase(ticket, now).label}</Badge>
             </div>
           ))}
         </div>
       </Card>}
 
       {tab === "pantauan" && <Card>
-        <CardHeader title="Pantauan setoran" subtitle="Pilih bulan dan tahun, lalu tampilkan rincian harian." />
-        <div className="grid gap-3 px-5 pb-3 sm:grid-cols-2">
-          <Field label="Bulan">
-            <Select value={month} onChange={(event) => { setMonth(event.target.value); setPreview(false); }}>
-              {Array.from({ length: 12 }, (_, index) => <option key={index + 1} value={index + 1}>{new Date(2026, index, 1).toLocaleDateString("id-ID", { month: "long" })}</option>)}
-            </Select>
-          </Field>
-          <Field label="Tahun">
-            <Select value={year} onChange={(event) => { setYear(event.target.value); setPreview(false); }}>
-              {[new Date().getFullYear() - 1, new Date().getFullYear(), new Date().getFullYear() + 1].map((item) => <option key={item}>{item}</option>)}
-            </Select>
-          </Field>
-        </div>
-        <div className="flex gap-2 px-5 pb-4">
-          <button onClick={() => setPreview(true)} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-white">Preview Laporan</button>
-          <Button size="sm" variant="outline" disabled={!preview} onClick={printSetoran}>CETAK</Button>
-        </div>
-        {preview && (
-          <div className="w-full max-w-full">
-            <table className="w-full table-fixed text-right text-xs">
-              <thead className="bg-slate-100 text-slate-500">
-                <tr>{["TGL", "LBR", "RUPIAH", "T.LBR", "T.RUPIAH", "REMARK", "SETOR", "T.SETOR", "SELISIH"].map((head) => <th key={head} className={`px-2 py-2 font-semibold ${head === "TGL" || head === "REMARK" ? "text-left" : ""}`}>{head}</th>)}</tr>
-              </thead>
-              <tbody>
-                {days.map((row) => (
-                  <tr key={row.day} className="border-t border-slate-100 text-slate-700">
-                    <td className="px-2 py-1.5 text-left">{row.day}</td>
-                    <td className="px-2 py-1.5">{row.lbr}</td>
-                    <td className="px-2 py-1.5">{formatRupiah(row.rupiah)}</td>
-                    <td className="px-2 py-1.5">{row.tLbr}</td>
-                    <td className="px-2 py-1.5">{formatRupiah(row.tRupiah)}</td>
-                    <td className="px-2 py-1.5 text-left">{row.remark}</td>
-                    <td className="px-2 py-1.5">{formatRupiah(row.setor)}</td>
-                    <td className="px-2 py-1.5">{formatRupiah(row.tSetor)}</td>
-                    <td className="px-2 py-1.5">{formatRupiah(row.selisih)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="grid grid-cols-2 gap-8 px-5 py-6 text-center text-xs text-slate-500">
-              <div>Dibuat Oleh<div className="mt-10 text-slate-300">(................................)</div></div>
-              <div>Diperiksa Oleh<div className="mt-10 text-slate-300">(................................)</div></div>
+        <CardHeader title="Antrean yang menunggu keputusan" subtitle={role === "superadmin" ? `${waiting.length} tiket menunggu. Setujui memindahkan saldo satu kali.` : `${waiting.length} tiket menunggu Super Admin.`} />
+        <div className="divide-y divide-slate-100">
+          {waiting.length === 0 && <div className="p-6 text-center text-sm text-slate-500">Tidak ada tiket yang menunggu. Riwayat selesai ada di tab History.</div>}
+          {waiting.map((ticket) => (
+            <div key={ticket.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
+              <div>
+                <div className="text-sm font-medium text-slate-800">{ticket.loketName || "Pemohon"} · {roleText(ticket.applicantRole)}</div>
+                <div className="text-xs text-slate-500">Kode {ticket.uniqueCode || "-"} · transfer {formatRupiah(ticket.transferAmount ?? ticket.amount)} · saldo {formatRupiah(ticket.baseAmount ?? ticket.amount)}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge tone={ticketPhase(ticket, now).tone}>{ticketPhase(ticket, now).label}</Badge>
+                {role === "superadmin" && ticket.status === "pending" && ticketPhase(ticket, now).label !== "Kedaluwarsa" && (
+                  <>
+                    <Button size="sm" disabled={decideId === `${ticket.id}approve`} onClick={() => decide(ticket.id, "approve")}>Setujui</Button>
+                    <Button size="sm" variant="outline" disabled={decideId === `${ticket.id}cancel`} onClick={() => decide(ticket.id, "cancel")}>Tolak</Button>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          ))}
+        </div>
       </Card>}
 
       {tab === "mutasi" && <Card>
-        <CardHeader title="Mutasi Saldo" subtitle="Setoran disetujui menambah saldo. Pembayaran mengurangi saldo." />
+        <CardHeader title="Buku mutasi saldo" subtitle={scopeText(role)} />
         <div className="divide-y divide-slate-100">
-          {tickets.filter((ticket) => ticket.status === "approved").map((ticket) => (
-            <div key={ticket.id} className="flex justify-between px-5 py-3 text-sm"><span>Setoran {ticket.bank}</span><span className="font-semibold text-emerald-700">+{formatRupiah(ticket.amount)}</span></div>
-          ))}
-          {sales.map((sale) => (
-            <div key={sale.id} className="flex justify-between px-5 py-3 text-sm"><span>{sale.product} · {formatWaktu(sale.createdAt)}</span><span className="font-semibold text-rose-700">-{formatRupiah(sale.amount)}</span></div>
+          <div className="grid grid-cols-4 gap-2 bg-slate-50 px-5 py-2 text-[11px] font-semibold uppercase text-slate-500"><span>Keterangan</span><span>Awal</span><span>Perubahan</span><span>Akhir</span></div>
+          {mutations.length === 0 && <div className="px-5 py-6 text-center text-sm text-slate-500">Belum ada perubahan saldo pada jangkauan peran ini.</div>}
+          {mutations.map((row) => (
+            <div key={row.id} className="grid grid-cols-4 gap-2 px-5 py-3 text-sm">
+              <div className="font-medium text-slate-800">{row.direction === "credit" ? "Masuk" : "Keluar"} · {row.note}<div className="text-xs font-normal text-slate-500">{formatWaktu(row.at)}</div></div>
+              <div>{formatRupiah(openingBalance(row))}</div>
+              <div className={`font-semibold ${row.direction === "credit" ? "text-emerald-700" : "text-rose-700"}`}>{row.direction === "credit" ? "+" : "-"}{formatRupiah(row.amount)}</div>
+              <div>{formatRupiah(Number(row.balanceAfter ?? 0))}</div>
+            </div>
           ))}
         </div>
       </Card>}
       </div>
     </div>
+  );
+}
+export function PusatDepositPage() {
+  return (
+    <PageContainer>
+      <DepositPanel page tick={0} requestRefresh={() => undefined} onClose={() => { window.location.hash = "/dashboard"; }} />
+    </PageContainer>
   );
 }

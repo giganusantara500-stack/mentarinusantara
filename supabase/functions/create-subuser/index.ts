@@ -1,11 +1,11 @@
 // Edge Function: create-subuser
 //
 // Membuat akun Mitra, Sub Mitra, atau Loket di bawah jaringan pemanggil, lalu
-// mengirim email undian agar pengguna membuat password sendiri.
+// mengirim email password sementara dari Mentari Nusantara.
 // Aksi tambahan:
-// - "resend": kirim ulang undian untuk akun yang belum pernah login.
+// - "resend": kirim ulang password sementara untuk akun yang belum pernah login.
 // - "update_email": ubah email akun target di Supabase Auth + profiles.
-// - "reset_password": kirim kode sandi sementara 12 digit ke pengguna target via Resend API.
+// - "reset_password": buat password sementara baru dan kirim email "Password Baru Anda".
 // Pemanggil diverifikasi dari JWT, role dan hierarki diperiksa di server.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
@@ -32,7 +32,7 @@ const VALID_LOKET_TYPES = ["konter", "minimarket", "agen", "lainnya"];
 const USERNAME_PATTERN = /^[a-z0-9_.]{3,30}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_URL_PATTERN = /^https?:\/\/[^\s]+$/;
-const PLATFORM_NAME = "Giga Mentari Nusantara";
+const DEFAULT_SENDER_NAME = "Mentari Nusantara";
 
 function json(obj: unknown, status = 200) {
   return new Response(JSON.stringify(obj), {
@@ -99,64 +99,73 @@ function escapeHtml(str: string): string {
     .replace(/'/g, "&#39;");
 }
 
-async function sendTempPasswordEmail(
-  admin: SupabaseClient,
-  targetId: string,
-  toEmail: string,
-  fullName: string,
-  tempPassword: string,
-): Promise<string | null> {
-  const resendApiKey = Deno.env.get("RESEND_API_KEY");
-  if (!resendApiKey) {
-    return "RESEND_API_KEY belum dikonfigurasi. Email tidak terkirim.";
-  }
-  const senderEmail = Deno.env.get("EMAIL_FROM_ADDRESS") || "onboarding@resend.dev";
-  const fromHeader = `${PLATFORM_NAME} <${senderEmail}>`;
+function mailIdentity() {
+  const senderName = (Deno.env.get("SENDER_NAME") || DEFAULT_SENDER_NAME).trim() || DEFAULT_SENDER_NAME;
+  const senderEmail = (Deno.env.get("SENDER_EMAIL") || Deno.env.get("EMAIL_FROM_ADDRESS") || "").trim();
+  const supportEmail = (Deno.env.get("SUPPORT_EMAIL") || "").trim();
+  return { senderName, senderEmail, supportEmail };
+}
 
-  const htmlBody = `<!DOCTYPE html>
+function fromHeader(senderName: string, senderEmail: string) {
+  return `${senderName} <${senderEmail}>`;
+}
+
+function temporaryPasswordMessage(input: {
+  senderName: string;
+  name: string;
+  password: string;
+  username?: string;
+  email?: string;
+  supportEmail?: string;
+  kind: "registration" | "reset";
+}) {
+  const name = input.name.trim() || "Pengguna";
+  const help = input.supportEmail
+    ? `Jika Anda tidak meminta email ini atau mengalami kendala, hubungi ${input.supportEmail}.`
+    : `Jika Anda tidak meminta email ini atau mengalami kendala, hubungi administrator ${input.senderName}.`;
+  const intro = input.kind === "registration"
+    ? `Akun ${input.senderName} Anda sudah dibuat. Berikut password sementara untuk masuk pertama kali.`
+    : `Permintaan reset password akun ${input.senderName} Anda sudah diproses. Berikut password sementara yang baru.`;
+  const identity = [
+    ["Nama", name],
+    ["Username", input.username?.trim() || ""],
+    ["Email", input.email?.trim() || ""],
+  ].filter((row) => row[1]);
+  const identityHtml = identity.map(([label, value]) =>
+    `<tr><td style="padding:6px 0;color:#64748b;font-size:13px;width:110px;">${escapeHtml(label)}</td><td style="padding:6px 0;color:#0f172a;font-size:14px;font-weight:600;">${escapeHtml(value)}</td></tr>`,
+  ).join("");
+  const html = `<!DOCTYPE html>
 <html lang="id">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;min-height:100vh;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9;">
     <tr>
       <td align="center" style="padding:24px 12px;">
-        <table width="560" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background-color:#ffffff;border-radius:16px;overflow:hidden;">
           <tr>
-            <td style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:28px 32px;text-align:center;">
-              <div style="display:inline-block;width:44px;height:44px;background:rgba(255,255,255,0.15);border-radius:12px;line-height:44px;font-size:24px;font-weight:bold;color:#ffffff;">G</div>
-              <div style="margin-top:8px;font-size:18px;font-weight:700;color:#ffffff;letter-spacing:0.5px;">${PLATFORM_NAME}</div>
-              <div style="font-size:11px;color:#94a3b8;text-transform:uppercase;letter-spacing:2px;margin-top:2px;">Platform PPOB</div>
+            <td style="background-color:#1e3a5f;padding:28px 32px;text-align:center;">
+              <div style="font-size:20px;font-weight:700;color:#ffffff;">${escapeHtml(input.senderName)}</div>
+              <div style="font-size:11px;color:#cbd5e1;letter-spacing:1.5px;margin-top:6px;">PASSWORD SEMENTARA</div>
             </td>
           </tr>
           <tr>
-            <td style="padding:32px;">
-              <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0f172a;">Kode Sandi Sementara Anda</h1>
-              <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:#475569;">
-                Halo <strong>${escapeHtml(fullName || "Pengguna")}</strong>,<br>
-                Berikut adalah kode sandi sementara untuk akun ${PLATFORM_NAME} Anda:
-              </p>
-              <div style="background-color:#f8fafc;border:2px solid #2563eb;border-radius:12px;padding:20px;text-align:center;margin-bottom:24px;">
-                <div style="font-size:13px;color:#64748b;margin-bottom:8px;">KODE SANDI SEMENTARA</div>
-                <div style="font-size:32px;font-weight:700;letter-spacing:6px;color:#1e3a5f;font-family:'Courier New',monospace;">
-                  ${escapeHtml(tempPassword)}
-                </div>
+            <td style="padding:32px 28px;">
+              <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#0f172a;">Password Baru Anda</h1>
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.6;color:#475569;">Halo <strong>${escapeHtml(name)}</strong>,<br>${escapeHtml(intro)}</p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">${identityHtml}</table>
+              <div style="background-color:#f8fafc;border:2px solid #1e3a5f;border-radius:12px;padding:20px;text-align:center;margin-bottom:20px;">
+                <div style="font-size:12px;color:#64748b;letter-spacing:1px;margin-bottom:8px;">PASSWORD SEMENTARA</div>
+                <div style="font-size:32px;font-weight:700;letter-spacing:6px;color:#1e3a5f;font-family:'Courier New',Courier,monospace;">${escapeHtml(input.password)}</div>
               </div>
-              <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#475569;">
-                Silakan login dengan email dan kode sandi sementara di atas. Anda akan diminta mengubah kata sandi setelah berhasil masuk.
-              </p>
-              <div style="background-color:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:16px;margin-bottom:20px;">
-                <p style="margin:0;font-size:13px;line-height:1.6;color:#92400e;">
-                  <strong>Penting:</strong> Kode sandi ini bersifat sementara. Segera login dan ganti dengan kata sandi baru yang kuat. Jangan membagikan kode sandi ini kepada siapapun.
-                </p>
+              <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#475569;">Gunakan password di atas untuk login. Segera ganti dengan password baru milik Anda setelah berhasil masuk. Jangan membagikan password ini kepada siapa pun.</p>
+              <div style="background-color:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:16px;">
+                <p style="margin:0;font-size:13px;line-height:1.6;color:#92400e;"><strong>Masa berlaku:</strong> password sementara ini berlaku sampai Anda menggantinya setelah login. ${escapeHtml(help)}</p>
               </div>
             </td>
           </tr>
           <tr>
-            <td style="background-color:#f8fafc;padding:20px 32px;border-top:1px solid #e2e8f0;">
-              <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;line-height:1.5;">
-                Email ini dikirim oleh sistem ${PLATFORM_NAME}. Jangan membalas email ini.<br>
-                &copy; 2026 ${PLATFORM_NAME}. Semua hak dilindungi.
-              </p>
+            <td style="background-color:#f8fafc;padding:18px 28px;border-top:1px solid #e2e8f0;">
+              <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;line-height:1.5;">Email ini dikirim oleh sistem ${escapeHtml(input.senderName)}. Mohon tidak membalas email ini.</p>
             </td>
           </tr>
         </table>
@@ -165,21 +174,45 @@ async function sendTempPasswordEmail(
   </table>
 </body>
 </html>`;
+  const text = [
+    `${input.senderName} — Password Baru Anda`,
+    "",
+    `Halo ${name},`,
+    intro,
+    ...identity.map(([label, value]) => `${label}: ${value}`),
+    "",
+    `Password sementara: ${input.password}`,
+    "",
+    "Gunakan password di atas untuk login. Segera ganti dengan password baru milik Anda setelah berhasil masuk.",
+    `Masa berlaku: password sementara ini berlaku sampai Anda menggantinya setelah login. ${help}`,
+  ].join("\n");
+  return { html, text };
+}
 
-  const textBody = `${PLATFORM_NAME} - Kode Sandi Sementara
-
-Halo ${fullName || "Pengguna"},
-
-Berikut adalah kode sandi sementara untuk akun ${PLATFORM_NAME} Anda:
-
-${tempPassword}
-
-Silakan login dengan email dan kode sandi sementara di atas. Anda akan diminta mengubah kata sandi setelah berhasil masuk.
-
-Penting: Kode sandi ini bersifat sementara. Segera login dan ganti dengan kata sandi baru yang kuat.
-
-© 2026 ${PLATFORM_NAME}. Semua hak dilindungi.`;
-
+async function sendTempPasswordEmail(
+  toEmail: string,
+  fullName: string,
+  tempPassword: string,
+  kind: "registration" | "reset",
+  username?: string,
+): Promise<string | null> {
+  const resendApiKey = Deno.env.get("RESEND_API_KEY");
+  if (!resendApiKey) {
+    return "RESEND_API_KEY belum dikonfigurasi. Email tidak terkirim.";
+  }
+  const { senderName, senderEmail, supportEmail } = mailIdentity();
+  if (!senderEmail.includes("@")) {
+    return "Secret SENDER_EMAIL belum diisi di Edge Function Supabase. Email tidak dikirim.";
+  }
+  const message = temporaryPasswordMessage({
+    senderName,
+    name: fullName,
+    password: tempPassword,
+    username,
+    email: toEmail.endsWith("@loket.local") ? "" : toEmail,
+    supportEmail,
+    kind,
+  });
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -187,11 +220,11 @@ Penting: Kode sandi ini bersifat sementara. Segera login dan ganti dengan kata s
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      from: fromHeader,
+      from: fromHeader(senderName, senderEmail),
       to: [toEmail],
-      subject: `Kode Sandi Sementara - ${PLATFORM_NAME}`,
-      html: htmlBody,
-      text: textBody,
+      subject: "Password Baru Anda",
+      html: message.html,
+      text: message.text,
     }),
   });
 
@@ -205,7 +238,7 @@ Penting: Kode sandi ini bersifat sementara. Segera login dan ganti dengan kata s
 
 interface SetupResult { passwordError: string | null; emailError: string | null; tempPassword: string }
 
-async function sendSetupEmail(admin: SupabaseClient, targetId: string, email: string, fullName: string): Promise<SetupResult> {
+async function sendSetupEmail(admin: SupabaseClient, targetId: string, email: string, fullName: string, username?: string, kind: "registration" | "reset" = "reset"): Promise<SetupResult> {
   const tempPassword = generateTempPassword();
   const { error: rpcErr } = await admin.rpc("admin_set_user_password", {
     p_user_id: targetId,
@@ -215,7 +248,7 @@ async function sendSetupEmail(admin: SupabaseClient, targetId: string, email: st
 
   await admin.from("profiles").update({ must_change_password: true }).eq("id", targetId);
 
-  const emailErr = await sendTempPasswordEmail(admin, targetId, email, fullName, tempPassword);
+  const emailErr = await sendTempPasswordEmail(email, fullName, tempPassword, kind, username);
   return { passwordError: null, emailError: emailErr, tempPassword };
 }
 
@@ -276,7 +309,7 @@ Deno.serve(async (req: Request) => {
       if (authTarget.user.last_sign_in_at) {
         return json({ error: "Akun ini sudah pernah login. Gunakan fitur lupa password." }, 409);
       }
-      const result = await sendSetupEmail(admin, target.id, target.email, target.full_name);
+      const result = await sendSetupEmail(admin, target.id, target.email, target.full_name, target.username ?? undefined, "registration");
       if (result.passwordError) return json({ error: result.passwordError, email_sent: false }, 502);
       return json({ success: true, email_sent: !result.emailError, email_error: result.emailError, temp_password: result.tempPassword });
     }
@@ -291,7 +324,7 @@ Deno.serve(async (req: Request) => {
       if (caller.role !== "super_admin" && !(await isInNetwork(admin, target.id, caller.id))) {
         return json({ error: "Akun berada di luar jaringan Anda." }, 403);
       }
-      const result = await sendSetupEmail(admin, target.id, target.email, target.full_name);
+      const result = await sendSetupEmail(admin, target.id, target.email, target.full_name, target.username ?? undefined);
       if (result.passwordError) return json({ error: result.passwordError, email_sent: false }, 502);
 
       await admin.from("audit_logs").insert({
@@ -477,7 +510,7 @@ Deno.serve(async (req: Request) => {
     await admin.from("profiles").update({ must_change_password: true }).eq("id", newId);
     let emailErr: string | null = null;
     if (EMAIL_PATTERN.test(email) && !email.endsWith("@loket.local")) {
-      emailErr = await sendTempPasswordEmail(admin, newId, email, fullName, tempPassword);
+      emailErr = await sendTempPasswordEmail(email, fullName, tempPassword, "registration", username);
     }
     const setupResult: SetupResult = { passwordError: null, emailError: emailErr, tempPassword };
 

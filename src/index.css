@@ -8,8 +8,19 @@
   font-family: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
+html {
+  font-size: 16px;
+  text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+
 html, body, #root {
   height: 100%;
+  min-height: 100%;
+}
+
+#root {
+  overflow: hidden;
 }
 
 body {
@@ -47,4 +58,45 @@ body {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+.loket-desk table {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.loket-desk th {
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: #334155;
+}
+
+.loket-desk td {
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.loket-desk td.font-mono,
+.loket-desk td.font-semibold {
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.loket-desk input,
+.loket-desk select,
+.loket-desk textarea {
+  font-weight: 700;
+}
+
+.loket-desk label > span {
+  margin-bottom: 0.15rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #334155;
 }

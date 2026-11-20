@@ -59,38 +59,21 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
     return () => { document.title = previous; };
   }, []);
 
-  useEffect(() => {
-    const desktop = window.matchMedia("(display-mode: standalone)").matches;
-    if (desktop || window.name === "mentari-loket") return;
-    const root = document.documentElement;
-    const fill = () => {
-      if (!document.fullscreenElement) root.requestFullscreen?.().catch(() => undefined);
-    };
-    fill();
-    if (!sessionStorage.getItem("mentari-desk")) {
-      const features = `menubar=no,toolbar=no,location=no,status=no,width=${window.screen.availWidth},height=${window.screen.availHeight},left=0,top=0`;
-      const opened = window.open(window.location.href, "mentari-loket", features);
-      if (opened) sessionStorage.setItem("mentari-desk", "1");
-    }
-    window.addEventListener("pointerdown", fill, { once: true });
-    return () => window.removeEventListener("pointerdown", fill);
-  }, []);
-
   if (!profile) return null;
   const role = dbRoleToAppRole(profile.role);
   if (role === "pending") return null;
   return (
     <LoketRefreshContext.Provider value={{ tick, requestRefresh, loketCode, openDeposit: () => setDepositOpen(true) }}>
-      <div className="flex h-dvh w-screen flex-col overflow-hidden bg-white">
+      <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white">
         <DeskHeader brand={LOKET_BRAND} stats={stats} onDeposit={() => setDepositOpen(true)} onRefresh={requestRefresh} onLogout={onLogout} />
-        {notice && <div className="bg-emerald-50 px-4 py-1 text-xs font-semibold text-emerald-700">{notice}</div>}
-        <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden px-6 pt-2 md:px-10">
+        {notice && <div className="bg-emerald-50 px-3 py-0.5 text-sm font-black text-emerald-800">{notice}</div>}
+        <main className="loket-desk flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden px-3 pt-0">
           <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
-          <div className="h-20 shrink-0" />
+          <div className="h-16 shrink-0" />
         </main>
         <DepositModal open={depositOpen || current === "/deposit"} tick={tick} requestRefresh={requestRefresh} onClose={() => { setDepositOpen(false); if (current === "/deposit") onNavigate("/dashboard"); }} />
         <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-slate-200 bg-white">
-          <div className="flex w-full items-center justify-center gap-6 overflow-x-auto md:gap-10">
+          <div className="flex w-full items-center justify-center gap-2 overflow-x-auto sm:gap-4">
             {MENU.map((item) => {
               const active = current === item.path || (item.path === "/beli" && current.startsWith("/beli"));
               const Icon = item.icon;
@@ -99,12 +82,12 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
                   key={item.path}
                   onClick={() => onNavigate(item.path)}
                   className={cn(
-                    "relative flex w-[4.5rem] shrink-0 flex-col items-center gap-1 px-1 pb-2 pt-2 text-[11px] font-bold leading-tight sm:w-20 sm:text-xs",
-                    active ? "text-slate-900" : "text-slate-600",
+                    "relative flex w-16 shrink-0 flex-col items-center gap-0.5 px-0.5 pb-1 pt-1 text-xs font-black leading-none sm:w-[4.5rem]",
+                    active ? "text-slate-950" : "text-slate-700",
                   )}
                 >
-                  <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg shadow-sm", active ? "bg-amber-400 text-neutral-950" : "bg-neutral-950 text-amber-400")}>
-                    <Icon size={18} strokeWidth={2.4} />
+                  <span className={cn("flex h-9 w-9 items-center justify-center rounded-md", active ? "bg-amber-400 text-neutral-950" : "bg-neutral-950 text-amber-400")}>
+                    <Icon size={22} strokeWidth={2.6} />
                   </span>
                   <span className="max-w-full text-center">{item.label}</span>
                   {active && <span className="absolute inset-x-3 bottom-0 h-1 rounded-full bg-amber-400" />}

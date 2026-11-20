@@ -28,44 +28,16 @@ export function LoginPage() {
 
     if (input && !isEmail(input)) {
       const username = input.toLowerCase();
-      const { data: lookupRows, error: lookupErr } = await supabase.rpc("lookup_email_by_username", { p_username: username });
-      const row = Array.isArray(lookupRows) ? lookupRows[0] : lookupRows;
-      if (!lookupErr && row?.email) {
-        if (row.status === "suspended") {
-          setError("Akun Anda dinonaktifkan. Hubungi administrator.");
-          setLoading(false);
-          return;
-        }
-        loginEmail = row.email;
-      } else if (!lookupErr) {
-        setError("Username tidak ditemukan.");
+      const { data: found, error: lookupErr } = await supabase.rpc("lookup_email_by_username", { p_username: username });
+      const usernameExists = found === true || (Array.isArray(found) && found.length > 0);
+      if (lookupErr || !usernameExists) {
+        setError(lookupErr ? "Gagal memverifikasi pengguna. Coba lagi." : "Username tidak ditemukan.");
         setLoading(false);
         return;
-      } else {
-        const { data, error: profileErr } = await supabase
-          .from("profiles")
-          .select("username, role, is_active")
-          .eq("username", username)
-          .maybeSingle();
-        if (profileErr) {
-          setError("Gagal memverifikasi pengguna. Coba lagi.");
-          setLoading(false);
-          return;
-        }
-        if (!data) {
-          setError("Username tidak ditemukan.");
-          setLoading(false);
-          return;
-        }
-        if (data.is_active === false) {
-          setError("Akun Anda dinonaktifkan. Hubungi administrator.");
-          setLoading(false);
-          return;
-        }
-        loginEmail = data.username === "giganusantara"
-          ? "gigamentarinusantara@gmail.com"
-          : `${data.username}@gigamentarinusantara.id`;
       }
+      loginEmail = username === "giganusantara"
+        ? "gigamentarinusantara@gmail.com"
+        : `${username}@gigamentarinusantara.id`;
     }
 
     const res = await signIn(loginEmail, password);
@@ -150,15 +122,15 @@ export function LoginPage() {
             <>
               <div className="mb-6 text-center">
                 <h2 className="text-xl font-bold text-slate-900">Pemulihan Kata Sandi</h2>
-                <p className="text-sm text-slate-500 mt-1">Kami akan mengirim kode sandi sementara ke email Anda.</p>
+                <p className="text-sm text-slate-500 mt-1">Kami mengirim password sementara ke email terdaftar Anda.</p>
               </div>
               {recoverSent ? (
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-800">
                   <div className="flex items-center gap-2 mb-1">
                     <KeyRound size={16} />
-                    <b>Kode sandi sementara terkirim</b>
+                    <b>Password baru terkirim</b>
                   </div>
-                  <p className="text-emerald-700">Kode sandi sementara telah dikirim ke email Anda. Login dengan kode sandi tersebut, lalu ganti dengan kata sandi baru Anda.</p>
+                  <p className="text-emerald-700">Buka email dari Mentari Nusantara. Gunakan password sementara untuk masuk, lalu segera ganti setelah login.</p>
                 </div>
               ) : (
                 <form onSubmit={onRecover} className="space-y-4">
@@ -175,7 +147,7 @@ export function LoginPage() {
                     </div>
                   )}
                   <Button type="submit" fullWidth size="lg" disabled={loading}>
-                    {loading ? "Mengirim..." : "Kirim Kode Sandi Sementara"}
+                    {loading ? "Mengirim..." : "Kirim Password Baru"}
                   </Button>
                 </form>
               )}

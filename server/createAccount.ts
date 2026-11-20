@@ -1,4 +1,4 @@
-import { readDotEnv, sendPasswordEmail } from "./mail";
+import { readDotEnv, sendAccountEmail, sendPasswordEmail } from "./mail";
 import { codeFromMetadata, listAuthUsers, makeLoketCode } from "./loketCode";
 
 export interface CreateAccountInput {
@@ -19,7 +19,8 @@ export interface CreateAccountResult {
   user_id: string;
   username: string;
   temp_password: string;
-  email_sent: false;
+  email_sent: boolean;
+  email_error: string | null;
   loket_code: string | null;
 }
 
@@ -29,6 +30,9 @@ interface Env {
   serviceRoleKey: string;
   resendApiKey?: string;
   emailFrom?: string;
+  senderName?: string;
+  senderEmail?: string;
+  supportEmail?: string;
 }
 
 const ALLOWED: Record<string, string[]> = {
@@ -67,6 +71,84 @@ export function nextUsername(base: string, existing: string[]) {
   return `${base}${number}`;
 }
 
+function supabaseError(body: unknown) {
+  if (!body || typeof body !== "object") return "Supabase tidak mengembalikan detail error.";
+  const record = body as Record<string, unknown>;
+  const nested = record.error && typeof record.error === "object" ? record.error as Record<string, unknown> : null;
+  const parts = [
+    record.message, record.msg, record.error_description, record.hint, record.details, record.code, record.error_code,
+    nested?.message, nested?.msg,
+    typeof record.error === "string" ? record.error : "",
+  ].filter((value) => typeof value === "string" && value.trim());
+  return parts.join(" | ") || JSON.stringify(body);
+}
+
+function columnName(message: string) {
+  return message.match(/'([^']+)' column/)?.[1]
+    || message.match(/column "([^"]+)"/)?.[1]
+    || "";
+}
+
+async function saveProfile(env: Env, userId: string, fields: Record<string, unknown>) {
+  const headers = {
+    apikey: env.serviceRoleKey,
+    Authorization: `Bearer ${env.serviceRoleKey}`,
+    "Content-Type": "application/json",
+    Prefer: "return=minimal",
+  };
+  const payload = { ...fields };
+  let lastError = "Profil gagal disimpan.";
+  for (let attempt = 0; attempt < 16; attempt += 1) {
+    const listed = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=*`, { headers });
+    const rows = await readJson(listed);
+    if (!listed.ok) {
+      lastError = supabaseError(rows);
+      const missing = columnName(lastError);
+      if (missing) continue;
+      return { ok: false, error: lastError };
+    }
+    const row = Array.isArray(rows) ? rows[0] as Record<string, unknown> | undefined : undefined;
+    if (row) {
+      const patch: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(payload)) {
+        if (key in row) patch[key] = value;
+      }
+      if (Object.keys(patch).length === 0) return { ok: true as const };
+      const response = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(patch),
+      });
+      if (response.ok) return { ok: true as const };
+      const detail = await readJson(response);
+      lastError = supabaseError(detail);
+      const missing = columnName(lastError);
+      if (missing && missing in payload) {
+        delete payload[missing];
+        continue;
+      }
+      console.error("Supabase profil gagal diperbarui:", lastError);
+      return { ok: false as const, error: lastError };
+    }
+    const response = await fetch(`${env.supabaseUrl}/rest/v1/profiles`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ id: userId, ...payload }),
+    });
+    if (response.ok) return { ok: true as const };
+    const detail = await readJson(response);
+    lastError = supabaseError(detail);
+    const missing = columnName(lastError);
+    if ((missing && missing in payload) || /duplicate key|23505/i.test(lastError)) {
+      if (missing) delete payload[missing];
+      continue;
+    }
+    console.error("Supabase profil gagal disimpan:", lastError);
+    return { ok: false as const, error: lastError };
+  }
+  return { ok: false as const, error: lastError };
+}
+
 async function readJson(response: Response) {
   const text = await response.text();
   if (!text) return null;
@@ -100,6 +182,11 @@ export async function createNetworkAccount(authorization: string, input: CreateA
     { headers: serviceHeaders },
   );
   const callerRows = await readJson(callerProfileResponse);
+  if (!callerProfileResponse.ok) {
+    const message = supabaseError(callerRows);
+    console.error("Supabase gagal membaca profil pemanggil:", callerProfileResponse.status, message);
+    return { status: callerProfileResponse.status || 500, body: { error: message } };
+  }
   const caller = Array.isArray(callerRows) ? callerRows[0] : null;
   const callerRole = normalizeRole(clean(caller?.role));
   if (!caller || caller.is_active === false || !ALLOWED[callerRole]) {
@@ -116,7 +203,8 @@ export async function createNetworkAccount(authorization: string, input: CreateA
   }
   if (!fullName || !phone) return { status: 400, body: { error: "Nama dan nomor HP wajib diisi." } };
   if (!city) return { status: 400, body: { error: "Kota atau wilayah wajib diisi." } };
-  if (role !== "loket" && !clean(input.email)) return { status: 400, body: { error: "Email wajib diisi." } };
+  const contactEmail = clean(input.email).toLowerCase();
+  if (!contactEmail) return { status: 400, body: { error: "Email wajib diisi." } };
 
   if (callerRole === "super_admin" && role === "mitra" && parentId !== callerId) {
     return { status: 403, body: { error: "Mitra harus berada di bawah Super Admin yang membuatnya." } };
@@ -199,64 +287,85 @@ export async function createNetworkAccount(authorization: string, input: CreateA
         business_name: clean(input.businessName),
         address: clean(input.address),
         city,
-        contact_email: clean(input.email),
+        contact_email: contactEmail,
         parent_id: parentId,
         mitra_id: mitraId,
+        created_by: callerId,
         role,
         status: input.status === "suspended" ? "suspended" : "active",
         username,
         loket_type: role === "loket" ? (clean(input.loketType) || "lainnya") : null,
         loket_code: loketCode,
+        mfa_enabled: role === "mitra" || role === "loket",
+        mfa_status: role === "mitra" || role === "loket" || role === "submitra" ? "active" : "off",
       },
     }),
   });
   const created = await readJson(createdResponse);
   const userId = created?.id ?? created?.user?.id;
   if (!createdResponse.ok || !userId) {
-    const message = created?.msg || created?.message || created?.error_description || "Akun autentikasi gagal dibuat.";
-    return { status: createdResponse.status || 500, body: { error: String(message) } };
+    const message = supabaseError(created);
+    console.error("Supabase Auth gagal membuat akun:", createdResponse.status, message);
+    return { status: createdResponse.status || 500, body: { error: message } };
   }
 
   const active = input.status !== "suspended";
-  const profileResponse = await fetch(`${env.supabaseUrl}/rest/v1/profiles?on_conflict=id`, {
-    method: "POST",
-    headers: { ...serviceHeaders, Prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify({
-      id: userId,
-      username,
-      role,
-      is_active: active,
-    }),
+  const savedProfile = await saveProfile(env, userId, {
+    username,
+    role,
+    is_active: active,
+    email: contactEmail,
+    full_name: fullName,
+    phone,
+    business_name: clean(input.businessName),
+    address: clean(input.address),
+    city,
+    parent_id: parentId,
+    mitra_id: mitraId,
+    created_by: callerId,
+    status: active ? "active" : "suspended",
+    loket_type: role === "loket" ? (clean(input.loketType) || "lainnya") : null,
+    loket_code: loketCode,
+    mfa_enabled: role === "mitra" || role === "loket",
+    must_change_password: true,
   });
-  if (!profileResponse.ok) {
-    const repaired = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
-      method: "PATCH",
-      headers: { ...serviceHeaders, Prefer: "return=minimal" },
-      body: JSON.stringify({ username, role, is_active: active }),
-    });
-    if (!repaired.ok) {
-      await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, { method: "DELETE", headers: serviceHeaders });
-      const profileError = await readJson(profileResponse);
-      return { status: 500, body: { error: profileError?.message || "Profil gagal disimpan. Akun dibatalkan." } };
-    }
+  if (!savedProfile.ok) {
+    await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, { method: "DELETE", headers: serviceHeaders });
+    return { status: 500, body: { error: savedProfile.error } };
   }
 
   const savedResponse = await fetch(
-    `${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=role,is_active`,
+    `${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=*`,
     { headers: serviceHeaders },
   );
   const savedRows = await readJson(savedResponse);
   const saved = Array.isArray(savedRows) ? savedRows[0] : null;
-  if (normalizeRole(clean(saved?.role)) !== role || (active && saved?.is_active === false)) {
-    const repaired = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
-      method: "PATCH",
-      headers: { ...serviceHeaders, Prefer: "return=minimal" },
-      body: JSON.stringify({ username, role, is_active: active }),
+  const savedRole = normalizeRole(clean(saved?.role));
+  if (saved && savedRole && savedRole !== role) {
+    await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, { method: "DELETE", headers: serviceHeaders });
+    return { status: 500, body: { error: `Peran akun tersimpan sebagai ${savedRole}, bukan ${role}. Akun dibatalkan.` } };
+  }
+
+  const apiKey = (env.resendApiKey || readDotEnv("RESEND_API_KEY")).trim();
+  const sender = mailSender(env);
+  let emailSent = false;
+  let emailError: string | null = null;
+  if (!apiKey) {
+    emailError = "Layanan email belum dikonfigurasi. Username dan password sementara tetap tersedia di layar.";
+  } else {
+    const mailed = await sendAccountEmail({
+      apiKey,
+      from: sender.from,
+      senderName: sender.name,
+      supportEmail: sender.supportEmail,
+      to: contactEmail,
+      name: fullName,
+      username,
+      email: contactEmail,
+      password: tempPassword,
     });
-    if (!repaired.ok) {
-      await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, { method: "DELETE", headers: serviceHeaders });
-      return { status: 500, body: { error: "Peran akun tidak tersimpan. Akun dibatalkan." } };
-    }
+    emailSent = mailed.sent;
+    emailError = mailed.sent ? null : mailed.error;
   }
 
   const result: CreateAccountResult = {
@@ -264,10 +373,89 @@ export async function createNetworkAccount(authorization: string, input: CreateA
     user_id: userId,
     username,
     temp_password: tempPassword,
-    email_sent: false,
+    email_sent: emailSent,
+    email_error: emailError,
     loket_code: loketCode,
   };
   return { status: 200, body: result };
+}
+
+function mailSender(env: Env) {
+  return {
+    from: (env.senderEmail || readDotEnv("SENDER_EMAIL") || env.emailFrom || readDotEnv("EMAIL_FROM_ADDRESS")).trim(),
+    name: (env.senderName || readDotEnv("SENDER_NAME") || "Mentari Nusantara").trim() || "Mentari Nusantara",
+    supportEmail: (env.supportEmail || readDotEnv("SUPPORT_EMAIL")).trim(),
+  };
+}
+
+async function markMustChangePassword(env: Env, userId: string) {
+  const response = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
+    method: "PATCH",
+    headers: {
+      apikey: env.serviceRoleKey,
+      Authorization: `Bearer ${env.serviceRoleKey}`,
+      "Content-Type": "application/json",
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify({ must_change_password: true }),
+  });
+  if (!response.ok) {
+    const detail = await readJson(response);
+    console.error("Profil gagal ditandai wajib ganti password:", supabaseError(detail));
+  }
+}
+
+export async function requestPasswordReset(emailOrUsername: string, env: Env) {
+  const needle = emailOrUsername.trim().toLowerCase();
+  if (!needle) return { status: 400, body: { error: "Email wajib diisi." } };
+  const users = await listAuthUsers(env) as Array<{ id: string; email?: string; user_metadata?: Record<string, unknown> }>;
+  const user = users.find((item) => {
+    const contact = clean(item.user_metadata?.contact_email).toLowerCase();
+    const authEmail = clean(item.email).toLowerCase();
+    const username = clean(item.user_metadata?.username).toLowerCase();
+    return contact === needle || authEmail === needle || username === needle;
+  });
+  if (!user?.email) return { status: 404, body: { error: "Email tidak ditemukan pada akun terdaftar." } };
+  const recipient = clean(user.user_metadata?.contact_email) || (user.email.endsWith("@gigamentarinusantara.id") ? "" : user.email);
+  if (!recipient) return { status: 400, body: { error: "Akun ini belum memiliki email terdaftar." } };
+  const apiKey = (env.resendApiKey || readDotEnv("RESEND_API_KEY")).trim();
+  if (!apiKey) {
+    return { status: 500, body: { error: "RESEND_API_KEY belum ada, jadi password tidak diubah dan email tidak terkirim." } };
+  }
+  const tempPassword = generatePassword();
+  const headers = { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}`, "Content-Type": "application/json" };
+  const updated = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${user.id}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify({ password: tempPassword }),
+  });
+  if (!updated.ok) {
+    const detail = await readJson(updated);
+    return { status: 500, body: { error: supabaseError(detail) || "Password gagal diperbarui." } };
+  }
+  await markMustChangePassword(env, user.id);
+  const sender = mailSender(env);
+  const mailed = await sendPasswordEmail({
+    apiKey,
+    from: sender.from,
+    senderName: sender.name,
+    supportEmail: sender.supportEmail,
+    to: recipient,
+    name: clean(user.user_metadata?.full_name) || clean(user.user_metadata?.username) || "Pengguna",
+    username: clean(user.user_metadata?.username),
+    email: recipient,
+    password: tempPassword,
+  });
+  if (!mailed.sent) {
+    return {
+      status: 502,
+      body: {
+        error: `Password baru sudah disimpan, tetapi email gagal dikirim. ${mailed.error} Hubungi administrator untuk mengirim ulang password.`,
+        email_sent: false,
+      },
+    };
+  }
+  return { status: 200, body: { success: true, email_sent: true } };
 }
 
 export async function resetAccountPassword(authorization: string, userId: string, env: Env) {
@@ -317,10 +505,12 @@ export async function resetAccountPassword(authorization: string, userId: string
     const detail = await updated.json().catch(() => null);
     return { status: 500, body: { error: detail?.msg || detail?.message || "Password gagal diperbarui." } };
   }
+  await markMustChangePassword(env, userId);
   const contactEmail = typeof targetUser?.user_metadata?.contact_email === "string" ? targetUser.user_metadata.contact_email.trim() : "";
   const authEmail = typeof targetUser?.email === "string" ? targetUser.email.trim() : "";
   const recipient = contactEmail || (authEmail.endsWith("@gigamentarinusantara.id") ? "" : authEmail);
   const name = targetUser?.user_metadata?.full_name || target?.username || "Pengguna";
+  const username = typeof targetUser?.user_metadata?.username === "string" ? targetUser.user_metadata.username : "";
   const apiKey = (env.resendApiKey || readDotEnv("RESEND_API_KEY")).trim();
   if (!apiKey || !recipient) {
     return {
@@ -330,15 +520,21 @@ export async function resetAccountPassword(authorization: string, userId: string
         temp_password: tempPassword,
         email_sent: false,
         email_error: !apiKey
-          ? "RESEND_API_KEY belum ada di file .env. Password baru tampil di layar ini."
+          ? "Layanan email belum siap. Password baru tampil di layar ini."
           : "Akun ini belum memiliki email terdaftar. Password baru tampil di layar ini.",
       },
     };
   }
+  const sender = mailSender(env);
   const mailed = await sendPasswordEmail({
     apiKey,
+    from: sender.from,
+    senderName: sender.name,
+    supportEmail: sender.supportEmail,
     to: recipient,
     name,
+    username,
+    email: recipient,
     password: tempPassword,
   });
   return {
