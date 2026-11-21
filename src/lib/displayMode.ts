@@ -26,19 +26,13 @@ function setManifest(href: string) {
 }
 
 function loketEntryRequested() {
-  return new URLSearchParams(window.location.search).get("app") === "loket";
+  if (new URLSearchParams(window.location.search).get("app") === "loket") return true;
+  const hash = window.location.hash.replace(/^#/, "").split("?")[0];
+  return hash === "/loket-login" || hash === "/meja" || hash.startsWith("/meja/");
 }
 
 export function isLoketWindow() {
   return document.documentElement.classList.contains("loket-app") || installedLoketApp() || loketEntryRequested();
-}
-
-export function setEntryMode(mode: "loket" | "monitor") {
-  const url = new URL(window.location.href);
-  if (mode === "loket") url.searchParams.set("app", "loket");
-  else url.searchParams.delete("app");
-  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-  applyDisplayMode(null, false);
 }
 
 export async function requestLoketFullscreen(): Promise<"entered" | "exited" | "unavailable"> {

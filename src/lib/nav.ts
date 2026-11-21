@@ -81,27 +81,26 @@ export const NAV_CONFIG: Record<Role, NavSection[]> = {
   mitra: managementNav("mitra"),
   submitra: managementNav("submitra"),
   loket: [
-    { category: "Utama", items: [dashboard] },
+    { category: "Utama", items: [{ path: "/meja", label: "Beranda", icon: LayoutDashboard }] },
     {
       category: "Transaksi",
       items: [
-        { path: "/beli", label: "Beli Produk", icon: ShoppingCart },
-        { path: "/produk", label: "Katalog Produk", icon: Package },
-        { path: "/transaksi", label: "Riwayat Transaksi", icon: History },
+        { path: "/meja/beli", label: "Beli Produk", icon: ShoppingCart },
+        { path: "/meja/transaksi", label: "Riwayat Transaksi", icon: History },
       ],
     },
     {
       category: "Keuangan",
       items: [
-        { path: "/mutasi", label: "Mutasi Saldo", icon: Wallet },
-        { path: "/deposit", label: "Deposit", icon: Landmark },
+        { path: "/meja/transfer", label: "Transfer Uang", icon: Wallet },
+        { path: "/meja/deposit", label: "Deposit", icon: Landmark },
       ],
     },
     {
       category: "Informasi",
       items: [
-        { path: "/pengumuman", label: "Pengumuman", icon: Megaphone },
-        { path: "/pengaturan", label: "Pengaturan", icon: Settings },
+        { path: "/meja/laporan", label: "Laporan", icon: FileBarChart },
+        { path: "/meja/pengaturan", label: "Pengaturan", icon: Settings },
       ],
     },
   ],

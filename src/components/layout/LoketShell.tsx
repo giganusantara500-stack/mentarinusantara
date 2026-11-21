@@ -22,13 +22,13 @@ export function useLoketRefresh() {
 }
 
 const MENU = [
-  { path: "/dashboard", label: "Beranda", icon: Home },
-  { path: "/beli", label: "Transaksi", icon: Receipt },
-  { path: "/kolektif", label: "Kolektif", icon: Layers },
-  { path: "/transfer", label: "Transfer Uang", icon: Banknote },
-  { path: "/riwayat", label: "Status Transaksi", icon: ClipboardList },
-  { path: "/laporan", label: "Laporan", icon: FileBarChart },
-  { path: "/pengaturan", label: "Setting", icon: Settings },
+  { path: "/meja", label: "Beranda", icon: Home },
+  { path: "/meja/beli", label: "Transaksi", icon: Receipt },
+  { path: "/meja/kolektif", label: "Kolektif", icon: Layers },
+  { path: "/meja/transfer", label: "Transfer Uang", icon: Banknote },
+  { path: "/meja/riwayat", label: "Status Transaksi", icon: ClipboardList },
+  { path: "/meja/laporan", label: "Laporan", icon: FileBarChart },
+  { path: "/meja/pengaturan", label: "Setting", icon: Settings },
 ];
 
 export const LOKET_BRAND = "Mentari Nusantara";
@@ -72,11 +72,11 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
           <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
           <div className="h-[calc(4rem+env(safe-area-inset-bottom))] shrink-0" />
         </main>
-        <DepositModal open={depositOpen || current === "/deposit"} tick={tick} requestRefresh={requestRefresh} onClose={() => { setDepositOpen(false); if (current === "/deposit") onNavigate("/dashboard"); }} />
+        <DepositModal open={depositOpen || current === "/meja/deposit"} tick={tick} requestRefresh={requestRefresh} onClose={() => { setDepositOpen(false); if (current === "/meja/deposit") onNavigate("/meja"); }} />
         <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)]">
           <div className="flex w-full items-center justify-center gap-2 overflow-x-auto sm:gap-4">
             {MENU.map((item) => {
-              const active = current === item.path || (item.path === "/beli" && current.startsWith("/beli"));
+              const active = current === item.path || (item.path === "/meja/beli" && current.startsWith("/meja/beli"));
               const Icon = item.icon;
               return (
                 <button

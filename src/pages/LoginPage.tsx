@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { LOKET_VERSION_LABEL, PLATFORM_NAME } from "@/lib/brand";
-import { isLoketWindow, setEntryMode } from "@/lib/displayMode";
+import { LOKET_HOME, MONITOR_HOME } from "@/lib/access";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
 import { Zap, User, Lock, AlertCircle, ArrowLeft, KeyRound, Eye, EyeOff } from "lucide-react";
 
-export function LoginPage() {
+export function LoginPage({ variant }: { variant: "monitor" | "loket" }) {
   const { signIn, recoverPassword } = useAuth();
   const [loginInput, setLoginInput] = useState("");
   const [password, setPassword] = useState("");
@@ -17,18 +17,7 @@ export function LoginPage() {
   const [mode, setMode] = useState<"login" | "recover">("login");
   const [recoverSent, setRecoverSent] = useState(false);
   const [recoverEmail, setRecoverEmail] = useState("");
-  const [loketWindow, setLoketWindow] = useState(false);
-
-  useEffect(() => {
-    setLoketWindow(isLoketWindow());
-  }, []);
-
-  const chooseEntry = (next: "loket" | "monitor") => {
-    setEntryMode(next);
-    setLoketWindow(next === "loket");
-    setMode("login");
-    setError("");
-  };
+  const loketWindow = variant === "loket";
 
   const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
@@ -60,7 +49,7 @@ export function LoginPage() {
       setError(res.error);
       return;
     }
-    window.location.hash = "/dashboard";
+    window.location.hash = variant === "loket" ? LOKET_HOME : MONITOR_HOME;
   };
 
   const onRecover = async (e: React.FormEvent) => {
@@ -114,9 +103,6 @@ export function LoginPage() {
             <p className="mt-3 max-w-sm text-sm leading-6 text-amber-50/80">Meja kasir untuk transaksi, kolektif, dan saldo loket.</p>
             <p className="mt-4 text-xs font-semibold text-amber-200">{LOKET_VERSION_LABEL}</p>
           </div>
-          <p className="mt-10 max-w-sm text-xs leading-5 text-neutral-400">
-            Tab browser biasa tetap menampilkan bilah alamat. Bilah itu hilang setelah aplikasi loket dipasang, atau sementara setelah tombol Layar penuh ditekan dari dalam meja loket.
-          </p>
         </aside>
         <main className="flex items-center justify-center px-6 py-10">
           <div className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-8 shadow-xl">
@@ -145,9 +131,8 @@ export function LoginPage() {
                     {loading ? "MEMPROSES" : "LOGIN"}
                   </button>
                 </form>
-                <div className="mt-5 flex items-center justify-between text-sm">
+                <div className="mt-5 text-sm">
                   <button type="button" onClick={() => { setMode("recover"); setError(""); setRecoverSent(false); }} className="text-slate-500 hover:text-slate-800">Lupa kata sandi?</button>
-                  <button type="button" onClick={() => chooseEntry("monitor")} className="font-semibold text-neutral-950">Dashboard monitoring</button>
                 </div>
               </>
             ) : (
@@ -208,12 +193,9 @@ export function LoginPage() {
                   {loading ? "Memproses..." : "Masuk"}
                 </button>
               </form>
-              <div className="mt-5 flex flex-col items-center gap-2 text-center">
+              <div className="mt-5 text-center">
                 <button onClick={() => { setMode("recover"); setError(""); setRecoverSent(false); }} className="text-sm text-purple-600 hover:text-purple-700 hover:underline">
                   Lupa kata sandi?
-                </button>
-                <button type="button" onClick={() => chooseEntry("loket")} className="text-sm font-semibold text-slate-700">
-                  Buka tampilan Loket
                 </button>
               </div>
             </>

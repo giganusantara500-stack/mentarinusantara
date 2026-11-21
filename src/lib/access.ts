@@ -1,6 +1,21 @@
 import { canonicalRole } from "@/lib/auth";
 
-const LOKET = new Set(["/dashboard", "/beli", "/kolektif", "/transfer", "/riwayat", "/transaksi", "/laporan", "/pengaturan", "/deposit"]);
+export const MONITOR_HOME = "/dashboard";
+export const MONITOR_LOGIN = "/login";
+export const LOKET_HOME = "/meja";
+export const LOKET_LOGIN = "/loket-login";
+
+const LOKET = new Set([
+  "/meja",
+  "/meja/beli",
+  "/meja/kolektif",
+  "/meja/transfer",
+  "/meja/riwayat",
+  "/meja/transaksi",
+  "/meja/laporan",
+  "/meja/pengaturan",
+  "/meja/deposit",
+]);
 
 const SUBMITRA = new Set([
   "/dashboard", "/mutasi", "/transaksi", "/riwayat", "/rekap", "/qris", "/deposit",
@@ -11,6 +26,15 @@ const SUBMITRA = new Set([
 const MITRA = new Set([...SUBMITRA, "/submitra", "/runtext"]);
 
 const SUPER = new Set([...MITRA, "/mitra", "/harga", "/pembagian", "/produk", "/beli", "/setup-superadmin"]);
+
+export function isLoketArea(path: string) {
+  const base = path.split("?")[0] || "/";
+  return base === LOKET_LOGIN || base === LOKET_HOME || base.startsWith(`${LOKET_HOME}/`);
+}
+
+export function homeForRole(role: string | null | undefined) {
+  return canonicalRole(role) === "loket" ? LOKET_HOME : MONITOR_HOME;
+}
 
 export function pathAllowed(role: string | null | undefined, path: string) {
   const canonical = canonicalRole(role);

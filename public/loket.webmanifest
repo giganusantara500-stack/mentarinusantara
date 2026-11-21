@@ -1,9 +1,9 @@
 {
-  "id": "/?app=loket",
+  "id": "/#/loket-login",
   "name": "Mentari Nusantara",
   "short_name": "Mentari",
   "description": "Aplikasi loket Mentari Nusantara.",
-  "start_url": "/?app=loket",
+  "start_url": "/#/loket-login",
   "scope": "/",
   "display": "standalone",
   "display_override": ["fullscreen", "standalone"],

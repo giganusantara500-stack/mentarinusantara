@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AuthProvider, canonicalRole, useAuth } from "@/lib/auth";
-import { pathAllowed } from "@/lib/access";
+import { homeForRole, isLoketArea, pathAllowed } from "@/lib/access";
 import { applyDisplayMode } from "@/lib/displayMode";
 import { AppShell } from "@/components/layout/AppShell";
 import { LoketShell } from "@/components/layout/LoketShell";
@@ -15,7 +15,6 @@ import { ForcePasswordChangePage } from "@/pages/ForcePasswordChangePage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { LoketHomePage } from "@/pages/LoketHomePage";
 import { LoketKolektifPage, LoketReportPage, LoketSettingPage, LoketStatusPage, LoketTransaksiPage, LoketTransferPage } from "@/pages/loket/LoketDesk";
-import { KolektifPage } from "@/pages/KolektifPage";
 import { BuyPage } from "@/pages/BuyPage";
 import { ManageUsersPage } from "@/pages/ManageUsersPage";
 import { UserDetailPage } from "@/pages/UserDetailPage";
@@ -67,7 +66,17 @@ function ProtectedApp() {
 
   useEffect(() => {
     if (!profile || path === "/reset-password") return;
-    if (!pathAllowed(profile.role, path)) window.location.hash = "/dashboard";
+    const home = homeForRole(profile.role);
+    const loket = canonicalRole(profile.role) === "loket";
+    if (loket && !path.startsWith("/meja")) {
+      window.location.hash = home;
+      return;
+    }
+    if (!loket && isLoketArea(path)) {
+      window.location.hash = home;
+      return;
+    }
+    if (!pathAllowed(profile.role, path)) window.location.hash = home;
   }, [profile, path]);
 
   const navigate = (p: string) => {
@@ -82,7 +91,7 @@ function ProtectedApp() {
   }
 
   if (path === "/setup-superadmin" && !user && !loading) {
-    return <LoginPage />;
+    return <LoginPage variant="monitor" />;
   }
 
   // Loading awal
@@ -99,7 +108,8 @@ function ProtectedApp() {
 
   // Belum login -> LoginPage
   if (!user) {
-    return <LoginPage />;
+    const loketEntry = isLoketArea(path) || new URLSearchParams(window.location.search).get("app") === "loket";
+    return <LoginPage variant={loketEntry ? "loket" : "monitor"} />;
   }
 
   const role = canonicalRole(profile?.role);
@@ -133,7 +143,8 @@ function ProtectedApp() {
     );
   }
 
-  const visiblePath = pathAllowed(profile.role, path) ? path : "/dashboard";
+  const home = homeForRole(profile.role);
+  const visiblePath = pathAllowed(profile.role, path) ? path : home;
 
   const render = () => {
     // Detail pages: /mitra/detail/:id, /submitra/detail/:id, /loket/detail/:id
@@ -144,53 +155,50 @@ function ProtectedApp() {
     }
 
     switch (visiblePath) {
+      case "/meja": return <LoketHomePage />;
+      case "/meja/beli": return <LoketTransaksiPage />;
+      case "/meja/kolektif": return <LoketKolektifPage />;
+      case "/meja/transfer": return <LoketTransferPage />;
+      case "/meja/riwayat":
+      case "/meja/transaksi": return <LoketStatusPage />;
+      case "/meja/laporan": return <LoketReportPage />;
+      case "/meja/pengaturan": return <LoketSettingPage />;
+      case "/meja/deposit": return null;
       case "/dashboard":
         if (isSuperAdmin || canonicalRole(profile?.role) === "mitra" || canonicalRole(profile?.role) === "submitra") return <OpsDashboardPage />;
-        if (canonicalRole(profile?.role) === "loket") return <LoketHomePage />;
         return <DashboardPage onNavigate={navigate} />;
-      case "/keamanan": return role === "loket" ? <LoketHomePage /> : <SecurityPage />;
+      case "/keamanan": return <SecurityPage />;
       case "/setup-superadmin": return isSuperAdmin ? <SetupSuperAdminPage /> : <OpsDashboardPage />;
-      case "/beli": return profile?.role === "loket" ? <LoketTransaksiPage /> : <BuyPage />;
+      case "/beli": return <BuyPage />;
       case "/mitra": return <ManageUsersPage targetRole="mitra" onNavigate={navigate} />;
       case "/submitra": return <ManageUsersPage targetRole="submitra" onNavigate={navigate} />;
       case "/loket": return <ManageUsersPage targetRole="loket" onNavigate={navigate} />;
       case "/produk": return <ProductsPage />;
       case "/harga": return <PricingPage />;
-      case "/transaksi": return canonicalRole(profile?.role) === "loket" ? <LoketStatusPage /> : <TransactionsPage />;
-      case "/riwayat": return profile?.role === "loket" ? <LoketStatusPage /> : <TransactionsPage riwayat />;
+      case "/transaksi": return <TransactionsPage />;
+      case "/riwayat": return <TransactionsPage riwayat />;
       case "/mutasi": return <MutationsPage />;
-      case "/deposit":
-        if (profile.role === "loket") return null;
-        return <PusatDepositPage />;
-      case "/kolektif":
-        return profile.role === "loket" ? <LoketKolektifPage /> : <DashboardPage onNavigate={navigate} />;
-      case "/transfer":
-        return profile.role === "loket" ? <LoketTransferPage /> : <DashboardPage onNavigate={navigate} />;
+      case "/deposit": return <PusatDepositPage />;
+      case "/kolektif": return <DashboardPage onNavigate={navigate} />;
+      case "/transfer": return <DashboardPage onNavigate={navigate} />;
       case "/setoran":
       case "/deposit-approval":
-        return profile.role === "loket" ? <LoketHomePage /> : <ManageSetoranPage />;
-      case "/saldo":
-        return profile.role === "loket" ? <LoketHomePage /> : <BalanceMonitorPage />;
+        return <ManageSetoranPage />;
+      case "/saldo": return <BalanceMonitorPage />;
       case "/pembagian":
         return isSuperAdmin ? <BalanceAllocationPage /> : <BalanceMonitorPage />;
-      case "/outstanding":
-        return profile.role === "loket" ? <LoketHomePage /> : <OutstandingPage />;
-      case "/rekap":
-        return profile.role === "loket" ? <LoketHomePage /> : <RecapPage />;
-      case "/qris":
-        return profile.role === "loket" ? <LoketHomePage /> : <QrisReportPage />;
-      case "/kolektif-admin":
-        return profile.role === "loket" ? <KolektifPage /> : <CollectiveAdminPage />;
-      case "/runtext":
-        return profile.role === "loket" ? <LoketHomePage /> : <RunTextPage />;
-      case "/blokir":
-        return profile.role === "loket" ? <LoketHomePage /> : <BlockLoketPage />;
-      case "/laporan": return profile?.role === "loket" ? <LoketReportPage /> : <ReportsPage />;
+      case "/outstanding": return <OutstandingPage />;
+      case "/rekap": return <RecapPage />;
+      case "/qris": return <QrisReportPage />;
+      case "/kolektif-admin": return <CollectiveAdminPage />;
+      case "/runtext": return <RunTextPage />;
+      case "/blokir": return <BlockLoketPage />;
+      case "/laporan": return <ReportsPage />;
       case "/pengumuman": return <AnnouncementsPage />;
-      case "/pengaturan": return profile?.role === "loket" ? <LoketSettingPage /> : <SettingsPage />;
+      case "/pengaturan": return <SettingsPage />;
       default:
+        if (canonicalRole(profile.role) === "loket") return <LoketHomePage />;
         if (isSuperAdmin || canonicalRole(profile?.role) === "mitra" || canonicalRole(profile?.role) === "submitra") return <OpsDashboardPage />;
-        if (canonicalRole(profile?.role) === "loket") return <LoketHomePage />;
         return <DashboardPage onNavigate={navigate} />;
     }
   };
