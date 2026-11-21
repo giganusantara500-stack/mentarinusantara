@@ -296,8 +296,8 @@ export async function createNetworkAccount(authorization: string, input: CreateA
         username,
         loket_type: role === "loket" ? (clean(input.loketType) || "lainnya") : null,
         loket_code: loketCode,
-        mfa_enabled: role === "mitra" || role === "loket",
-        mfa_status: role === "mitra" || role === "loket" || role === "submitra" ? "active" : "off",
+        mfa_enabled: false,
+        mfa_status: role === "mitra" || role === "submitra" ? "pending" : "off",
       },
     }),
   });
@@ -326,7 +326,7 @@ export async function createNetworkAccount(authorization: string, input: CreateA
     status: active ? "active" : "suspended",
     loket_type: role === "loket" ? (clean(input.loketType) || "lainnya") : null,
     loket_code: loketCode,
-    mfa_enabled: role === "mitra" || role === "loket",
+    mfa_enabled: false,
     must_change_password: true,
   });
   if (!savedProfile.ok) {

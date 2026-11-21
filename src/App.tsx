@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { AuthProvider, canonicalRole, useAuth } from "@/lib/auth";
+import { pathAllowed } from "@/lib/access";
 import { applyDisplayMode } from "@/lib/displayMode";
 import { AppShell } from "@/components/layout/AppShell";
 import { LoketShell } from "@/components/layout/LoketShell";
 import { LoginPage } from "@/pages/LoginPage";
+import { MFAEnrollPage } from "@/pages/MFAEnrollPage";
 import { MFAVerifyPage } from "@/pages/MFAVerifyPage";
 import { PendingPage } from "@/pages/PendingPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
@@ -63,6 +65,11 @@ function ProtectedApp() {
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
+  useEffect(() => {
+    if (!profile || path === "/reset-password") return;
+    if (!pathAllowed(profile.role, path)) window.location.hash = "/dashboard";
+  }, [profile, path]);
+
   const navigate = (p: string) => {
     window.location.hash = p;
     setPath(p);
@@ -74,8 +81,8 @@ function ProtectedApp() {
     return <ResetPasswordPage />;
   }
 
-  if (path === "/setup-superadmin") {
-    return <SetupSuperAdminPage />;
+  if (path === "/setup-superadmin" && !user && !loading) {
+    return <LoginPage />;
   }
 
   // Loading awal
@@ -95,31 +102,29 @@ function ProtectedApp() {
     return <LoginPage />;
   }
 
-  const mfaMarkedActive = user?.user_metadata?.mfa_enabled === true || user?.user_metadata?.mfa_status === true || user?.user_metadata?.mfa_status === "active";
-  const mfaRequired = profile?.role === "super_admin" || profile?.role === "mitra" || mfaMarkedActive;
-
-  // 2FA wajib untuk Super Admin dan Mitra jika sudah terdaftar tetapi sesi belum AAL2.
-  if (mfaRequired && mfaState === "required") {
-    return <MFAVerifyPage />;
-  }
+  const role = canonicalRole(profile?.role);
+  const privileged = role === "super_admin" || role === "mitra" || role === "submitra";
 
   if (profile?.status === "suspended") {
     return <PendingPage />;
   }
 
-  // Password sementara wajib diganti sebelum dashboard dibuka.
-  // Super Admin yang sudah aktif masuk ke dashboard utama.
   if (profile?.must_change_password && !isSuperAdmin) {
     return <ForcePasswordChangePage />;
   }
 
-  // Super Admin dan Mitra wajib memasang 2FA sebelum membuka dashboard.
-  if (mfaRequired && mfaState === "none") {
+  if (privileged && mfaState === "loading") {
     return (
-      <AppShell current="/keamanan" onNavigate={navigate} onLogout={() => signOut()} onSecurity={() => navigate("/keamanan")}>
-        <SecurityPage />
-      </AppShell>
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">Memeriksa verifikasi dua langkah...</div>
     );
+  }
+
+  if (privileged && mfaState === "required") {
+    return <MFAVerifyPage />;
+  }
+
+  if (privileged && mfaState === "none") {
+    return <MFAEnrollPage />;
   }
 
   if (!profile) {
@@ -128,20 +133,23 @@ function ProtectedApp() {
     );
   }
 
+  const visiblePath = pathAllowed(profile.role, path) ? path : "/dashboard";
+
   const render = () => {
     // Detail pages: /mitra/detail/:id, /submitra/detail/:id, /loket/detail/:id
-    const detailMatch = path.match(/^\/(mitra|submitra|loket)\/detail\/(.+)$/);
+    const detailMatch = visiblePath.match(/^\/(mitra|submitra|loket)\/detail\/(.+)$/);
     if (detailMatch) {
       const [, role, userId] = detailMatch;
       return <UserDetailPage userId={userId} onBack={() => navigate(`/${role}`)} />;
     }
 
-    switch (path) {
+    switch (visiblePath) {
       case "/dashboard":
         if (isSuperAdmin || canonicalRole(profile?.role) === "mitra" || canonicalRole(profile?.role) === "submitra") return <OpsDashboardPage />;
         if (canonicalRole(profile?.role) === "loket") return <LoketHomePage />;
         return <DashboardPage onNavigate={navigate} />;
-      case "/keamanan": return <SecurityPage />;
+      case "/keamanan": return role === "loket" ? <LoketHomePage /> : <SecurityPage />;
+      case "/setup-superadmin": return isSuperAdmin ? <SetupSuperAdminPage /> : <OpsDashboardPage />;
       case "/beli": return profile?.role === "loket" ? <LoketTransaksiPage /> : <BuyPage />;
       case "/mitra": return <ManageUsersPage targetRole="mitra" onNavigate={navigate} />;
       case "/submitra": return <ManageUsersPage targetRole="submitra" onNavigate={navigate} />;
@@ -189,14 +197,14 @@ function ProtectedApp() {
 
   if (canonicalRole(profile.role) === "loket") {
     return (
-      <LoketShell current={path} onNavigate={navigate} onLogout={() => signOut()}>
+      <LoketShell current={visiblePath} onNavigate={navigate} onLogout={() => signOut()}>
         {render()}
       </LoketShell>
     );
   }
 
   return (
-    <AppShell current={path} onNavigate={navigate} onLogout={() => signOut()} onSecurity={() => navigate("/keamanan")}>
+    <AppShell current={visiblePath} onNavigate={navigate} onLogout={() => signOut()} onSecurity={() => navigate("/keamanan")}>
       {render()}
     </AppShell>
   );

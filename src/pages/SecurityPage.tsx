@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { dbRoleToAppRole, mfaIssuer, roleUsesMfa, useAuth } from "@/lib/auth";
+import { dbRoleToAppRole, mfaIssuer, useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
@@ -73,7 +73,7 @@ export function SecurityPage() {
   const marked = user?.user_metadata?.mfa_enabled === true || user?.user_metadata?.mfa_status === true || user?.user_metadata?.mfa_status === "active";
   const enrolled = verified.length > 0;
   const mfaActive = enrolled;
-  const showMfa = appRole === "superadmin" || appRole === "mitra" || (appRole === "loket" && marked) || (roleUsesMfa(profile?.role) && (enrolled || marked));
+  const showMfa = appRole === "superadmin" || appRole === "mitra" || appRole === "submitra" || (appRole === "loket" && (marked || enrolled));
 
   // Ganti password state
   const [showPwd, setShowPwd] = useState(false);

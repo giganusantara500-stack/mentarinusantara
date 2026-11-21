@@ -299,7 +299,7 @@ export async function getUserDetail(authorization: string, userId: string, env: 
     body: {
       profile: {
         ...profile,
-        must_change_password: false,
+        must_change_password: profile.must_change_password === true,
         deleted_at: null,
         last_login_at: null,
         created_by: null,
@@ -459,6 +459,7 @@ export async function sessionProfile(authorization: string, env: Env) {
         business_name: clean(row?.business_name) || clean(metadata.business_name),
         address: clean(row?.address) || clean(metadata.address),
         is_active: active,
+        must_change_password: row?.must_change_password === true,
       },
     },
   };

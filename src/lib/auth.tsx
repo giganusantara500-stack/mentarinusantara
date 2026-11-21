@@ -21,7 +21,7 @@ interface AuthContextValue {
   unenrollMFA: (factorId: string, code: string) => Promise<{ error?: string }>;
   challengeMFA: (factorId: string) => Promise<{ data?: { challengeId: string }; error?: string }>;
   verifyMFAChallenge: (challengeId: string, code: string) => Promise<{ error?: string }>;
-  getEnrolledFactors: () => Promise<{ data: any[]; error?: string }>;
+  getEnrolledFactors: () => Promise<{ data: { id: string; status: string; friendly_name?: string | null }[]; error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -72,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [mfaState, setMfaState] = useState<MFAState>("loading");
 
   const fetchProfile = useCallback(async (uid: string, email = "", metadata?: User["user_metadata"], accessToken?: string): Promise<Profile | null> => {
-    const fromRow = (row: { id: string; username?: string | null; role?: string | null; is_active?: boolean | null; created_at?: string; updated_at?: string; email?: string; full_name?: string | null; city?: string | null; phone?: string | null; business_name?: string | null; address?: string | null }) => withAccountMetadata({
+    const fromRow = (row: { id: string; username?: string | null; role?: string | null; is_active?: boolean | null; created_at?: string; updated_at?: string; email?: string; full_name?: string | null; city?: string | null; phone?: string | null; business_name?: string | null; address?: string | null; must_change_password?: boolean | null }) => withAccountMetadata({
       id: row.id,
       email: row.email || email,
       full_name: row.username === "giganusantara" ? "Aris Purwanto" : (row.full_name || row.username || ""),
@@ -84,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: canonicalRole(row.role),
       parent_id: null,
       status: row.is_active === false ? "suspended" : "active",
-      must_change_password: false,
+      must_change_password: row.must_change_password === true || metadata?.must_change_password === true,
       loket_type: null,
       loket_code: null,
       deleted_at: null,
@@ -131,7 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null;
   }, []);
 
-  const checkMFA = useCallback(async (u: User): Promise<MFAState> => {
+  const checkMFA = useCallback(async (): Promise<MFAState> => {
     try {
       const { data, error } = await supabase.auth.mfa.listFactors();
       if (error) return "none";
@@ -143,8 +143,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (aaData?.currentLevel === "aal2") return "enrolled";
         return "required";
       }
-      const marked = u.user_metadata?.mfa_enabled === true || u.user_metadata?.mfa_status === true || u.user_metadata?.mfa_status === "active";
-      if (marked || canonicalRole(metadataText(u.user_metadata, "role")) === "mitra") return "enrolled";
       return "none";
     } catch {
       return "none";
@@ -173,9 +171,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const p = await fetchProfile(u.id, u.email ?? "", u.user_metadata, s?.access_token);
         if (!mounted) return;
         setProfile(p);
-        const m = await checkMFA(u);
+        const m = await checkMFA();
         if (!mounted) return;
-        setMfaState(m === "none" && p?.role === "mitra" ? "enrolled" : m);
+        setMfaState(m);
       } else {
         setProfile(null);
         setMfaState("none");
@@ -194,9 +192,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const p = await fetchProfile(u.id, u.email ?? "", u.user_metadata, s?.access_token);
           if (!mounted) return;
           setProfile(p);
-          const m = await checkMFA(u);
+          const m = await checkMFA();
           if (!mounted) return;
-          setMfaState(m === "none" && p?.role === "mitra" ? "enrolled" : m);
+          setMfaState(m);
         } else {
           setProfile(null);
           setMfaState("none");
@@ -216,7 +214,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) return { error: error.message };
     // Setelah login, cek MFA
     if (data.user) {
-      const m = await checkMFA(data.user);
+      const m = await checkMFA();
       setMfaState(m);
     }
     return {};
@@ -269,6 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const verifyMFAEnroll = useCallback(async (factorId: string, code: string) => {
     const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code });
     if (error) return { error: error.message };
+    await supabase.auth.updateUser({ data: { mfa_enabled: true, mfa_status: "active" } });
     setMfaState("enrolled");
     return {};
   }, []);

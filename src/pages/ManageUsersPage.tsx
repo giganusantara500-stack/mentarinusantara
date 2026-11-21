@@ -956,7 +956,7 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
                 Password sementara berupa 6 digit angka. Berikan username dan password ini kepada pengguna, lalu minta diganti saat login pertama.
               </p>
               {created.mfaActive && (
-                <p className="text-xs font-semibold text-emerald-700">Keamanan 2FA: Aktif</p>
+                <p className="text-xs font-semibold text-amber-800">Login pertama wajib mengganti password, lalu mengaktifkan 2FA dengan memindai QR atau memasukkan kunci rahasia dan kode OTP.</p>
               )}
             </div>
             {created.emailSent ? (

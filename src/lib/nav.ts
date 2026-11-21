@@ -66,7 +66,7 @@ function managementNav(role: Role): NavSection[] {
       { path: "/pembagian", label: "Share Fee", icon: Share2 },
     );
   }
-  if (role === "superadmin" || role === "mitra") admin.push({ path: "/keamanan", label: "Keamanan (2FA)", icon: ShieldCheck });
+  if (role === "superadmin" || role === "mitra" || role === "submitra") admin.push({ path: "/keamanan", label: "Keamanan (2FA)", icon: ShieldCheck });
   admin.push({ path: "/pengaturan", label: "Pengaturan", icon: Settings });
   return [
     { category: "Dashboard", icon: LayoutDashboard, items: [dashboard] },

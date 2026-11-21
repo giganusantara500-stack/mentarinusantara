@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { FunctionsHttpError } from "@supabase/supabase-js";
-import { useAuth } from "@/lib/auth";
+import { canonicalRole, useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
 import { KeyRound, Lock, AlertCircle, ShieldCheck } from "lucide-react";
 
 export function ForcePasswordChangePage() {
-  const { signOut, refreshProfile } = useAuth();
+  const { signOut, refreshProfile, profile } = useAuth();
+  const needsMfa = canonicalRole(profile?.role) === "mitra" || canonicalRole(profile?.role) === "submitra";
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
@@ -58,7 +59,7 @@ export function ForcePasswordChangePage() {
           </div>
           <h1 className="text-xl font-bold text-slate-900">Ganti Password Awal</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Anda masuk dengan password sementara. Buat password baru sebelum melanjutkan ke dashboard.
+            Anda masuk dengan password sementara. Buat password baru sebelum melanjutkan{needsMfa ? ", lalu aktifkan 2FA dengan QR dan kode OTP." : " ke dashboard."}
           </p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4">
