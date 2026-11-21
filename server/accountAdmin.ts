@@ -184,13 +184,16 @@ export async function listAccounts(authorization: string, env: Env) {
   for (const profile of profileRows) {
     const user = byId.get(profile.id) as { email?: string; user_metadata?: Record<string, string> } | undefined;
     const meta = user?.user_metadata ?? {};
-    const parentId = meta.parent_id || clean(profile.parent_id) || null;
-    const createdBy = meta.created_by || clean(profile.created_by) || null;
+    const parentId = clean(profile.parent_id) || meta.parent_id || null;
+    const createdBy = clean(profile.created_by) || meta.created_by || null;
+    const parentProfile = parentId ? profileRows.find((item) => String(item.id) === parentId) : null;
     const parent = parentId ? byId.get(parentId) as { user_metadata?: Record<string, string> } | undefined : null;
     const parentMeta = parent?.user_metadata ?? {};
-    const parentRole = normalizeRole(clean(parentMeta.role));
+    const parentRole = normalizeRole(clean(parentProfile?.role) || clean(parentMeta.role));
     const role = accountRole(meta, normalizeRole(clean(profile.role))) || normalizeRole(clean(profile.role));
-    const mitraId = meta.mitra_id || clean(profile.mitra_id) || (parentRole === "mitra" ? parentId : parentMeta.mitra_id || (parentRole === "submitra" ? parentMeta.parent_id : "")) || null;
+    const parentMitraId = clean(parentProfile?.mitra_id) || parentMeta.mitra_id || "";
+    const parentParentId = clean(parentProfile?.parent_id) || parentMeta.parent_id || "";
+    const mitraId = clean(profile.mitra_id) || meta.mitra_id || (parentRole === "mitra" ? parentId : parentMitraId || (parentRole === "submitra" ? parentParentId : "")) || null;
     if (role === "loket" && mitraId && !meta.mitra_id && user) {
       meta.mitra_id = mitraId;
       await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${profile.id}`, {
@@ -211,7 +214,7 @@ export async function listAccounts(authorization: string, env: Env) {
       parent_id: parentId,
       mitra_id: mitraId,
       created_by: createdBy,
-      parent_of_parent: parentMeta.parent_id || null,
+      parent_of_parent: parentParentId || null,
       loket_type: meta.loket_type || null,
       loket_code: codes.get(profile.id) || meta.loket_code || null,
       status: profile.is_active === false ? "suspended" : "active",

@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth, dbRoleToAppRole } from "@/lib/auth";
 import { PLATFORM_NAME } from "@/lib/brand";
 import { useProfiles, useWallets, roleToUi } from "@/lib/hooks";
+import { accountInNetwork } from "@/lib/network";
 import { PageContainer } from "@/components/PageContainer";
 import { PageHeader, SearchInput } from "@/components/ui/Common";
 import { Card, CardHeader } from "@/components/ui/Card";
@@ -220,7 +221,7 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
       const role = (p.role as string) === "sub_mitra" ? "submitra" : p.role;
       if (role !== targetRoleDb) return false;
       if (!profile || myRole === "superadmin") return true;
-      return p.parent_id === profile.id || p.created_by === profile.id || p.mitra_id === profile.id || profiles.some((parent) => parent.id === p.parent_id && (parent.parent_id === profile.id || parent.created_by === profile.id || parent.id === profile.id));
+      return accountInNetwork(profile, p, [profile, ...profiles]);
     });
   }, [profiles, targetRoleDb, profile, myRole]);
 

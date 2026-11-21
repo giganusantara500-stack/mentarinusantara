@@ -36,9 +36,10 @@ export function accountInNetwork(caller: Profile, row: Profile, profiles: Profil
   if (callerRole === "super_admin") return true;
   if (callerRole === "mitra") {
     if (row.parent_id === caller.id || row.created_by === caller.id || row.mitra_id === caller.id) return true;
-    if (!row.parent_id) return false;
-    const parent = profiles.find((item) => item.id === row.parent_id);
-    return !!parent && (parent.parent_id === caller.id || parent.created_by === caller.id || parent.mitra_id === caller.id || parent.id === caller.id);
+    const parent = row.parent_id ? profiles.find((item) => item.id === row.parent_id) : undefined;
+    if (parent && (parent.parent_id === caller.id || parent.created_by === caller.id || parent.mitra_id === caller.id || parent.id === caller.id)) return true;
+    const creator = row.created_by ? profiles.find((item) => item.id === row.created_by) : undefined;
+    return !!creator && (creator.parent_id === caller.id || creator.mitra_id === caller.id || creator.id === caller.id);
   }
   if (callerRole === "submitra") return row.parent_id === caller.id || row.created_by === caller.id;
   return false;

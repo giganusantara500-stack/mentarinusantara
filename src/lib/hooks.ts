@@ -103,7 +103,7 @@ export function useVisibleScope() {
         return;
       }
       const loaded = await loadProfiles();
-      const ids = loaded.scoped ? networkAccountIds(profile, loaded.rows).filter((id) => id !== profile.id) : [];
+      const ids = networkAccountIds(profile, loaded.rows).filter((id) => id !== profile.id);
       if (active) {
         setDescendantIds(ids);
         setLoading(false);
@@ -171,13 +171,18 @@ async function loadProfiles() {
     }
     if (response.ok && Array.isArray(body?.rows)) {
       const apiRows = (body.rows as Record<string, unknown>[]).map((row) => mapProfileRow(row));
-      return { rows: apiRows, scoped: true, error: null as string | null };
+      const byId = new Map(table.rows.map((row) => [row.id, row]));
+      for (const row of apiRows) {
+        const current = byId.get(row.id);
+        byId.set(row.id, current ? { ...current, ...row, parent_id: row.parent_id || current.parent_id, mitra_id: row.mitra_id || current.mitra_id, created_by: row.created_by || current.created_by } : row);
+      }
+      return { rows: [...byId.values()], scoped: true, error: null as string | null };
     }
-    if (table.rows.length > 0) return { rows: table.rows, scoped: false, error: null };
+    if (table.rows.length > 0) return { rows: table.rows, scoped: true, error: null };
     return { rows: [] as Profile[], scoped: true, error: body?.error || table.error || "Daftar akun gagal dimuat dari server." };
   }
-  if (table.error) return { rows: [] as Profile[], scoped: false, error: table.error };
-  return { rows: table.rows, scoped: false, error: null };
+  if (table.error) return { rows: [] as Profile[], scoped: true, error: table.error };
+  return { rows: table.rows, scoped: true, error: null };
 }
 export function useProfiles() {
   const { profile, isSuperAdmin } = useAuth();
@@ -196,9 +201,9 @@ export function useProfiles() {
       return;
     }
     const rows = loaded.rows.filter((row) => !row.deleted_at && row.id !== profile.id);
-    if (!isSuperAdmin && !loaded.scoped) {
-      setProfiles([]);
+    if (loaded.error && rows.length === 0) {
       setError(loaded.error);
+      setProfiles([]);
       setLoading(false);
       return;
     }
@@ -225,9 +230,7 @@ export function useAllProfiles() {
     (async () => {
       if (!profile) return;
       const loaded = await loadProfiles();
-      if (!isSuperAdmin && !loaded.scoped) {
-        setProfiles(loaded.rows.filter((row) => row.id === profile.id));
-      } else if (isSuperAdmin) {
+      if (isSuperAdmin) {
         setProfiles(loaded.rows);
       } else {
         setProfiles(loaded.rows.filter((row) => row.id === profile.id || accountInNetwork(profile, row, loaded.rows)));
