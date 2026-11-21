@@ -14,6 +14,7 @@ interface Props {
   height?: number;
   emptyText?: string;
   emptyMax?: number;
+  integerScale?: boolean;
 }
 
 function niceMax(peak: number, emptyMax: number) {
@@ -27,13 +28,23 @@ function niceMax(peak: number, emptyMax: number) {
   return nice * base;
 }
 
-export function LineChart({ labels, series, formatValue, axisFormat, height = 288, emptyText = "Belum ada data.", emptyMax = 10 }: Props) {
+function countMax(peak: number) {
+  if (peak <= 0) return 1;
+  const headroom = Math.max(peak, Math.ceil(peak * 1.2));
+  const magnitude = 10 ** Math.floor(Math.log10(headroom));
+  const steps = [1, 2, 3, 4, 5, 6, 8, 10];
+  const scaled = headroom / magnitude;
+  const step = steps.find((item) => item + 1e-9 >= scaled) ?? 10;
+  return step * magnitude;
+}
+
+export function LineChart({ labels, series, formatValue, axisFormat, height = 288, emptyText = "Belum ada data.", emptyMax = 10, integerScale = false }: Props) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const chartHeight = Math.max(140, height);
 
   const allValues = series.flatMap((s) => s.values).filter((value): value is number => value != null);
   const peak = allValues.length ? Math.max(...allValues, 0) : 0;
-  const max = niceMax(peak, emptyMax);
+  const max = integerScale ? countMax(peak) : niceMax(peak, emptyMax);
   const min = 0;
   const range = max - min || 1;
   const axisText = axisFormat ?? ((value: number) => new Intl.NumberFormat("id-ID").format(Math.round(value)));
@@ -68,20 +79,22 @@ export function LineChart({ labels, series, formatValue, axisFormat, height = 28
   }, [series, xStep, plotH, range, min, padding.left, padding.top]);
 
   const yTicks = useMemo(() => {
-    const splits = [5, 4, 2].map((count) => max / count).find((step) => {
-      const exp = Math.floor(Math.log10(step || 1));
-      const base = 10 ** Math.max(exp, 0);
-      const frac = step / base;
-      return Math.abs(frac - Math.round(frac * 2) / 2) < 0.001;
-    });
-    const step = splits || max / 4;
-    const count = Math.round(max / step);
+    const splits = integerScale
+      ? [max <= 6 ? 1 : Math.max(1, Math.round(max / 4))]
+      : [5, 4, 2].map((count) => max / count).filter((step) => {
+          const exp = Math.floor(Math.log10(step || 1));
+          const base = 10 ** Math.max(exp, 0);
+          const frac = step / base;
+          return Math.abs(frac - Math.round(frac * 2) / 2) < 0.001;
+        });
+    const step = splits[0] || max / 4;
+    const count = Math.max(1, Math.round(max / step));
     return Array.from({ length: count + 1 }, (_, i) => {
-      const value = Math.round(step * i * 1000) / 1000;
+      const value = integerScale ? Math.round(step * i) : Math.round(step * i * 1000) / 1000;
       const y = padding.top + plotH - ((value - min) / range) * plotH;
       return { value, y };
     });
-  }, [max, min, range, plotH, padding.top]);
+  }, [max, min, range, plotH, padding.top, integerScale]);
 
   if (labels.length === 0) {
     return (

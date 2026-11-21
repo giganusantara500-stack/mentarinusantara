@@ -5,9 +5,9 @@ import { DepositInfo } from "@/components/layout/DepositInfo";
 import { useLoketRefresh } from "@/components/layout/LoketShell";
 import { CapaianChart } from "@/components/dashboard/CapaianChart";
 import { WelcomeGreeting } from "@/components/dashboard/WelcomeGreeting";
-import { buildThreeMonthSheets } from "@/lib/sheetChart";
+import { buildThreeMonthSheets, isCountedSale } from "@/lib/sheetChart";
 
-interface SalePoint { amount: number; createdAt: string }
+interface SalePoint { loketId?: string; createdAt: string; status?: string }
 
 export function LoketHomePage() {
   const { tick } = useLoketRefresh();
@@ -21,8 +21,8 @@ export function LoketHomePage() {
       const response = await fetch("/api/loket-sales", {
         headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
       });
-      const body = response.ok ? await response.json() : { sales: [] };
-      if (!stop) setSales(body.sales ?? []);
+      const body = response.ok ? await response.json() : { sales: [], simulations: [] };
+      if (!stop) setSales([...(body.simulations ?? []), ...(body.sales ?? [])]);
     };
     load();
     const timer = window.setInterval(load, 5000);
@@ -30,8 +30,10 @@ export function LoketHomePage() {
   }, [tick]);
 
   const curve = useMemo(
-    () => buildThreeMonthSheets(sales.map((sale) => ({ at: sale.createdAt })), profile?.created_at || null),
-    [sales, profile?.created_at],
+    () => buildThreeMonthSheets(sales
+      .filter((sale) => !sale.loketId || sale.loketId === profile?.id)
+      .map((sale) => ({ at: sale.createdAt, ok: isCountedSale(sale.status) }))),
+    [sales, profile?.id],
   );
 
   return (

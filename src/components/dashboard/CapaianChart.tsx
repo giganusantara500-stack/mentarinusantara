@@ -66,6 +66,7 @@ export function CapaianChart({
           formatValue={(value) => `${Math.round(value)} lembar`}
           height={fill ? plotHeight : 340}
           emptyText={emptyText}
+          integerScale
         />
       </div>
     </section>

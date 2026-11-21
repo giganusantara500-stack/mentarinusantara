@@ -53,11 +53,14 @@ export interface TransactionRow {
   cost_price: number;
   sell_price: number;
   profit: number;
-  status: "pending" | "success" | "failed" | "refunded";
+  status: "pending" | "success" | "failed" | "refunded" | "simulated";
   provider_reference: string | null;
   note: string | null;
   created_at: string;
   completed_at: string | null;
+  submitra_id?: string | null;
+  mitra_id?: string | null;
+  super_admin_id?: string | null;
 }
 
 export interface AnnouncementRow {
@@ -486,6 +489,62 @@ export function useNetworkSummary() {
   return { summary, loading, refresh };
 }
 
+interface SaleWire {
+  id: string;
+  loketId: string;
+  loketCode?: string;
+  loketName?: string;
+  category?: string;
+  product: string;
+  customerNumber: string;
+  customerName?: string;
+  amount: number;
+  createdAt: string;
+  status?: string;
+  channel?: string;
+  submitraId?: string | null;
+  mitraId?: string | null;
+  superAdminId?: string | null;
+}
+
+function saleStatus(sale: SaleWire): TransactionRow["status"] {
+  if (sale.channel === "simulation" || sale.status === "simulated") return "simulated";
+  if (sale.status === "pending" || sale.status === "failed" || sale.status === "refunded" || sale.status === "success") return sale.status;
+  return "success";
+}
+
+function mapSale(sale: SaleWire): TransactionRow {
+  return {
+    id: sale.id,
+    invoice_code: sale.loketCode || sale.id.slice(0, 8),
+    user_id: sale.loketId,
+    product_id: "",
+    product_name_snapshot: sale.product,
+    category_slug_snapshot: (sale.category || "kolektif").toLowerCase(),
+    customer_number: sale.customerNumber,
+    amount: Number(sale.amount),
+    cost_price: Number(sale.amount),
+    sell_price: Number(sale.amount),
+    profit: 0,
+    status: saleStatus(sale),
+    provider_reference: sale.loketName ?? null,
+    note: sale.customerName ?? null,
+    created_at: sale.createdAt,
+    completed_at: sale.createdAt,
+    submitra_id: Object.prototype.hasOwnProperty.call(sale, "submitraId") ? (sale.submitraId ?? null) : undefined,
+    mitra_id: Object.prototype.hasOwnProperty.call(sale, "mitraId") ? (sale.mitraId ?? null) : undefined,
+    super_admin_id: Object.prototype.hasOwnProperty.call(sale, "superAdminId") ? (sale.superAdminId ?? null) : undefined,
+  };
+}
+
+function saleInRole(role: string, selfId: string, sale: TransactionRow) {
+  if (role === "super_admin") return true;
+  if (role === "loket") return sale.user_id === selfId;
+  if (role === "submitra") return sale.submitra_id === undefined || sale.submitra_id === selfId;
+  if (role === "mitra") return sale.mitra_id === undefined || sale.mitra_id === selfId;
+  return sale.user_id === selfId;
+}
+
 export function useNetworkLoketSales() {
   const { profile } = useAuth();
   const [rows, setRows] = useState<TransactionRow[]>([]);
@@ -498,26 +557,15 @@ export function useNetworkLoketSales() {
       const response = await fetch("/api/loket-sales", {
         headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
       });
-      const body = response.ok ? await response.json() : { sales: [] };
+      const body = response.ok ? await response.json() : { sales: [], simulations: [] };
       if (stop) return;
-      setRows((body.sales ?? []).filter((sale: { channel?: string; status?: string }) => sale.channel !== "simulation" && sale.status !== "simulated").map((sale: { id: string; loketId: string; loketCode?: string; loketName?: string; category?: string; product: string; customerNumber: string; customerName?: string; amount: number; createdAt: string; status?: string }) => ({
-        id: sale.id,
-        invoice_code: sale.loketCode || sale.id.slice(0, 8),
-        user_id: sale.loketId,
-        product_id: "",
-        product_name_snapshot: sale.product,
-        category_slug_snapshot: (sale.category || "kolektif").toLowerCase(),
-        customer_number: sale.customerNumber,
-        amount: Number(sale.amount),
-        cost_price: Number(sale.amount),
-        sell_price: Number(sale.amount),
-        profit: 0,
-        status: (sale.status === "pending" || sale.status === "failed" || sale.status === "refunded" || sale.status === "success" ? sale.status : "success"),
-        provider_reference: sale.loketName ?? null,
-        note: sale.customerName ?? null,
-        created_at: sale.createdAt,
-        completed_at: sale.createdAt,
-      })));
+      const role = canonicalRole(profile.role);
+      const merged = new Map<string, TransactionRow>();
+      for (const sale of [...(body.simulations ?? []), ...(body.sales ?? [])] as SaleWire[]) {
+        const row = mapSale(sale);
+        if (saleInRole(role, profile.id, row)) merged.set(row.id, row);
+      }
+      setRows([...merged.values()]);
     };
     load();
     const timer = window.setInterval(load, 8000);

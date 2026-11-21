@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { PageContainer } from "@/components/PageContainer";
 import { CapaianChart } from "@/components/dashboard/CapaianChart";
 import { WelcomeGreeting } from "@/components/dashboard/WelcomeGreeting";
-import { buildThreeMonthSheets } from "@/lib/sheetChart";
+import { buildThreeMonthSheets, isCountedSale } from "@/lib/sheetChart";
 import { formatRupiah } from "@/lib/format";
 import { ticketPhase } from "@/lib/depositStatus";
 import { Button } from "@/components/ui/Button";
@@ -105,7 +105,7 @@ export function OpsDashboardPage() {
     [profiles],
   );
   const archive = loketRows;
-  const chart = useMemo(() => buildThreeMonthSheets(archive.map((row) => ({ at: row.created_at, ok: row.status === "success" }))), [archive]);
+  const chart = useMemo(() => buildThreeMonthSheets(archive.map((row) => ({ at: row.created_at, ok: isCountedSale(row.status) }))), [archive]);
   const scopedTickets = useMemo(() => {
     if (!networkView) return tickets;
     return tickets.filter((ticket) => !!ticket.loketId && networkLoketIds.has(ticket.loketId));
@@ -244,7 +244,7 @@ export function OpsDashboardPage() {
           labels={chart.labels}
           series={chart.series}
           emptyText="Kurva menunggu data transaksi."
-          caption={role === "superadmin" ? "Seluruh loket dan mitra" : "Akumulasi loket di jaringan Anda"}
+          caption={role === "superadmin" ? "Seluruh transaksi jaringan" : role === "mitra" ? "Sub Mitra dan loket di jaringan Anda" : "Loket di bawah Sub Mitra ini"}
           fill
           className="relative z-0 min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-left shadow-sm"
         />

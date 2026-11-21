@@ -18,12 +18,14 @@ const statusTone: Record<string, "success" | "warning" | "danger" | "info"> = {
   pending: "warning",
   failed: "danger",
   refunded: "info",
+  simulated: "info",
 };
 const statusLabel: Record<string, string> = {
   success: "Berhasil",
   pending: "Pending",
   failed: "Gagal",
   refunded: "Refund",
+  simulated: "Simulasi",
 };
 
 export function TransactionsPage({ riwayat = false }: { riwayat?: boolean }) {

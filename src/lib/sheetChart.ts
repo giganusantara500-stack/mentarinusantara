@@ -2,42 +2,13 @@ import type { LineSeries } from "@/components/dashboard/LineChart";
 
 const COLORS = ["#f59e0b", "#7c3aed", "#0284c7"];
 
-function monthStart(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
+export function isCountedSale(status?: string | null) {
+  return status === "success" || status === "simulated";
 }
 
-function monthIndex(date: Date) {
-  return date.getFullYear() * 12 + date.getMonth();
-}
-
-function validMonth(iso?: string | null) {
-  if (!iso) return null;
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return null;
-  return monthStart(date);
-}
-
-export function buildThreeMonthSheets(points: { at: string; ok?: boolean }[], since?: string | null) {
+export function buildThreeMonthSheets(points: { at: string; ok?: boolean }[]) {
   const now = new Date();
-  const end = monthStart(now);
-  const rolling = new Date(end.getFullYear(), end.getMonth() - 2, 1);
-  let origin = end;
-  const pull = (iso?: string | null) => {
-    const month = validMonth(iso);
-    if (month && monthIndex(month) < monthIndex(origin)) origin = month;
-  };
-  if (since) pull(since);
-  else {
-    for (const point of points) {
-      if (point.ok === false) continue;
-      pull(point.at);
-    }
-  }
-  const start = monthIndex(origin) > monthIndex(rolling) ? origin : rolling;
-  const months: Date[] = [];
-  for (let cursor = new Date(start); monthIndex(cursor) <= monthIndex(end) && months.length < 3; cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)) {
-    months.push(new Date(cursor));
-  }
+  const months = [2, 1, 0].map((offset) => new Date(now.getFullYear(), now.getMonth() - offset, 1));
   const labels = Array.from({ length: 31 }, (_, index) => String(index + 1));
   const series: LineSeries[] = months.map((month, index) => {
     const daysInMonth = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
@@ -56,7 +27,7 @@ export function buildThreeMonthSheets(points: { at: string; ok?: boolean }[], si
     });
     return {
       name: month.toLocaleDateString("id-ID", { month: "long", year: "numeric" }),
-      color: COLORS[COLORS.length - months.length + index] ?? COLORS[index] ?? COLORS[2],
+      color: COLORS[index] ?? COLORS[2],
       values,
     };
   });
