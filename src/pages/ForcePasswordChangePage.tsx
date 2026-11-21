@@ -41,13 +41,14 @@ export function ForcePasswordChangePage() {
       setError(msg);
       return;
     }
-    if (fnData?.error) {
+    if (!fnData || fnData.success !== true) {
       setLoading(false);
-      setError(fnData.error);
+      setError(typeof fnData?.error === "string" ? fnData.error : "Server tidak mengonfirmasi penggantian password.");
       return;
     }
     await refreshProfile();
     setLoading(false);
+    setError("Password tersimpan, tetapi aplikasi belum berpindah. Muat ulang halaman.");
   };
 
   return (
@@ -63,16 +64,16 @@ export function ForcePasswordChangePage() {
           </p>
         </div>
         <form onSubmit={onSubmit} className="space-y-4">
-          <Field label="Password Baru">
+          <Field label="Password Baru" hint="Minimal 6 karakter.">
             <div className="relative">
               <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="pl-9" autoComplete="new-password" required autoFocus />
+              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="pl-9" autoComplete="new-password" minLength={6} required autoFocus />
             </div>
           </Field>
-          <Field label="Konfirmasi Password Baru">
+          <Field label="Konfirmasi Password Baru" hint="Harus sama dengan password baru.">
             <div className="relative">
               <ShieldCheck size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="pl-9" autoComplete="new-password" required />
+              <Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="pl-9" autoComplete="new-password" minLength={6} required />
             </div>
           </Field>
           {error && (

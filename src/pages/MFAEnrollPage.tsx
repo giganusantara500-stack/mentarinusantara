@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { mfaIssuer, useAuth } from "@/lib/auth";
-import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
 import { AlertCircle, KeyRound, ShieldCheck } from "lucide-react";
@@ -12,27 +11,34 @@ export function MFAEnrollPage() {
   const [factorId, setFactorId] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
+  const [preparing, setPreparing] = useState(true);
   const [loading, setLoading] = useState(false);
   const issuer = mfaIssuer(profile?.role);
 
+  const prepare = useCallback(async (isCurrent: () => boolean = () => true) => {
+    setPreparing(true);
+    setError("");
+    setQrCode("");
+    setSecret("");
+    setFactorId("");
+    const enrolled = await enrollMFA();
+    if (!isCurrent()) return;
+    setPreparing(false);
+    if (enrolled.error) {
+      setError(enrolled.error);
+      return;
+    }
+    if (!enrolled.data) return;
+    setQrCode(enrolled.data.qrCode);
+    setSecret(enrolled.data.secret);
+    setFactorId(enrolled.data.id);
+  }, [enrollMFA]);
+
   useEffect(() => {
     let stop = false;
-    (async () => {
-      const listed = await supabase.auth.mfa.listFactors();
-      const pending = (listed.data?.totp ?? []).filter((factor) => factor.status !== "verified");
-      await Promise.all(pending.map((factor) => supabase.auth.mfa.unenroll({ factorId: factor.id })));
-      const enrolled = await enrollMFA();
-      if (stop) return;
-      if (enrolled.error || !enrolled.data) {
-        setError(enrolled.error || "Kode QR 2FA gagal dibuat.");
-        return;
-      }
-      setQrCode(enrolled.data.qrCode);
-      setSecret(enrolled.data.secret);
-      setFactorId(enrolled.data.id);
-    })();
+    void prepare(() => !stop);
     return () => { stop = true; };
-  }, [enrollMFA]);
+  }, [prepare]);
 
   const onVerify = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -91,7 +97,14 @@ export function MFAEnrollPage() {
             </Button>
           </form>
         ) : (
-          <p className="text-center text-sm text-slate-500">{error || "Menyiapkan kode QR..."}</p>
+          <div className="space-y-3 text-center">
+            <p className="text-sm text-slate-500">{preparing ? "Menyiapkan kode QR..." : error || "Kode QR belum siap."}</p>
+            {!preparing && error && (
+              <Button type="button" variant="secondary" onClick={() => { void prepare(); }}>
+                Siapkan ulang kode QR
+              </Button>
+            )}
+          </div>
         )}
         <div className="mt-5 text-center">
           <button type="button" onClick={() => signOut()} className="text-sm text-slate-500 hover:text-slate-700">Keluar</button>

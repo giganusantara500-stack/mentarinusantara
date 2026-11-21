@@ -42,7 +42,8 @@ export function SecurityPage() {
     setSetupStep("qr");
     const res = await enrollMFA();
     if (res.error) { setSetupError(res.error); return; }
-    setQrCode(res.data!.qrCode);
+    if (!res.data) return;
+    setQrCode(res.data.qrCode);
     setSecret(res.data!.secret);
     setFactorId(res.data!.id);
     setShowSetup(true);

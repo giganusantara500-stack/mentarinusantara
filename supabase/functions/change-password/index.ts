@@ -66,9 +66,21 @@ Deno.serve(async (req: Request) => {
       return json({ error: `Gagal mengubah password: ${rpcErr.message}` }, 500);
     }
 
-    await admin.from("profiles").update({ must_change_password: false }).eq("id", userId);
+    const profileUpdate = await admin.from("profiles").update({ must_change_password: false }).eq("id", userId);
+    if (profileUpdate.error && !/must_change_password|schema cache|column/i.test(profileUpdate.error.message)) {
+      return json({ success: false, error: `Password berubah, tetapi status akun gagal diperbarui: ${profileUpdate.error.message}` }, 500);
+    }
 
-    return json({ success: true, message: "Password berhasil diubah." });
+    const metadata = {
+      ...(userData.user.user_metadata ?? {}),
+      must_change_password: false,
+    };
+    const { error: metaErr } = await admin.auth.admin.updateUserById(userId, { user_metadata: metadata });
+    if (metaErr) {
+      return json({ success: false, error: `Password berubah, tetapi tanda ganti password gagal dimatikan: ${metaErr.message}` }, 500);
+    }
+
+    return json({ success: true, must_change_password: false, message: "Password berhasil diubah." });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Kesalahan server tidak diketahui.";
     return json({ error: message }, 500);

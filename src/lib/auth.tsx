@@ -49,6 +49,12 @@ function roleFromMetadata(metadata: User["user_metadata"] | undefined): Profile[
   return "pending";
 }
 
+function mustChangePassword(rowFlag: boolean | null | undefined, metadata: User["user_metadata"] | undefined) {
+  const meta = metadata?.must_change_password;
+  if (meta === false || meta === "false") return false;
+  return rowFlag === true || meta === true || meta === "true";
+}
+
 function withAccountMetadata(profile: Profile, metadata: User["user_metadata"] | undefined): Profile {
   const fullName = metadataText(metadata, "full_name");
   return {
@@ -84,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: canonicalRole(row.role),
       parent_id: null,
       status: row.is_active === false ? "suspended" : "active",
-      must_change_password: row.must_change_password === true || metadata?.must_change_password === true,
+      must_change_password: mustChangePassword(row.must_change_password, metadata),
       loket_type: null,
       loket_code: null,
       deleted_at: null,
@@ -153,6 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!user) return;
     const { data } = await supabase.auth.getUser();
     const current = data.user ?? user;
+    setUser(current);
     const p = await fetchProfile(current.id, current.email ?? "", current.user_metadata);
     setProfile(p);
   }, [user, fetchProfile]);
@@ -255,13 +262,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const enrollMFA = useCallback(async () => {
     const issuer = mfaIssuer(profile?.role);
     if (!issuer) return { error: "Peran ini tidak menggunakan verifikasi dua langkah." };
-    const { data, error } = await supabase.auth.mfa.enroll({
-      factorType: "totp",
-      issuer,
-      friendlyName: issuer,
+    if (enrollInFlight) return enrollInFlight;
+
+    const run = async (): Promise<EnrollResult> => {
+      const listed = await listTotpFactors();
+      if (listed.error) return { error: listed.error };
+      await removeUnverifiedTotp(listed.factors);
+
+      const fresh = await listTotpFactors();
+      if (fresh.error) return { error: fresh.error };
+      const verified = fresh.factors.filter((factor) => factor.status === "verified");
+      const { data: assurance } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (verified.length > 0 && assurance?.currentLevel !== "aal2") {
+        setMfaState("required");
+        return {};
+      }
+
+      const attempt = (friendlyName: string) => supabase.auth.mfa.enroll({
+        factorType: "totp",
+        issuer,
+        friendlyName,
+      });
+      let { data, error } = await attempt(nextFriendlyName(fresh.factors, issuer));
+      if (error && /friendly name/i.test(error.message)) {
+        const again = await listTotpFactors();
+        await removeUnverifiedTotp(again.factors);
+        const after = await listTotpFactors();
+        const verifiedAfter = after.factors.filter((factor) => factor.status === "verified");
+        if (verifiedAfter.length > 0 && assurance?.currentLevel !== "aal2") {
+          setMfaState("required");
+          return {};
+        }
+        ({ data, error } = await attempt(`${issuer}-${Date.now()}`));
+      }
+      if (error) return { error: error.message };
+      if (!data?.totp?.qr_code || !data.totp.secret) return { error: "Kode QR 2FA gagal dibuat." };
+      return { data: { qrCode: data.totp.qr_code, secret: data.totp.secret, id: data.id } };
+    };
+
+    enrollInFlight = run().finally(() => {
+      enrollInFlight = null;
     });
-    if (error) return { error: error.message };
-    return { data: { qrCode: data.totp.qr_code, secret: data.totp.secret, id: data.id } };
+    return enrollInFlight;
   }, [profile?.role]);
 
   const verifyMFAEnroll = useCallback(async (factorId: string, code: string) => {
@@ -342,6 +384,45 @@ export function dbRoleToAppRole(role: string): "superadmin" | "mitra" | "submitr
   if (canonical === "submitra") return "submitra";
   if (canonical === "loket") return "loket";
   return "pending";
+}
+
+type TotpFactor = {
+  id: string;
+  status: string;
+  friendly_name?: string | null;
+  factor_type?: string;
+};
+
+type EnrollResult = { data?: { qrCode: string; secret: string; id: string }; error?: string };
+
+let enrollInFlight: Promise<EnrollResult> | null = null;
+
+async function listTotpFactors(): Promise<{ factors: TotpFactor[]; error?: string }> {
+  const { data, error } = await supabase.auth.mfa.listFactors();
+  if (error || !data) return { factors: [], error: error?.message || "Daftar faktor 2FA gagal dibaca." };
+  const fromAll = data.all.filter((factor) => factor.factor_type === "totp");
+  return { factors: fromAll.length > 0 ? fromAll : data.totp };
+}
+
+async function removeUnverifiedTotp(factors: TotpFactor[]) {
+  const stale = factors.filter((factor) => factor.status && factor.status !== "verified");
+  for (const factor of stale) {
+    const { error } = await supabase.auth.mfa.unenroll({ factorId: factor.id });
+    if (error && !/not found|not exist/i.test(error.message)) {
+      return error.message;
+    }
+  }
+  return "";
+}
+
+function nextFriendlyName(factors: TotpFactor[], issuer: string) {
+  const taken = new Set(factors.map((factor) => factor.friendly_name || ""));
+  if (!taken.has(issuer)) return issuer;
+  for (let index = 2; index < 20; index += 1) {
+    const candidate = `${issuer}-${index}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${issuer}-${Date.now()}`;
 }
 
 export function roleUsesMfa(role: string | null | undefined): boolean {
