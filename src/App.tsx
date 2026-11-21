@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AuthProvider, canonicalRole, useAuth } from "@/lib/auth";
+import { applyDisplayMode } from "@/lib/displayMode";
 import { AppShell } from "@/components/layout/AppShell";
 import { LoketShell } from "@/components/layout/LoketShell";
 import { LoginPage } from "@/pages/LoginPage";
@@ -13,9 +14,6 @@ import { DashboardPage } from "@/pages/DashboardPage";
 import { LoketHomePage } from "@/pages/LoketHomePage";
 import { LoketKolektifPage, LoketReportPage, LoketSettingPage, LoketStatusPage, LoketTransaksiPage, LoketTransferPage } from "@/pages/loket/LoketDesk";
 import { KolektifPage } from "@/pages/KolektifPage";
-import { TransferPage } from "@/pages/TransferPage";
-import { MitraDashboardPage } from "@/pages/MitraDashboardPage";
-import { SuperAdminDashboardPage } from "@/pages/SuperAdminDashboardPage";
 import { BuyPage } from "@/pages/BuyPage";
 import { ManageUsersPage } from "@/pages/ManageUsersPage";
 import { UserDetailPage } from "@/pages/UserDetailPage";
@@ -204,6 +202,15 @@ function ProtectedApp() {
   );
 }
 
+function RoleDisplay() {
+  const { user, profile, loading } = useAuth();
+  useEffect(() => {
+    if (loading) return;
+    applyDisplayMode(user ? profile?.role : null, Boolean(user && profile));
+  }, [loading, user, profile]);
+  return null;
+}
+
 export default function App() {
   // Handle recovery flow dari email: Supabase redirect ke /#/reset-password
   useEffect(() => {
@@ -221,6 +228,7 @@ export default function App() {
 
   return (
     <AuthProvider>
+        <RoleDisplay />
         <ProtectedApp />
     </AuthProvider>
   );

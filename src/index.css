@@ -19,6 +19,18 @@ html, body, #root {
   min-height: 100%;
 }
 
+html.loket-app,
+html.loket-app body,
+html.loket-app #root {
+  height: 100dvh;
+  min-height: 100dvh;
+  background: #fff;
+}
+
+html.loket-app body {
+  overscroll-behavior: none;
+}
+
 #root {
   overflow: hidden;
 }

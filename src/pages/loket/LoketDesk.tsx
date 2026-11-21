@@ -72,14 +72,22 @@ async function authHeader() {
   return { Authorization: `Bearer ${session.data.session?.access_token ?? ""}`, "Content-Type": "application/json" };
 }
 
-async function readApi(response: Response) {
+const HOSTING_KOLEKTIF = "Layanan kolektif di hosting tidak menjawab JSON. Pastikan fungsi API dan kunci Supabase aktif.";
+
+interface KolektifApiBody {
+  error?: string;
+  rows?: Group[];
+  row?: Partial<Group> & { id?: string };
+}
+
+async function readApi(response: Response): Promise<{ ok: boolean; json: boolean; body: KolektifApiBody }> {
   const text = await response.text();
-  if (!text) return { ok: response.ok, body: {} as Record<string, any> };
+  if (!text) return { ok: response.ok, json: true, body: {} };
   try {
-    const body = JSON.parse(text);
-    return { ok: response.ok && !body?.error, body };
+    const body = JSON.parse(text) as KolektifApiBody;
+    return { ok: response.ok && !body.error, json: true, body };
   } catch {
-    return { ok: false, body: { error: "Layanan kolektif di hosting tidak menjawab JSON. Pastikan fungsi API dan kunci Supabase aktif." } };
+    return { ok: false, json: false, body: { error: HOSTING_KOLEKTIF } };
   }
 }
 
@@ -114,7 +122,8 @@ function printSheet(text: string) {
   const popup = window.open("", "kolektif-cetak", "width=980,height=760");
   if (!popup) return;
   const body = text.replace(/</g, "&lt;");
-  popup.document.write(`<!doctype html><html><head><title>Daftar Tagihan Kolektif</title><style>@page{size:A4 portrait;margin:12mm}body{margin:0}pre{font-family:"Courier New",Consolas,monospace;font-size:11px;line-height:1.45;white-space:pre;color:#0f172a}</style></head><body><pre>${body}</pre><script>window.onload=function(){window.print()}<\/script></body></html>`);
+  const closeScript = "</" + "script>";
+  popup.document.write(`<!doctype html><html><head><title>Daftar Tagihan Kolektif</title><style>@page{size:A4 portrait;margin:12mm}body{margin:0}pre{font-family:"Courier New",Consolas,monospace;font-size:11px;line-height:1.45;white-space:pre;color:#0f172a}</style></head><body><pre>${body}</pre><script>window.onload=function(){window.print()}${closeScript}</body></html>`);
   popup.document.close();
   popup.focus();
 }
@@ -169,6 +178,171 @@ function sheetText(group: Group, code: string, loketName: string) {
   return lines.join("\n");
 }
 
+function cacheKey(userId: string) {
+  return `mentari-kolektif:${userId}`;
+}
+
+function normalizeBill(bill: Partial<GroupBill>): GroupBill {
+  const status = bill.status === "LUNAS" || bill.status === "LAINNYA" || bill.status === "BL LNS" ? bill.status : "BL LNS";
+  return {
+    number: String(bill.number ?? "").trim(),
+    name: String(bill.name ?? "Pelanggan").trim() || "Pelanggan",
+    product: bill.product ? String(bill.product) : "",
+    period: String(bill.period ?? ""),
+    total: Number(bill.total) || 0,
+    status,
+  };
+}
+
+function normalizeGroup(row: Partial<Group> & { members?: Member[]; bills?: GroupBill[] }): Group {
+  const members = Array.isArray(row.members)
+    ? row.members.filter((member) => member?.number).map((member) => ({
+      number: String(member.number).trim(),
+      name: String(member.name || "Pelanggan").trim() || "Pelanggan",
+      product: member.product ? String(member.product) : "",
+    }))
+    : [];
+  return {
+    id: row.id || crypto.randomUUID(),
+    name: row.name || row.collector || "Kolektor",
+    collector: row.collector || row.name || "Kolektor",
+    loketCode: row.loketCode,
+    ownerName: row.ownerName,
+    members,
+    bills: Array.isArray(row.bills) ? row.bills.map((bill) => normalizeBill(bill)).filter((bill) => bill.number) : [],
+    history: Array.isArray(row.history) ? row.history : [],
+  };
+}
+
+function readCollectiveCache(userId: string) {
+  if (!userId) return null;
+  try {
+    const parsed = JSON.parse(localStorage.getItem(cacheKey(userId)) || "") as { dirty?: boolean; rows?: Group[] };
+    if (!Array.isArray(parsed?.rows)) return null;
+    return { dirty: Boolean(parsed.dirty), rows: parsed.rows.map((row) => normalizeGroup(row)) };
+  } catch {
+    return null;
+  }
+}
+
+function writeCollectiveCache(userId: string, rows: Group[], dirty: boolean) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(cacheKey(userId), JSON.stringify({ dirty, rows }));
+  } catch {
+    // Perangkat penuh. Daftar di layar tetap dipakai.
+  }
+}
+
+function cleanCell(value: unknown) {
+  if (value == null) return "";
+  if (typeof value === "number" && Number.isFinite(value)) return value.toFixed(0);
+  const text = String(value).trim().replace(/^\uFEFF/, "").replace(/^["']|["']$/g, "");
+  if (/^\d+(\.\d+)?e\+\d+$/i.test(text)) {
+    const num = Number(text);
+    if (Number.isFinite(num)) return num.toFixed(0);
+  }
+  return text.replace(/\.0+$/, "");
+}
+
+function normalizeId(value: string) {
+  const compact = value.replace(/\s+/g, "");
+  return /\d/.test(compact) && compact.replace(/[\d.]/g, "").length <= 2 ? compact : value.trim();
+}
+
+function isCustomerId(value: string) {
+  const text = normalizeId(value);
+  if (text.length < 5 || text.length > 32) return false;
+  if (/^(id|nama|produk|product|nomor|pelanggan|no)$/i.test(text)) return false;
+  return /\d/.test(text);
+}
+
+function buildBills(group: Group): GroupBill[] {
+  return group.members.map((member) => {
+    const existing = group.bills.find((bill) => bill.number === member.number);
+    if (existing && existing.period && existing.period !== "Memuat") {
+      return { ...existing, name: member.name || existing.name, product: member.product || existing.product };
+    }
+    const product = member.product || "PDAM";
+    const bill = inquire(product, member.number, product, 0);
+    return bill
+      ? { number: member.number, name: member.name, product, period: bill.period, total: bill.total, status: "BL LNS" as const }
+      : { number: member.number, name: member.name, product, period: "-", total: 0, status: "LAINNYA" as const };
+  });
+}
+
+function withBills(group: Group) {
+  return { ...group, bills: buildBills(group) };
+}
+
+function mergeMembers(current: Member[], incoming: Member[]) {
+  const merged = current.map((member) => ({ ...member }));
+  incoming.forEach((member) => {
+    const index = merged.findIndex((item) => item.number === member.number);
+    if (index >= 0) merged[index] = { ...merged[index], name: member.name || merged[index].name, product: member.product || merged[index].product };
+    else merged.push(member);
+  });
+  return merged;
+}
+
+function splitLoose(line: string) {
+  const clean = line.replace(/^\uFEFF/, "").trim();
+  if (!clean) return [];
+  const delimiter = clean.includes(";") ? ";" : clean.includes("\t") ? "\t" : clean.includes("|") ? "|" : clean.includes(",") ? "," : "";
+  if (!delimiter) {
+    const match = clean.match(/^(\S+)\s+(.+)$/);
+    return match ? [match[1], match[2].trim()] : [clean];
+  }
+  return clean.split(delimiter).map((part) => part.trim().replace(/^["']|["']$/g, ""));
+}
+
+function rowsFromText(text: string) {
+  return text.replace(/^\uFEFF/, "").split(/\r?\n/).map((line) => splitLoose(line)).filter((row) => row.some((cell) => cell.trim()));
+}
+
+function headerColumn(header: string[], patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const index = header.findIndex((cell) => pattern.test(cell.trim().toLowerCase()));
+    if (index >= 0) return index;
+  }
+  return -1;
+}
+
+function membersFromTable(rows: string[][], fallbackProduct: string): Member[] {
+  const table = rows.map((row) => row.map((cell) => cleanCell(cell)));
+  let headerAt = -1;
+  for (let index = 0; index < Math.min(table.length, 8); index += 1) {
+    const cells = table[index];
+    const hasLabel = cells.some((cell) => /idpel|id pelanggan|^id\b|nomor|^no\b|nama|produk|product/i.test(cell));
+    const hasId = cells.some((cell) => isCustomerId(cell));
+    if (hasLabel && !hasId) {
+      headerAt = index;
+      break;
+    }
+  }
+  const header = headerAt >= 0 ? table[headerAt] : [];
+  const sample = table.find((row, index) => index !== headerAt && row.some((cell) => isCustomerId(cell))) ?? [];
+  const guessedId = Math.max(0, sample.findIndex((cell) => isCustomerId(cell)));
+  const pick = (found: number, fallback: number) => found >= 0 ? found : fallback;
+  const idCol = pick(headerAt >= 0 ? headerColumn(header, [/idpel/i, /id pelanggan/i, /^id\b/i, /nomor/i, /\bid\b/i, /^no\b/i]) : guessedId, guessedId);
+  const nameCol = pick(headerAt >= 0 ? headerColumn(header, [/nama|name/i]) : guessedId + 1, idCol + 1);
+  const productCol = pick(headerAt >= 0 ? headerColumn(header, [/produk|product|biller|kategori/i]) : guessedId + 2, idCol + 2);
+  return table.filter((_, index) => index !== headerAt).map((row) => ({
+    number: normalizeId(row[idCol] ?? ""),
+    name: (row[nameCol] ?? "").trim() || "Pelanggan",
+    product: (row[productCol] ?? "").trim() || fallbackProduct,
+  })).filter((row) => isCustomerId(row.number));
+}
+
+function sheetRows(book: XLSX.WorkBook) {
+  for (const name of book.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(book.Sheets[name], { header: 1, raw: false, defval: "" });
+    const table = rows.map((row) => (Array.isArray(row) ? row : []).map((cell) => cleanCell(cell)));
+    if (table.some((row) => row.some(Boolean))) return table;
+  }
+  return [];
+}
+
 export function LoketKolektifPage() {
   const { profile } = useAuth();
   const { tick, requestRefresh, loketCode } = useLoketRefresh();
@@ -191,12 +365,24 @@ export function LoketKolektifPage() {
   const [collectorName, setCollectorName] = useState("");
   const [biller, setBiller] = useState("PLN");
   const [custNo, setCustNo] = useState("");
-  const [custName, setCustName] = useState("");
-  const [pasteText, setPasteText] = useState("");
   const [notice, setNotice] = useState("");
+  const [noticeTone, setNoticeTone] = useState<"error" | "ok">("error");
   const [paying, setPaying] = useState(false);
   const loketName = profile?.full_name || profile?.username || "Loket";
+  const userId = profile?.id ?? "";
   const fileRef = useRef<HTMLInputElement>(null);
+  const groupsRef = useRef<Group[]>([]);
+  const activeIdRef = useRef("");
+  const revision = useRef(0);
+  const custNoRef = useRef<HTMLInputElement>(null);
+  const removedIds = useRef<string[]>([]);
+  groupsRef.current = groups;
+  activeIdRef.current = activeId;
+
+  const tell = (text: string, tone: "error" | "ok" = "error") => {
+    setNoticeTone(tone);
+    setNotice(text);
+  };
 
   const groupsFromSession = async () => {
     const { data } = await supabase.auth.getUser();
@@ -205,32 +391,58 @@ export function LoketKolektifPage() {
     if (!uid || !Array.isArray(raw)) return null;
     return raw
       .filter((row) => !row?.ownerId || row.ownerId === uid)
-      .map((row) => ({ ...row, bills: row.bills ?? [], history: row.history ?? [], members: row.members ?? [] }));
+      .map((row) => normalizeGroup(row));
   };
 
   const applyGroups = (rows: Group[]) => {
-    setNotice("");
+    groupsRef.current = rows;
     setGroups(rows);
     setActiveId((current) => rows.some((row) => row.id === current) ? current : (rows[0]?.id ?? ""));
+    setNotice("");
   };
 
+  const mirrorAccount = (rows: Group[]) => supabase.auth.updateUser({
+    data: { collectives: rows.map((row) => ({ ...row, ownerId: userId })) },
+  }).then(() => undefined, () => undefined);
+
   const load = async () => {
-    const response = await fetch("/api/kolektif", { headers: await authHeader() });
-    const parsed = await readApi(response);
-    if (parsed.ok) {
-      const rows = (parsed.body.rows ?? []).map((row: Group) => ({ ...row, bills: row.bills ?? [], history: row.history ?? [], members: row.members ?? [] }));
-      applyGroups(rows);
+    const revAtStart = revision.current;
+    let parsed: Awaited<ReturnType<typeof readApi>> = { ok: false, json: false, body: { error: HOSTING_KOLEKTIF } };
+    try {
+      const response = await fetch("/api/kolektif", { headers: await authHeader() });
+      parsed = await readApi(response);
+    } catch {
+      parsed = { ok: false, json: false, body: { error: HOSTING_KOLEKTIF } };
+    }
+    if (revision.current !== revAtStart) return;
+    const cached = readCollectiveCache(userId);
+    if (cached?.dirty) {
+      applyGroups(cached.rows);
+      return;
+    }
+    if (parsed.ok && parsed.json && Array.isArray(parsed.body.rows)) {
+      const remote = parsed.body.rows.map((row) => normalizeGroup(row));
+      applyGroups(remote);
+      writeCollectiveCache(userId, remote, false);
+      return;
+    }
+    if (groupsRef.current.length > 0) return;
+    if (cached?.rows.length) {
+      applyGroups(cached.rows);
       return;
     }
     const own = await groupsFromSession();
-    if (own) {
+    if (revision.current !== revAtStart) return;
+    if (own?.length) {
       applyGroups(own);
+      writeCollectiveCache(userId, own, false);
       return;
     }
-    setNotice(parsed.body.error || "Daftar kolektif gagal dimuat.");
+    tell(parsed.body.error || "Daftar kolektif gagal dimuat.");
   };
-  useEffect(() => { load(); }, [tick]);
+  useEffect(() => { void load(); }, [tick, userId]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = groups.find((group) => group.id === activeId) ?? null;
+  const activeLabel = active?.collector || active?.name || "";
   const tableRows: GroupBill[] = (active?.members ?? []).map((member) => {
     const bill = active?.bills.find((row) => row.number === member.number);
     if (bill) return { ...bill, name: member.name || bill.name, product: member.product || bill.product };
@@ -257,84 +469,119 @@ export function LoketKolektifPage() {
   const remainder = payable.slice(10);
   const remainderTotal = remainder.reduce((sum, row) => sum + row.total, 0);
 
-  const saveMembers = async (id: string, members: Member[], extra: { name?: string; collector?: string } = {}) => {
-    const response = await fetch("/api/kolektif", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id, members, ...extra }) });
-    const parsed = await readApi(response);
-    if (!parsed.ok) setNotice(parsed.body.error || "Anggota kolektif gagal disimpan.");
-    await load();
+  const publish = async (rows: Group[], rev: number) => {
+    const keepLocal = async () => {
+      if (revision.current !== rev) return;
+      await mirrorAccount(groupsRef.current);
+    };
+    try {
+      const listed = await readApi(await fetch("/api/kolektif", { headers: await authHeader() }));
+      if (revision.current !== rev) return;
+      if (!listed.json || !listed.ok || !Array.isArray(listed.body.rows)) {
+        await keepLocal();
+        return;
+      }
+      for (const id of removedIds.current) {
+        const removed = await readApi(await fetch("/api/kolektif", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id, action: "delete" }) }));
+        if (revision.current !== rev) return;
+        if (!removed.json) {
+          await keepLocal();
+          return;
+        }
+        if (!removed.ok && !String(removed.body.error || "").includes("tidak ditemukan")) {
+          await keepLocal();
+          return;
+        }
+      }
+      let latest = rows;
+      let changed = false;
+      for (const group of rows) {
+        const saved = await readApi(await fetch("/api/kolektif", {
+          method: "POST",
+          headers: await authHeader(),
+          body: JSON.stringify({ id: group.id, name: group.name, collector: group.collector, members: group.members }),
+        }));
+        if (revision.current !== rev) return;
+        if (!saved.json || !saved.ok) {
+          await keepLocal();
+          return;
+        }
+        const savedId = String(saved.body.row?.id ?? group.id);
+        if (savedId !== group.id) {
+          changed = true;
+          latest = latest.map((item) => item.id === group.id ? { ...item, id: savedId } : item);
+          if (activeIdRef.current === group.id) setActiveId(savedId);
+        }
+        const current = latest.find((item) => item.id === savedId);
+        if (current?.bills.length) {
+          await fetch("/api/kolektif/bills", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: savedId, bills: current.bills }) }).catch(() => undefined);
+        }
+      }
+      if (revision.current !== rev) return;
+      if (changed) {
+        groupsRef.current = latest;
+        setGroups(latest);
+      }
+      removedIds.current = [];
+      writeCollectiveCache(userId, latest, false);
+      await mirrorAccount(latest);
+    } catch {
+      await keepLocal();
+    }
   };
 
-  const parseMemberLines = (text: string): Member[] => text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !/^id\b/i.test(line)).map((line) => {
-    const parts = line.split(/[,;\t|]/).map((part) => part.trim()).filter(Boolean);
-    const cells = parts.length > 1 ? parts : line.split(/\s+/);
-    return { number: cells[0] || "", name: cells[1] || "Pelanggan", product: cells[2] || biller };
-  }).filter((row) => row.number.length >= 5);
+  const commitLocal = (rows: Group[], message?: string, nextActive?: string) => {
+    revision.current += 1;
+    const rev = revision.current;
+    const ready = rows.map((row) => withBills(row));
+    groupsRef.current = ready;
+    setGroups(ready);
+    if (nextActive !== undefined) setActiveId(nextActive);
+    writeCollectiveCache(userId, ready, true);
+    if (message) tell(message, "ok");
+    void publish(ready, rev);
+  };
 
-  const storeMembers = async (incoming: Member[]) => {
-    if (incoming.length === 0) return;
-    if (active) {
-      const merged = [...active.members];
-      incoming.forEach((member) => { if (!merged.some((item) => item.number === member.number)) merged.push(member); });
-      await saveMembers(active.id, merged);
+  const storeMembers = (incoming: Member[], seedName: string) => {
+    if (incoming.length === 0) {
+      tell("Tidak ada pelanggan yang terbaca. Gunakan ID dan nama, satu pelanggan tiap baris.");
       return;
     }
-    const response = await fetch("/api/kolektif", {
-      method: "POST",
-      headers: await authHeader(),
-      body: JSON.stringify({ name: collectorName.trim() || "Kolektor", collector: collectorName.trim() || loketName, members: incoming }),
-    });
-    const parsed = await readApi(response);
-    if (!parsed.ok) {
-      setNotice(parsed.body.error || "Grup kolektif gagal dibuat.");
+    const current = groupsRef.current;
+    const target = current.find((group) => group.id === activeIdRef.current) ?? null;
+    if (target) {
+      const members = mergeMembers(target.members, incoming);
+      const next = current.map((group) => group.id === target.id ? { ...group, members } : group);
+      commitLocal(next, `${incoming.length} pelanggan masuk ke daftar.`, target.id);
       return;
     }
-    setActiveId(parsed.body.row?.id ?? "");
-    await load();
+    const name = collectorName.trim() || seedName || "Kolektor";
+    const row: Group = { id: crypto.randomUUID(), name, collector: name, members: mergeMembers([], incoming), bills: [], history: [] };
+    setCollectorName("");
+    commitLocal([row, ...current], `${incoming.length} pelanggan masuk ke ${name}.`, row.id);
   };
 
   const importFile = async (file: File) => {
-    if (/\.txt$/i.test(file.name)) {
-      await storeMembers(parseMemberLines(await file.text()));
-      return;
+    const lower = file.name.toLowerCase();
+    const seed = file.name.replace(/\.[^.]+$/, "") || "Kolektor";
+    const fromText = async () => membersFromTable(rowsFromText(await file.text()), biller);
+    if (lower.endsWith(".txt") || lower.endsWith(".csv")) {
+      const parsed = await fromText();
+      if (parsed.length > 0 || lower.endsWith(".txt")) {
+        storeMembers(parsed, seed);
+        return;
+      }
     }
-    const data = await file.arrayBuffer();
-    const book = XLSX.read(data, { type: "array" });
-    const rows = XLSX.utils.sheet_to_json<string[]>(book.Sheets[book.SheetNames[0]], { header: 1 });
-    const members = rows.slice(1).map((row) => ({
-      number: String(row?.[0] ?? "").trim(),
-      name: String(row?.[1] ?? "").trim() || "Pelanggan",
-      product: String(row?.[2] ?? "").trim() || biller,
-    })).filter((row) => row.number);
-    await storeMembers(members);
+    let members: Member[] = [];
+    try {
+      const book = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      members = membersFromTable(sheetRows(book), biller);
+    } catch {
+      members = [];
+    }
+    if (members.length === 0) members = await fromText();
+    storeMembers(members, seed);
   };
-
-  const importPaste = async () => {
-    await storeMembers(parseMemberLines(pasteText));
-    setPasteText("");
-  };
-
-  const syncing = useRef("");
-  useEffect(() => {
-    if (!active || active.members.length === 0) return;
-    const missing = active.members.some((member) => !active.bills.some((bill) => bill.number === member.number));
-    if (!missing || syncing.current === active.id) return;
-    const group = active;
-    syncing.current = group.id;
-    (async () => {
-      const next: GroupBill[] = group.members.map((member) => {
-        const existing = group.bills.find((bill) => bill.number === member.number);
-        if (existing) return { ...existing, name: member.name || existing.name, product: member.product || existing.product };
-        const product = member.product || "PDAM";
-        const bill = inquire(product, member.number, product, 0);
-        return bill
-          ? { number: member.number, name: member.name, product, period: bill.period, total: bill.total, status: "BL LNS" as const }
-          : { number: member.number, name: member.name, product, period: "-", total: 0, status: "LAINNYA" as const };
-      });
-      await fetch("/api/kolektif/bills", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: group.id, bills: next }) });
-      syncing.current = "";
-      await load();
-    })();
-  }, [activeId, active?.members.length, active?.bills.length]);
 
   const payBatch = async () => {
     if (!active || payable.length === 0 || paying) return;
@@ -361,11 +608,15 @@ export function LoketKolektifPage() {
         paidTotal += row.total;
       }
       if (paidCount > 0) {
-        await fetch("/api/kolektif/bills", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: active.id, bills: next, paid: true, paidCount, paidTotal }) });
+        const updated = groupsRef.current.map((group) => group.id === active.id ? { ...group, bills: next.map((bill) => ({ ...bill })) } : group);
+        groupsRef.current = updated;
+        setGroups(updated);
+        writeCollectiveCache(userId, updated, true);
+        await fetch("/api/kolektif/bills", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: active.id, bills: next, paid: true, paidCount, paidTotal }) }).catch(() => undefined);
       }
       if (stopped) break;
     }
-    if (stopped) setNotice(stopped);
+    if (stopped) tell(stopped);
     setConfirmOpen(false);
     setPicked([]);
     setPaying(false);
@@ -373,43 +624,73 @@ export function LoketKolektifPage() {
     await load();
   };
 
-  const addCollector = async () => {
-    if (!collectorName.trim()) return;
-    const response = await fetch("/api/kolektif", {
-      method: "POST",
-      headers: await authHeader(),
-      body: JSON.stringify({ name: collectorName.trim(), collector: collectorName.trim(), members: [] }),
-    });
-    const parsed = await readApi(response);
-    if (parsed.ok) setActiveId(parsed.body.row?.id ?? "");
-    else setNotice(parsed.body.error || "Kolektor gagal disimpan.");
+  const addCollector = () => {
+    const name = collectorName.trim();
+    if (!name) return;
+    const existing = groupsRef.current.find((group) => (group.collector || group.name).trim().toLowerCase() === name.toLowerCase());
+    if (existing) {
+      setActiveId(existing.id);
+      setCollectorName("");
+      tell(`Kolektor ${existing.collector || existing.name} dipilih.`, "ok");
+      requestAnimationFrame(() => custNoRef.current?.focus());
+      return;
+    }
+    const row: Group = { id: crypto.randomUUID(), name, collector: name, members: [], bills: [], history: [] };
     setCollectorName("");
-    await load();
+    commitLocal([row, ...groupsRef.current], `Kolektor ${name} ditambahkan.`, row.id);
+    requestAnimationFrame(() => custNoRef.current?.focus());
   };
 
-  const addCustomer = async () => {
-    if (!active || custNo.trim().length < 5) return;
-    const members = [...active.members, { number: custNo.trim(), name: custName.trim() || "Pelanggan", product: biller }];
+  const addCustomer = () => {
+    const number = normalizeId(custNo);
+    const group = groupsRef.current.find((item) => item.id === activeIdRef.current);
+    if (!group) {
+      tell("Tambah kolektor terlebih dahulu, lalu masukkan pelanggan.");
+      return;
+    }
+    if (!isCustomerId(number)) {
+      tell("ID pelanggan minimal 5 karakter.");
+      custNoRef.current?.focus();
+      return;
+    }
+    const known = inquire(biller, number, biller, 0);
+    const name = known?.name || "Pelanggan";
+    const members = mergeMembers(group.members, [{ number, name, product: biller }]);
+    const next = groupsRef.current.map((item) => item.id === group.id ? { ...item, members } : item);
     setCustNo("");
-    setCustName("");
-    await saveMembers(active.id, members);
+    commitLocal(next, `${number} masuk ke ${group.collector || group.name}.`, group.id);
+    requestAnimationFrame(() => custNoRef.current?.focus());
+  };
+
+  const removeGroup = (id: string) => {
+    removedIds.current = [...removedIds.current, id];
+    const next = groupsRef.current.filter((group) => group.id !== id);
+    const nextActive = activeIdRef.current === id ? (next[0]?.id ?? "") : activeIdRef.current;
+    commitLocal(next, "Kolektor dihapus.", nextActive);
   };
 
   const exportCustomers = () => {
-    if (!active) return;
-    const sheet = XLSX.utils.json_to_sheet(active.members.map((member) => ({ ID: member.number, Nama: member.name, Produk: member.product || "" })));
+    if (!active || active.members.length === 0) {
+      tell("Belum ada pelanggan untuk diekspor.");
+      return;
+    }
+    const sheet = XLSX.utils.aoa_to_sheet([
+      ["ID Pelanggan", "Nama Pelanggan", "Produk"],
+      ...active.members.map((member) => [member.number, member.name, member.product || ""]),
+    ]);
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, "Pelanggan");
-    XLSX.writeFile(book, `${active.name}.xlsx`);
+    const safeName = (active.collector || active.name || "kolektif").replace(/[\\/:*?"<>|]/g, "-");
+    XLSX.writeFile(book, `${safeName}.xlsx`);
   };
 
-  const removeCustomer = async (number: string) => {
-    if (!active) return;
-    const members = active.members.filter((member) => member.number !== number);
-    const bills = active.bills.filter((bill) => bill.number !== number);
-    await fetch("/api/kolektif/bills", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: active.id, bills }) });
-    await saveMembers(active.id, members);
+  const removeCustomer = (number: string) => {
+    const group = groupsRef.current.find((item) => item.id === activeIdRef.current);
+    if (!group) return;
+    const members = group.members.filter((member) => member.number !== number);
+    const next = groupsRef.current.map((item) => item.id === group.id ? { ...item, members, bills: item.bills.filter((bill) => bill.number !== number) } : item);
     setPicked((rows) => rows.filter((item) => item !== number));
+    commitLocal(next, "Pelanggan dihapus.", group.id);
   };
 
   useEffect(() => {
@@ -462,31 +743,34 @@ export function LoketKolektifPage() {
   const statusText = (status: GroupBill["status"]) => status === "BL LNS" ? "BL LUNAS" : status === "LAINNYA" ? "Perlu Diperiksa" : "LUNAS";
 
   return (
-    <div className="grid w-full min-w-0 gap-2 lg:grid-cols-[220px_minmax(0,1fr)]">
-      <aside className="flex min-h-[520px] max-h-[calc(100vh-9.5rem)] flex-col rounded-md border border-slate-300 bg-white p-2">
-        <div className="mb-2 text-xs font-bold uppercase text-slate-500">Kolektor</div>
-        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden pb-6">
+    <div className="grid min-h-0 w-full flex-1 grid-cols-1 gap-2 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-slate-300 bg-white">
+        <div className="mb-2 shrink-0 px-2 pt-2 text-xs font-bold uppercase text-slate-500">Kolektor</div>
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2">
           {groups.length === 0 && <p className="text-xs text-slate-400">Belum ada kolektor.</p>}
           {groups.map((group) => (
-            <button key={group.id} onClick={() => { setActiveId(group.id); setPicked([]); }} className={`block w-full rounded-lg px-3 py-2 text-left text-sm ${activeId === group.id ? "bg-amber-500 font-semibold text-white" : "text-slate-700 hover:bg-slate-50"}`}>
+            <button key={group.id} onClick={() => { setActiveId(group.id); setPicked([]); }} className={`block w-full rounded-lg border px-3 py-2 text-left text-sm ${activeId === group.id ? "border-amber-600 bg-amber-500 font-semibold text-white shadow-sm ring-2 ring-amber-300" : "border-transparent text-slate-700 hover:bg-slate-50"}`}>
               {group.collector || group.name}
               <div className={`text-xs ${activeId === group.id ? "text-amber-100" : "text-slate-400"}`}>{group.members.length} pelanggan</div>
             </button>
           ))}
         </div>
-        <button onClick={() => setManageOpen(true)} className="mt-3 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700">Kelola Kolektif</button>
-      </aside>
-      <section className="flex min-h-[560px] w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-900">
-          {active ? `Kelola Pelanggan - ${active.collector || active.name}` : "Kelola Pelanggan"}
+        <div className="mt-2 flex shrink-0 items-center px-2 py-2.5">
+          <button onClick={() => setManageOpen(true)} className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700">Kelola Kolektif</button>
         </div>
-        <div className="flex flex-wrap gap-2 border-b border-slate-100 p-3">
+      </aside>
+      <section className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-md border border-slate-300 bg-white">
+        <div className="shrink-0 border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-900">
+          {activeLabel ? `Kelola Pelanggan - ${activeLabel}` : "Kelola Pelanggan"}
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2 border-b border-slate-100 p-3">
           <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) importFile(file); event.target.value = ""; }} />
           <button onClick={() => fileRef.current?.click()} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">Impor Excel/CSV</button>
           <button onClick={() => setSheetOpen(true)} disabled={!active || bills.length === 0 || bills.some((row) => row.period === "Memuat")} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40">Preview List</button>
           <button onClick={() => setHistoryOpen(true)} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">Riwayat Pembayaran</button>
         </div>
-        <div className="flex flex-wrap items-center gap-2 px-3 py-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 px-3 py-3">
           {([
             ["semua", `Semua (${counts.semua})`],
             ["BL LNS", `BL LUNAS (${counts["BL LNS"]})`],
@@ -497,8 +781,8 @@ export function LoketKolektifPage() {
           ))}
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari ID atau nama" className="ml-auto w-48 rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
         </div>
-        <div className="h-5 shrink-0 px-3 text-sm text-rose-600">{notice}</div>
-        <div className="h-[450px] shrink-0 overflow-auto">
+        <div className={`h-5 shrink-0 px-3 text-sm ${noticeTone === "ok" ? "text-emerald-700" : "text-rose-600"}`}>{notice}</div>
+        <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full table-fixed text-left text-xs">
             <colgroup>
               <col className="w-8" />
@@ -535,11 +819,12 @@ export function LoketKolektifPage() {
             </tbody>
           </table>
         </div>
-        <div className="sticky bottom-0 z-10 mt-auto flex flex-wrap items-center justify-between gap-2 bg-slate-800 px-4 py-3 text-white">
-          <div className="text-sm text-slate-200">Total: {bills.length} pelanggan · Total bayar: {formatRupiah(listTotal)}</div>
-          <button onClick={() => nextBatch.length && setConfirmOpen(true)} disabled={nextBatch.length === 0 || paying} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-900 disabled:opacity-40">{paying ? "Memproses" : `Bayar ${nextBatch.length} Lembar`}</button>
+        <div className="flex shrink-0 items-center justify-between gap-3 bg-slate-800 px-4 py-2.5 text-white">
+          <div className="min-w-0 text-sm text-slate-200">Total: {bills.length} pelanggan · Total bayar: {formatRupiah(listTotal)}</div>
+          <button onClick={() => nextBatch.length && setConfirmOpen(true)} disabled={nextBatch.length === 0 || paying} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-40">{paying ? "Memproses" : `Bayar ${nextBatch.length} Lembar`}</button>
         </div>
       </section>
+    </div>
       {sheetOpen && active && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
           <div className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-4 shadow-xl">
@@ -637,39 +922,39 @@ export function LoketKolektifPage() {
             <div>
               <h2 className="font-semibold text-slate-900">Kolektor</h2>
               <div className="mt-3 flex gap-2">
-                <Input value={collectorName} onChange={(event) => setCollectorName(event.target.value)} placeholder="Nama kolektor" />
-                <button onClick={addCollector} className="rounded-lg bg-amber-500 px-3 text-sm font-semibold text-white">Tambah</button>
+                <Input value={collectorName} onChange={(event) => setCollectorName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCollector(); } }} placeholder="Nama kolektor, lalu Enter" />
+                <button type="button" onClick={addCollector} className="rounded-lg bg-amber-500 px-3 text-sm font-semibold text-white">Tambah</button>
               </div>
-              <div className="mt-3 divide-y">
-                {groups.map((group) => (
-                  <div key={group.id} className="flex items-center justify-between py-2 text-sm">
-                    <button onClick={() => setActiveId(group.id)} className="text-left">{group.collector || group.name}</button>
-                    <button onClick={async () => { await fetch("/api/kolektif", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: group.id, action: "delete" }) }); if (activeId === group.id) setActiveId(""); await load(); }} className="text-xs text-rose-600">Hapus</button>
-                  </div>
-                ))}
+              <div className="mt-3 space-y-1">
+                {groups.map((group) => {
+                  const selected = activeId === group.id;
+                  return (
+                    <div key={group.id} className={`flex items-center justify-between rounded-lg border px-2 py-2 text-sm ${selected ? "border-amber-600 bg-amber-500 text-white shadow-sm ring-2 ring-amber-300" : "border-transparent text-slate-700 hover:bg-slate-50"}`}>
+                      <button type="button" onClick={() => setActiveId(group.id)} className="min-w-0 flex-1 truncate text-left font-semibold">{group.collector || group.name}</button>
+                      <button type="button" onClick={() => removeGroup(group.id)} className={`shrink-0 text-xs font-semibold ${selected ? "text-white" : "text-rose-600"}`}>Hapus</button>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-            <div>
-              <h2 className="font-semibold text-slate-900">{active ? `Kelola Pelanggan - ${active.collector || active.name}` : "Kelola Pelanggan"}</h2>
+            <div className="flex min-h-0 flex-col">
+              <h2 className="font-semibold text-slate-900">{activeLabel ? `Kelola Pelanggan - ${activeLabel}` : "Kelola Pelanggan"}</h2>
               <div className="mt-3 grid gap-2">
                 <Select value={biller} onChange={(event) => setBiller(event.target.value)}>
                   {["GAS", "PLN", "BPJS", "PDAM", "TELCO", "TELKOM", "FINANCE", "INTERNET & TV", "PAJAK PBB", "CUSTID"].map((item) => <option key={item}>{item}</option>)}
                 </Select>
-                <Input value={custNo} onChange={(event) => setCustNo(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomer(); } }} placeholder="ID pelanggan, lalu Enter" />
-                <Input value={custName} onChange={(event) => setCustName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomer(); } }} placeholder="Nama pelanggan" />
+                <Input ref={custNoRef} value={custNo} onChange={(event) => setCustNo(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomer(); } }} placeholder="Nomor pelanggan, lalu Enter" />
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={addCustomer} disabled={!active} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white disabled:opacity-40">Tambah</button>
-                  <button onClick={() => fileRef.current?.click()} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Import Excel/CSV/Notepad</button>
-                  <button onClick={exportCustomers} disabled={!active} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold disabled:opacity-40">Ekspor Excel</button>
+                  <button type="button" onClick={addCustomer} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white">Tambah</button>
+                  <button type="button" onClick={() => fileRef.current?.click()} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Import Excel/CSV/Notepad</button>
+                  <button type="button" onClick={exportCustomers} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Ekspor Excel</button>
                 </div>
-                <textarea value={pasteText} onChange={(event) => setPasteText(event.target.value)} rows={4} placeholder={"Tempel dari Notepad. Satu pelanggan tiap baris:\n12345678901, Siti, PLN"} className="rounded-lg border border-slate-200 px-3 py-2 text-sm" />
-                <button onClick={importPaste} disabled={!active || pasteText.trim().length === 0} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold disabled:opacity-40">Masukkan dari Notepad</button>
               </div>
-              <div className="mt-3 max-h-48 divide-y overflow-auto text-sm">
+              <div className="mt-3 max-h-80 min-h-48 divide-y overflow-auto text-sm">
                 {(active?.members ?? []).map((member) => (
                   <div key={member.number} className="flex items-center justify-between py-1.5">
                     <span>{member.product || "CUSTID"} · {member.number} · {member.name}</span>
-                    <button onClick={() => active && saveMembers(active.id, active.members.filter((item) => item.number !== member.number))} className="text-xs text-rose-600">Hapus</button>
+                    <button type="button" onClick={() => removeCustomer(member.number)} className="text-xs text-rose-600">Hapus</button>
                   </div>
                 ))}
               </div>

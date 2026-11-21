@@ -241,30 +241,33 @@ export async function handleOpsRequest(
       const rows = stored.rows;
       if (existingId) {
         const row = rows.find((item) => item.id === existingId && (item.ownerId === caller.id || management(caller.role)));
-        if (!row || (caller.role === "loket" && row.ownerId !== caller.id)) return { status: 404, body: { error: "Kelompok kolektif tidak ditemukan." } };
-        if (!visible(row)) return { status: 404, body: { error: "Kelompok kolektif tidak ditemukan." } };
-        if (body.action === "delete") {
-          const next = rows.filter((item) => item.id !== existingId);
-          await saveCollectives(env, stored.users, next);
+        if (!row) {
+          if (body.action === "delete" || !name) return { status: 404, body: { error: "Kelompok kolektif tidak ditemukan." } };
+        } else {
+          if ((caller.role === "loket" && row.ownerId !== caller.id) || !visible(row)) return { status: 404, body: { error: "Kelompok kolektif tidak ditemukan." } };
+          if (body.action === "delete") {
+            const next = rows.filter((item) => item.id !== existingId);
+            await saveCollectives(env, stored.users, next);
+            return { status: 200, body: { row } };
+          }
+          if (name) row.name = name;
+          if (typeof body.collector === "string" && body.collector.trim()) row.collector = body.collector.trim();
+          if (body.status === "aktif" || body.status === "nonaktif") row.status = body.status;
+          const members = mapMembers(body, row.members);
+          if (members) {
+            row.members = members;
+            row.numbers = members.map((item) => item.number);
+          }
+          if (management(caller.role) && typeof body.ownerId === "string" && body.ownerId && body.ownerId !== row.ownerId) {
+            const loket = await ownedLoket(authorization, env, body.ownerId);
+            if (!loket) return { status: 403, body: { error: "Loket tujuan tidak ada di jaringan Anda." } };
+            row.ownerId = loket.id;
+            row.ownerName = loket.full_name || loket.username || "Loket";
+            row.loketCode = loket.loket_code || "";
+          }
+          await saveCollectives(env, stored.users, rows);
           return { status: 200, body: { row } };
         }
-        if (name) row.name = name;
-        if (typeof body.collector === "string" && body.collector.trim()) row.collector = body.collector.trim();
-        if (body.status === "aktif" || body.status === "nonaktif") row.status = body.status;
-        const members = mapMembers(body, row.members);
-        if (members) {
-          row.members = members;
-          row.numbers = members.map((item) => item.number);
-        }
-        if (management(caller.role) && typeof body.ownerId === "string" && body.ownerId && body.ownerId !== row.ownerId) {
-          const loket = await ownedLoket(authorization, env, body.ownerId);
-          if (!loket) return { status: 403, body: { error: "Loket tujuan tidak ada di jaringan Anda." } };
-          row.ownerId = loket.id;
-          row.ownerName = loket.full_name || loket.username || "Loket";
-          row.loketCode = loket.loket_code || "";
-        }
-        await saveCollectives(env, stored.users, rows);
-        return { status: 200, body: { row } };
       }
       if (!name) return { status: 400, body: { error: "Nama kolektif wajib diisi." } };
       let ownerId = caller.id;
@@ -280,7 +283,7 @@ export async function handleOpsRequest(
         loketCode = loket.loket_code || "";
       }
       const row = normalizeCollective({
-        id: crypto.randomUUID(),
+        id: existingId || crypto.randomUUID(),
         ownerId,
         ownerName,
         loketCode,
