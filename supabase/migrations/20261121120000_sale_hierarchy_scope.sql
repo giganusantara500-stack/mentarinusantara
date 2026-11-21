@@ -141,13 +141,23 @@ SET loket_id = chain.loket_id,
     submitra_id = chain.submitra_id,
     mitra_id = chain.mitra_id,
     super_admin_id = chain.super_admin_id
-FROM public.ledger_hierarchy(tx.user_id) AS chain;
+FROM (
+  SELECT row.id, hier.loket_id, hier.submitra_id, hier.mitra_id, hier.super_admin_id
+  FROM public.transactions AS row
+  CROSS JOIN LATERAL public.ledger_hierarchy(row.user_id) AS hier
+) AS chain
+WHERE tx.id = chain.id;
 
 UPDATE public.payment_simulations AS sale
 SET submitra_id = chain.submitra_id,
     mitra_id = chain.mitra_id,
     super_admin_id = chain.super_admin_id
-FROM public.ledger_hierarchy(sale.loket_id) AS chain;
+FROM (
+  SELECT row.id, hier.submitra_id, hier.mitra_id, hier.super_admin_id
+  FROM public.payment_simulations AS row
+  CROSS JOIN LATERAL public.ledger_hierarchy(row.loket_id) AS hier
+) AS chain
+WHERE sale.id = chain.id;
 
 REVOKE ALL ON FUNCTION public.ledger_hierarchy(uuid) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.ledger_sale_visible(text, uuid, uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
