@@ -25,9 +25,35 @@ function setManifest(href: string) {
   if (link.getAttribute("href") !== href) link.href = href;
 }
 
+function loketEntryRequested() {
+  return new URLSearchParams(window.location.search).get("app") === "loket";
+}
+
 export function isLoketWindow() {
-  const params = new URLSearchParams(window.location.search);
-  return document.documentElement.classList.contains("loket-app") || installedLoketApp() || params.get("app") === "loket";
+  return document.documentElement.classList.contains("loket-app") || installedLoketApp() || loketEntryRequested();
+}
+
+export function setEntryMode(mode: "loket" | "monitor") {
+  const url = new URL(window.location.href);
+  if (mode === "loket") url.searchParams.set("app", "loket");
+  else url.searchParams.delete("app");
+  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  applyDisplayMode(null, false);
+}
+
+export async function requestLoketFullscreen(): Promise<"entered" | "exited" | "unavailable"> {
+  const root = document.documentElement;
+  if (typeof root.requestFullscreen !== "function") return "unavailable";
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return "exited";
+    }
+    await root.requestFullscreen();
+    return "entered";
+  } catch {
+    return "unavailable";
+  }
 }
 
 function installedLoketApp() {
@@ -53,7 +79,7 @@ async function unregisterLoketWorker() {
 
 export function applyDisplayMode(role: string | null | undefined, known: boolean) {
   const loket = canonicalRole(role) === "loket";
-  const fullscreen = loket || (!known && installedLoketApp());
+  const fullscreen = loket || (!known && (installedLoketApp() || loketEntryRequested()));
   setManifest(fullscreen ? LOKET_MANIFEST : BROWSER_MANIFEST);
   setMeta("mobile-web-app-capable", fullscreen ? "yes" : "no");
   setMeta("apple-mobile-web-app-capable", fullscreen ? "yes" : "no");

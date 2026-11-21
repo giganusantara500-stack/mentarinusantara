@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { BadgeAlert, Landmark, LogOut, Receipt, RefreshCw, RotateCw, Store, SunMedium, Wallet } from "lucide-react";
+import { BadgeAlert, Landmark, LogOut, Maximize2, Minimize2, Receipt, RefreshCw, RotateCw, Store, SunMedium, Wallet } from "lucide-react";
+import { requestLoketFullscreen } from "@/lib/displayMode";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { formatRupiah } from "@/lib/format";
@@ -102,10 +103,18 @@ interface HeaderProps {
   onLogout: () => void;
   showStats?: boolean;
   version?: string;
+  allowFullscreen?: boolean;
 }
 
-export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showStats = true, version }: HeaderProps) {
+export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showStats = true, version, allowFullscreen = false }: HeaderProps) {
   const { profile, user } = useAuth();
+  const [full, setFull] = useState(Boolean(document.fullscreenElement));
+  const [fullHint, setFullHint] = useState("");
+  useEffect(() => {
+    const sync = () => setFull(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
   if (!profile) return null;
   const mfaOn = profile.role === "mitra" || user?.user_metadata?.mfa_enabled === true || user?.user_metadata?.mfa_status === true || user?.user_metadata?.mfa_status === "active";
   const code = stats.loketCode || profile.loket_code || "";
@@ -135,11 +144,27 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showS
           {mfaOn && profile.role === "mitra" && (
             <span className="inline-flex items-center rounded-full bg-emerald-400 px-2.5 py-1 text-sm font-black text-slate-950">2FA Aktif</span>
           )}
+          {allowFullscreen && (
+            <button
+              type="button"
+              onClick={() => {
+                void requestLoketFullscreen().then((result) => {
+                  setFullHint(result === "unavailable" ? "Layar penuh tidak tersedia pada tab browser ini." : "");
+                });
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-2.5 py-1 text-sm font-black text-slate-900"
+              title={fullHint || "Memenuhi layar. Di tab biasa, bilah alamat kembali setelah keluar dari layar penuh."}
+            >
+              {full ? <Minimize2 size={18} strokeWidth={2.6} /> : <Maximize2 size={18} strokeWidth={2.6} />}
+              {full ? "Keluar" : "Layar penuh"}
+            </button>
+          )}
           <button onClick={onLogout} className="inline-flex items-center gap-1.5 rounded-full border border-white/30 px-2.5 py-1 text-sm font-black" aria-label="Logout">
             <LogOut size={18} strokeWidth={2.6} /> Logout
           </button>
         </div>
       </div>
+      {fullHint && <div className="bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">{fullHint} Bilah alamat tab biasa tetap ada sampai aplikasi dipasang atau layar penuh berhasil.</div>}
       {showStats && (
         <div className="flex w-full items-stretch justify-start gap-2 overflow-x-auto border-b border-slate-200 bg-white px-3 py-2 text-slate-900">
           <Stat icon={Wallet} tone="bg-cyan-400 text-sky-950" label="Saldo" value={formatRupiah(stats.balance)} hint={stats.ticketHint || undefined} className="w-[220px]" />
