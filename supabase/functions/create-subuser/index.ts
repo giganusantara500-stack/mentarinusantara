@@ -54,31 +54,27 @@ interface ProfileRow {
   username: string | null;
 }
 
+function profileStatus(row: Record<string, unknown>) {
+  const explicit = typeof row.status === "string" ? row.status.trim().toLowerCase() : "";
+  if (explicit === "pending" || explicit === "active" || explicit === "suspended") return explicit;
+  if (row.is_active === false) return "suspended";
+  return "active";
+}
+
 async function loadProfile(admin: SupabaseClient, id: string): Promise<ProfileRow | null> {
-  const modern = await admin
-    .from("profiles")
-    .select("id, role, is_active, parent_id, email, full_name, username")
-    .eq("id", id)
-    .maybeSingle();
-  if (!modern.error && modern.data) {
-    const row = modern.data as Record<string, unknown>;
-    return {
-      id: String(row.id),
-      role: String(row.role ?? ""),
-      status: row.is_active === false ? "suspended" : "active",
-      parent_id: (row.parent_id as string | null) ?? null,
-      email: String(row.email ?? ""),
-      full_name: String(row.full_name ?? row.username ?? ""),
-      username: (row.username as string | null) ?? null,
-    };
-  }
-  const legacy = await admin
-    .from("profiles")
-    .select("id, role, status, parent_id, email, full_name, username")
-    .eq("id", id)
-    .maybeSingle();
-  if (legacy.error) throw new Error(`Gagal membaca profil: ${legacy.error.message}`);
-  return (legacy.data as ProfileRow) ?? null;
+  const loaded = await admin.from("profiles").select("*").eq("id", id).maybeSingle();
+  if (loaded.error) throw new Error(`Gagal membaca profil: ${loaded.error.message}`);
+  if (!loaded.data) return null;
+  const row = loaded.data as Record<string, unknown>;
+  return {
+    id: String(row.id),
+    role: String(row.role ?? ""),
+    status: profileStatus(row),
+    parent_id: (row.parent_id as string | null) ?? null,
+    email: String(row.email ?? ""),
+    full_name: String(row.full_name ?? row.username ?? ""),
+    username: (row.username as string | null) ?? null,
+  };
 }
 
 async function isInNetwork(admin: SupabaseClient, nodeId: string, ancestorId: string): Promise<boolean> {
@@ -119,8 +115,10 @@ async function writeProfile(admin: SupabaseClient, userId: string, fields: Recor
     const query = existing.data
       ? admin.from("profiles").update(payload).eq("id", userId)
       : admin.from("profiles").insert({ id: userId, ...payload });
-    const written = await query.select("id, username, role").maybeSingle();
-    if (!written.error && written.data) return { ok: true as const, row: written.data as Record<string, unknown> };
+    const written = await query.select("id").maybeSingle();
+    if (!written.error && written.data) {
+      return { ok: true as const, row: { ...payload, id: (written.data as { id: string }).id } };
+    }
     lastError = written.error?.message || "Profil baru tidak kembali dari database.";
     const missing = missingColumn(lastError);
     if (missing && missing in payload) {

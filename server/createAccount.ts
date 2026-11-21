@@ -195,7 +195,7 @@ export async function createNetworkAccount(authorization: string, input: CreateA
     "Content-Type": "application/json",
   };
   const callerProfileResponse = await fetch(
-    `${env.supabaseUrl}/rest/v1/profiles?id=eq.${callerId}&select=id,username,role,is_active`,
+    `${env.supabaseUrl}/rest/v1/profiles?id=eq.${callerId}&select=*`,
     { headers: serviceHeaders },
   );
   const callerRows = await readJson(callerProfileResponse);
@@ -206,7 +206,7 @@ export async function createNetworkAccount(authorization: string, input: CreateA
   }
   const caller = Array.isArray(callerRows) ? callerRows[0] : null;
   const callerRole = normalizeRole(clean(caller?.role));
-  if (!caller || caller.is_active === false || !ALLOWED[callerRole]) {
+  if (!caller || caller.is_active === false || caller.status === "suspended" || !ALLOWED[callerRole]) {
     return { status: 403, body: { error: "Akun pemanggil tidak berhak membuat pengguna." } };
   }
 
@@ -237,13 +237,13 @@ export async function createNetworkAccount(authorization: string, input: CreateA
   }
   if (parentId !== callerId) {
     const parentProfileResponse = await fetch(
-      `${env.supabaseUrl}/rest/v1/profiles?id=eq.${parentId}&select=id,role,is_active`,
+      `${env.supabaseUrl}/rest/v1/profiles?id=eq.${parentId}&select=*`,
       { headers: serviceHeaders },
     );
     const parentRows = await readJson(parentProfileResponse);
     const parent = Array.isArray(parentRows) ? parentRows[0] : null;
     const parentRole = normalizeRole(clean(parent?.role));
-    if (!parent || parent.is_active === false || parentRole !== "submitra" || callerRole !== "mitra") {
+    if (!parent || parent.is_active === false || parent.status === "suspended" || parentRole !== "submitra" || callerRole !== "mitra") {
       return { status: 403, body: { error: "Loket hanya dapat berada di bawah Anda atau Sub Mitra di jaringan Anda." } };
     }
     const parentAuthResponse = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${parentId}`, { headers: serviceHeaders });
@@ -503,7 +503,7 @@ export async function resetAccountPassword(authorization: string, userId: string
   if (caller.id === userId) return { status: 400, body: { error: "Gunakan halaman keamanan untuk mengganti password sendiri." } };
 
   const headers = { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}`, "Content-Type": "application/json" };
-  const profiles = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=in.(${caller.id},${userId})&select=id,role,is_active`, { headers });
+  const profiles = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=in.(${caller.id},${userId})&select=*`, { headers });
   const rows = await profiles.json();
   const callerProfile = Array.isArray(rows) ? rows.find((row) => row.id === caller.id) : null;
   const target = Array.isArray(rows) ? rows.find((row) => row.id === userId) : null;
@@ -592,7 +592,7 @@ export async function setLoketActive(authorization: string, userId: string, acti
   if (!callerResponse.ok || !caller?.id) return { status: 401, body: { error: "Sesi tidak valid. Silakan login ulang." } };
 
   const headers = { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}`, "Content-Type": "application/json" };
-  const profiles = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=in.(${caller.id},${userId})&select=id,role,is_active`, { headers });
+  const profiles = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=in.(${caller.id},${userId})&select=*`, { headers });
   const rows = await profiles.json();
   const callerProfile = Array.isArray(rows) ? rows.find((row) => row.id === caller.id) : null;
   const target = Array.isArray(rows) ? rows.find((row) => row.id === userId) : null;

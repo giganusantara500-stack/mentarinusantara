@@ -151,8 +151,6 @@ function mapProfileRow(row: Record<string, unknown>): Profile {
 }
 
 async function profileTableRows() {
-  const narrow = await supabase.from("profiles").select("id, username, role, is_active, created_at, updated_at");
-  if (!narrow.error) return { rows: (narrow.data ?? []).map((row) => mapProfileRow(row as Record<string, unknown>)), error: null as string | null };
   const wide = await supabase.from("profiles").select("*");
   if (wide.error) return { rows: [] as Profile[], error: wide.error.message };
   return { rows: (wide.data ?? []).map((row) => mapProfileRow(row as Record<string, unknown>)), error: null };

@@ -68,7 +68,7 @@ export function useSuperAdminDashboard(start: string, end: string, root: string 
       setError(null);
       const { data: profileRows, error: profileError } = await supabase
         .from("profiles")
-        .select("id, username, role, is_active, created_at");
+        .select("*");
       if (!active) return;
       if (profileError || !profileRows) {
         setError(profileError?.message ?? "Data profil tidak dapat dimuat");
@@ -77,12 +77,12 @@ export function useSuperAdminDashboard(start: string, end: string, root: string 
         return;
       }
 
-      const profiles = (profileRows as { id: string; username: string | null; role: string; is_active: boolean | null; created_at: string }[])
+      const profiles = (profileRows as { id: string; username: string | null; role: string; is_active?: boolean | null; status?: string | null; created_at: string }[])
         .map((row) => ({
           ...row,
           role: row.role === "sub_mitra" ? "submitra" : row.role,
           name: row.username === "giganusantara" ? "Aris Purwanto" : (row.username || "Tanpa nama"),
-          active: row.is_active !== false,
+          active: row.is_active !== false && row.status !== "suspended",
         }));
       const accounts = profiles.filter((row) => row.role === "mitra" || row.role === "submitra" || row.role === "loket");
       const visible = root ? accounts.filter((row) => row.id === root) : accounts;

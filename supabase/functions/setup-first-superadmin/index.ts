@@ -108,23 +108,31 @@ Deno.serve(async (req: Request) => {
     }
 
     const userId = created.user.id;
-
-    const { data: profile, error: profErr } = await supabase
-      .from("profiles")
-      .upsert(
-        {
-          id: userId,
-          email: PRESET_EMAIL,
-          full_name: fullName,
-          username: PRESET_USERNAME,
-          role: "super_admin",
-          status: "active",
-          must_change_password: false,
-        },
-        { onConflict: "id" },
-      )
-      .select("id, role, status")
-      .maybeSingle();
+    const payload: Record<string, unknown> = {
+      id: userId,
+      email: PRESET_EMAIL,
+      full_name: fullName,
+      username: PRESET_USERNAME,
+      role: "super_admin",
+      status: "active",
+      must_change_password: false,
+    };
+    let profile: { id: string; role: string } | null = null;
+    let profErr: { message: string } | null = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const saved = await supabase.from("profiles").upsert(payload, { onConflict: "id" }).select("id, role").maybeSingle();
+      profile = saved.data;
+      profErr = saved.error;
+      if (!saved.error && saved.data?.role === "super_admin") break;
+      const missing = saved.error?.message.match(/'([^']+)' column/)?.[1]
+        || saved.error?.message.match(/column "([^"]+)"/)?.[1]
+        || "";
+      if (missing && missing in payload && missing !== "id" && missing !== "role") {
+        delete payload[missing];
+        continue;
+      }
+      break;
+    }
 
     if (profErr || !profile || profile.role !== "super_admin") {
       await supabase.auth.admin.deleteUser(userId);

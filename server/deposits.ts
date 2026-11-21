@@ -49,12 +49,12 @@ export async function loadCaller(authorization: string, env: Env): Promise<Calle
   const callerId = callerAuth?.id as string | undefined;
   if (!callerResponse.ok || !callerId) return null;
   const profileResponse = await fetch(
-    `${env.supabaseUrl}/rest/v1/profiles?id=eq.${callerId}&select=id,username,role,is_active`,
+    `${env.supabaseUrl}/rest/v1/profiles?id=eq.${callerId}&select=*`,
     { headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` } },
   );
   const rows = await readJson(profileResponse);
   const profile = Array.isArray(rows) ? rows[0] : null;
-  if (!profile || profile.is_active === false) return null;
+  if (!profile || profile.is_active === false || profile.status === "suspended") return null;
   const meta = (callerAuth?.user_metadata ?? {}) as Record<string, unknown>;
   const loketCode = typeof meta.loket_code === "string" && /^\d{7}$/.test(meta.loket_code);
   const role = canonRole(profile.role) || canonRole(meta.role) || (loketCode || meta.loket_type ? "loket" : "");

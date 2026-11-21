@@ -72,22 +72,24 @@ function asProfile(row: {
   username?: string | null;
   role?: string | null;
   is_active?: boolean | null;
+  status?: string | null;
 }, authEmail = "", fullName = ""): ProfileRow {
-  const active = row.is_active !== false;
+  const explicit = typeof row.status === "string" ? row.status.trim().toLowerCase() : "";
+  const active = row.is_active !== false && explicit !== "suspended";
   return {
     id: row.id,
     email: authEmail,
     full_name: fullName || row.username || "Pengguna",
     role: clean(row.role),
-    status: active ? "active" : "suspended",
-    is_active: row.is_active ?? null,
+    status: explicit === "pending" || explicit === "active" || explicit === "suspended" ? explicit : (active ? "active" : "suspended"),
+    is_active: active,
   };
 }
 
 async function findProfileById(admin: SupabaseClient, id: string): Promise<(ProfileRow & { deliverTo: string }) | null> {
   const { data, error } = await admin
     .from("profiles")
-    .select("id, username, role, is_active")
+    .select("*")
     .eq("id", id)
     .maybeSingle();
   if (error || !data) return null;
@@ -103,7 +105,7 @@ async function findProfileById(admin: SupabaseClient, id: string): Promise<(Prof
 async function findProfileByEmail(admin: SupabaseClient, email: string): Promise<ProfileRow | null> {
   const { data, error } = await admin
     .from("profiles")
-    .select("id, username, role, is_active, email")
+    .select("*")
     .eq("email", email)
     .limit(1);
   if (error || !data?.length) return null;
@@ -128,7 +130,7 @@ async function findAccount(admin: SupabaseClient, email: string): Promise<(Profi
     if (match) {
       const { data: profile } = await admin
         .from("profiles")
-        .select("id, username, role, is_active")
+        .select("*")
         .eq("id", match.id)
         .limit(1);
       const contact = clean((match.user_metadata as { contact_email?: string } | undefined)?.contact_email);
@@ -279,11 +281,19 @@ async function sendTempPasswordEmail(
 async function loadAccessProfile(admin: SupabaseClient, id: string): Promise<AccessProfile | null> {
   const { data, error } = await admin
     .from("profiles")
-    .select("id, role, parent_id, created_by, is_active")
+    .select("*")
     .eq("id", id)
     .maybeSingle();
   if (error || !data) return null;
-  return data as AccessProfile;
+  const row = data as Record<string, unknown>;
+  const explicit = typeof row.status === "string" ? row.status.trim().toLowerCase() : "";
+  return {
+    id: String(row.id),
+    role: String(row.role ?? ""),
+    parent_id: (row.parent_id as string | null) ?? null,
+    created_by: (row.created_by as string | null) ?? null,
+    is_active: row.is_active === false || explicit === "suspended" ? false : true,
+  };
 }
 
 async function targetIsInNetwork(admin: SupabaseClient, ancestorId: string, target: AccessProfile) {

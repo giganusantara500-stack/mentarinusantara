@@ -47,10 +47,10 @@ async function loadCaller(authorization: string, env: Env): Promise<Caller | nul
   });
   const user = await readJson(response);
   if (!response.ok || !user?.id) return null;
-  const profiles = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${user.id}&select=role,is_active`, { headers: serviceHeaders(env) });
+  const profiles = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${user.id}&select=*`, { headers: serviceHeaders(env) });
   const rows = await readJson(profiles);
   const profile = Array.isArray(rows) ? rows[0] : null;
-  if (!profile || profile.is_active === false) return null;
+  if (!profile || profile.is_active === false || profile.status === "suspended") return null;
   return { id: user.id, role: normalizeRole(clean(profile.role)) };
 }
 
@@ -90,7 +90,7 @@ export async function sweepIdleAccounts(env: Env, caller: Caller) {
   try {
     const headers = serviceHeaders(env);
     const profilesResponse = await fetch(
-      `${env.supabaseUrl}/rest/v1/profiles?select=id,role,is_active,created_at,parent_id,created_by,mitra_id`,
+      `${env.supabaseUrl}/rest/v1/profiles?select=*`,
       { headers },
     );
     const profiles = await readJson(profilesResponse);
@@ -103,7 +103,7 @@ export async function sweepIdleAccounts(env: Env, caller: Caller) {
     for (const profile of profiles) {
       const role = normalizeRole(clean(profile.role));
       const profileId = String(profile.id);
-      if (profileId === caller.id || !["mitra", "submitra", "loket"].includes(role) || profile.is_active === false) continue;
+      if (profileId === caller.id || !["mitra", "submitra", "loket"].includes(role) || profile.is_active === false || profile.status === "suspended") continue;
       const parentId = clean(profile.parent_id) || null;
       const parentOfParent = parentId ? parentById.get(parentId) ?? null : null;
       const inScope = canManage(
@@ -242,20 +242,32 @@ export async function updateUserDetails(authorization: string, input: Record<str
   }
   const username = clean(input.username).toLowerCase();
   if (!/^[a-z0-9._]{3,30}$/.test(username)) return { status: 400, body: { error: "Username hanya huruf kecil, angka, titik, atau garis bawah." } };
+  const active = input.status !== "suspended";
   const headers = serviceHeaders(env);
   const clash = await fetch(`${env.supabaseUrl}/rest/v1/profiles?username=eq.${encodeURIComponent(username)}&id=neq.${userId}&select=id`, { headers });
   const clashRows = await readJson(clash);
   if (Array.isArray(clashRows) && clashRows.length > 0) return { status: 409, body: { error: "Username sudah dipakai." } };
 
-  const profileUpdate = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
-    method: "PATCH",
-    headers: { ...headers, Prefer: "return=minimal" },
-    body: JSON.stringify({ username, is_active: input.status !== "suspended" }),
-  });
-  if (!profileUpdate.ok) {
+  const profileFields: Record<string, unknown> = { username, is_active: active, status: active ? "active" : "suspended" };
+  let profileUpdate: Response | null = null;
+  let lastMessage = "Profil gagal diperbarui.";
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    profileUpdate = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
+      method: "PATCH",
+      headers: { ...headers, Prefer: "return=minimal" },
+      body: JSON.stringify(profileFields),
+    });
+    if (profileUpdate.ok) break;
     const detail = await readJson(profileUpdate);
-    return { status: 500, body: { error: detail?.message || "Profil gagal diperbarui." } };
+    lastMessage = typeof detail?.message === "string" && detail.message ? detail.message : lastMessage;
+    const missing = lastMessage.match(/'([^']+)' column/)?.[1] || lastMessage.match(/column "([^"]+)"/)?.[1] || "";
+    if (missing && missing in profileFields && missing !== "username") {
+      delete profileFields[missing];
+      continue;
+    }
+    break;
   }
+  if (!profileUpdate?.ok) return { status: 500, body: { error: lastMessage } };
 
   const current = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, { headers });
   const user = await readJson(current);
