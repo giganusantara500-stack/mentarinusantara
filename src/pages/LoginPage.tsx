@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { PLATFORM_NAME } from "@/lib/brand";
+import { LOKET_VERSION_LABEL, PLATFORM_NAME } from "@/lib/brand";
+import { isLoketWindow } from "@/lib/displayMode";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
-import { Zap, User, Lock, AlertCircle, ArrowLeft, KeyRound, CheckCircle2 } from "lucide-react";
+import { Zap, User, Lock, AlertCircle, ArrowLeft, KeyRound } from "lucide-react";
 
 export function LoginPage() {
   const { signIn, recoverPassword } = useAuth();
@@ -15,6 +16,11 @@ export function LoginPage() {
   const [mode, setMode] = useState<"login" | "recover">("login");
   const [recoverSent, setRecoverSent] = useState(false);
   const [recoverEmail, setRecoverEmail] = useState("");
+  const [loketWindow, setLoketWindow] = useState(false);
+
+  useEffect(() => {
+    setLoketWindow(isLoketWindow());
+  }, []);
 
   const isEmail = (v: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
@@ -73,6 +79,7 @@ export function LoginPage() {
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight text-center">{PLATFORM_NAME}</h1>
           <p className="text-xs text-purple-300 uppercase tracking-widest mt-1">Platform PPOB</p>
+          {loketWindow && <p className="mt-2 text-xs font-semibold text-amber-200">{LOKET_VERSION_LABEL}</p>}
         </div>
 
         {/* Login card */}

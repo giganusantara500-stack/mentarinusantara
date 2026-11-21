@@ -25,6 +25,11 @@ function setManifest(href: string) {
   if (link.getAttribute("href") !== href) link.href = href;
 }
 
+export function isLoketWindow() {
+  const params = new URLSearchParams(window.location.search);
+  return document.documentElement.classList.contains("loket-app") || installedLoketApp() || params.get("app") === "loket";
+}
+
 function installedLoketApp() {
   const nav = navigator as Navigator & { standalone?: boolean };
   return window.matchMedia("(display-mode: standalone)").matches || nav.standalone === true;

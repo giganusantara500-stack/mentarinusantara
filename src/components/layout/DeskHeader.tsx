@@ -101,9 +101,10 @@ interface HeaderProps {
   onRefresh: () => void;
   onLogout: () => void;
   showStats?: boolean;
+  version?: string;
 }
 
-export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showStats = true }: HeaderProps) {
+export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showStats = true, version }: HeaderProps) {
   const { profile, user } = useAuth();
   if (!profile) return null;
   const mfaOn = profile.role === "mitra" || user?.user_metadata?.mfa_enabled === true || user?.user_metadata?.mfa_status === true || user?.user_metadata?.mfa_status === "active";
@@ -119,6 +120,7 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showS
             <SunMedium size={22} strokeWidth={2.6} />
           </span>
           <span className="truncate text-base font-black tracking-tight">{brand}</span>
+          {version && <span className="shrink-0 text-[11px] font-semibold text-amber-200">{version}</span>}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
           <button onClick={onDeposit} className="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-2.5 py-1 text-sm font-black text-slate-900">
