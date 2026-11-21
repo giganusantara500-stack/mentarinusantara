@@ -362,6 +362,7 @@ export function LoketKolektifPage() {
   const [filter, setFilter] = useState<"semua" | "BL LNS" | "LUNAS" | "LAINNYA">("semua");
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
+  const [sessionOmit, setSessionOmit] = useState<string[]>([]);
   const [collectorName, setCollectorName] = useState("");
   const [biller, setBiller] = useState("PLN");
   const [custNo, setCustNo] = useState("");
@@ -398,6 +399,7 @@ export function LoketKolektifPage() {
     groupsRef.current = rows;
     setGroups(rows);
     setActiveId((current) => rows.some((row) => row.id === current) ? current : (rows[0]?.id ?? ""));
+    setSessionOmit([]);
     setNotice("");
   };
 
@@ -443,7 +445,8 @@ export function LoketKolektifPage() {
   useEffect(() => { void load(); }, [tick, userId]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = groups.find((group) => group.id === activeId) ?? null;
   const activeLabel = active?.collector || active?.name || "";
-  const tableRows: GroupBill[] = (active?.members ?? []).map((member) => {
+  const omitted = new Set(sessionOmit);
+  const tableRows: GroupBill[] = (active?.members ?? []).filter((member) => !omitted.has(member.number)).map((member) => {
     const bill = active?.bills.find((row) => row.number === member.number);
     if (bill) return { ...bill, name: member.name || bill.name, product: member.product || bill.product };
     return { number: member.number, name: member.name, product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" };
@@ -690,7 +693,14 @@ export function LoketKolektifPage() {
     const members = group.members.filter((member) => member.number !== number);
     const next = groupsRef.current.map((item) => item.id === group.id ? { ...item, members, bills: item.bills.filter((bill) => bill.number !== number) } : item);
     setPicked((rows) => rows.filter((item) => item !== number));
+    setSessionOmit((rows) => rows.filter((item) => item !== number));
     commitLocal(next, "Pelanggan dihapus.", group.id);
+  };
+
+  const releaseCustomer = (number: string) => {
+    setSessionOmit((rows) => rows.includes(number) ? rows : [...rows, number]);
+    setPicked((rows) => rows.filter((item) => item !== number));
+    tell("Pelanggan dikeluarkan dari daftar transaksi ini.", "ok");
   };
 
   useEffect(() => {
@@ -750,7 +760,7 @@ export function LoketKolektifPage() {
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2">
           {groups.length === 0 && <p className="text-xs text-slate-400">Belum ada kolektor.</p>}
           {groups.map((group) => (
-            <button key={group.id} onClick={() => { setActiveId(group.id); setPicked([]); }} className={`block w-full rounded-lg border px-3 py-2 text-left text-sm ${activeId === group.id ? "border-amber-600 bg-amber-500 font-semibold text-white shadow-sm ring-2 ring-amber-300" : "border-transparent text-slate-700 hover:bg-slate-50"}`}>
+            <button key={group.id} onClick={() => { setActiveId(group.id); setPicked([]); setSessionOmit([]); }} className={`block w-full rounded-lg border px-3 py-2 text-left text-sm ${activeId === group.id ? "border-amber-600 bg-amber-500 font-semibold text-white shadow-sm ring-2 ring-amber-300" : "border-transparent text-slate-700 hover:bg-slate-50"}`}>
               {group.collector || group.name}
               <div className={`text-xs ${activeId === group.id ? "text-amber-100" : "text-slate-400"}`}>{group.members.length} pelanggan</div>
             </button>
@@ -813,7 +823,7 @@ export function LoketKolektifPage() {
                   <td className="px-3 py-2">{row.period}</td>
                   <td className="px-3 py-2 font-semibold">{formatRupiah(row.total)}</td>
                   <td className="px-3 py-2">{statusText(row.status)}</td>
-                  <td className="px-3 py-2 text-right"><button onClick={() => removeCustomer(row.number)} className="text-xs font-semibold text-rose-600">Hapus</button></td>
+                  <td className="px-3 py-2 text-right"><button onClick={() => releaseCustomer(row.number)} className="text-xs font-semibold text-rose-600">Keluarkan</button></td>
                 </tr>
               ))}
             </tbody>
