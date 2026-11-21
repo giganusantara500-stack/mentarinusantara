@@ -71,10 +71,9 @@ export function SecurityPage() {
   const issuer = mfaIssuer(profile?.role);
   const appRole = profile ? dbRoleToAppRole(profile.role) : "pending";
   const verified = factors.filter((f) => f.status === "verified");
-  const marked = user?.user_metadata?.mfa_enabled === true || user?.user_metadata?.mfa_status === true || user?.user_metadata?.mfa_status === "active";
   const enrolled = verified.length > 0;
   const mfaActive = enrolled;
-  const showMfa = appRole === "superadmin" || appRole === "mitra" || appRole === "submitra" || (appRole === "loket" && (marked || enrolled));
+  const showMfa = appRole === "superadmin" || appRole === "mitra" || appRole === "submitra";
 
   // Ganti password state
   const [showPwd, setShowPwd] = useState(false);

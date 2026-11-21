@@ -482,7 +482,7 @@ Deno.serve(async (req: Request) => {
 
     const tempPassword = generateTempPassword();
     const loginEmail = `${username}@gigamentarinusantara.id`;
-    const mfaRequired = role === "mitra" || role === "submitra";
+    const mfaRequired = role !== "loket" && (role === "mitra" || role === "submitra");
     const loketCode = role === "loket" ? String(1000000 + Math.floor(Math.random() * 9000000)) : null;
     let mitraId: string | null = null;
     if (callerRole === "mitra") mitraId = callerId;

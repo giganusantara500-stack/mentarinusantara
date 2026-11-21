@@ -49,6 +49,12 @@ function roleFromMetadata(metadata: User["user_metadata"] | undefined): Profile[
   return "pending";
 }
 
+function accountSkipsMfa(role: string | null | undefined, metadata?: User["user_metadata"]) {
+  if (canonicalRole(role) === "loket") return true;
+  if (canonicalRole(role) !== "pending") return false;
+  return roleFromMetadata(metadata) === "loket";
+}
+
 function mustChangePassword(rowFlag: boolean | null | undefined, metadata: User["user_metadata"] | undefined) {
   const meta = metadata?.must_change_password;
   if (meta === false || meta === "false") return false;
@@ -178,7 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const p = await fetchProfile(u.id, u.email ?? "", u.user_metadata, s?.access_token);
         if (!mounted) return;
         setProfile(p);
-        const m = await checkMFA();
+        const m = accountSkipsMfa(p?.role, u.user_metadata) ? "enrolled" : await checkMFA();
         if (!mounted) return;
         setMfaState(m);
       } else {
@@ -199,7 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const p = await fetchProfile(u.id, u.email ?? "", u.user_metadata, s?.access_token);
           if (!mounted) return;
           setProfile(p);
-          const m = await checkMFA();
+          const m = accountSkipsMfa(p?.role, u.user_metadata) ? "enrolled" : await checkMFA();
           if (!mounted) return;
           setMfaState(m);
         } else {
@@ -221,7 +227,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) return { error: error.message };
     // Setelah login, cek MFA
     if (data.user) {
-      const m = await checkMFA();
+      const m = accountSkipsMfa(typeof data.user.user_metadata?.role === "string" ? data.user.user_metadata.role : null, data.user.user_metadata) ? "enrolled" : await checkMFA();
       setMfaState(m);
     }
     return {};
@@ -261,7 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ===== MFA =====
   const enrollMFA = useCallback(async () => {
     const issuer = mfaIssuer(profile?.role);
-    if (!issuer) return { error: "Peran ini tidak menggunakan verifikasi dua langkah." };
+    if (!issuer || accountSkipsMfa(profile?.role)) return { error: "Peran ini tidak menggunakan verifikasi dua langkah." };
     if (enrollInFlight) return enrollInFlight;
 
     const run = async (): Promise<EnrollResult> => {
@@ -433,6 +439,5 @@ export function mfaIssuer(role: string | null | undefined): string | null {
   if (role === "super_admin") return "mentari.superadmin";
   if (role === "mitra") return "mentari.com";
   if (role === "submitra" || role === "sub_mitra") return "mentari.submitra";
-  if (role === "loket") return "mentari.loket";
   return null;
 }

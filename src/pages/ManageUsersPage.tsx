@@ -366,7 +366,7 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
           : (data.email_error as string | null) ?? null,
         tempPassword: (data.temp_password as string | null) ?? null,
         loketCode: (data.loket_code as string | null) ?? null,
-        mfaActive: targetRole === "mitra" || targetRole === "submitra" || data.mfa_required === true,
+        mfaActive: targetRole === "mitra" || targetRole === "submitra",
       });
       setAf(emptyAddForm(profile.id));
       setShowAdd(false);

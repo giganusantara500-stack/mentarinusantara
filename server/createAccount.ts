@@ -314,7 +314,7 @@ export async function createNetworkAccount(authorization: string, input: CreateA
         loket_type: role === "loket" ? (clean(input.loketType) || "lainnya") : null,
         loket_code: loketCode,
         mfa_enabled: false,
-        mfa_status: role === "mitra" || role === "submitra" ? "pending" : "off",
+        mfa_status: role === "loket" ? "off" : role === "mitra" || role === "submitra" ? "pending" : "off",
         must_change_password: true,
       },
     }),

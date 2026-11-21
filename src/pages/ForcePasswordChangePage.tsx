@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { FunctionsHttpError } from "@supabase/supabase-js";
-import { canonicalRole, useAuth } from "@/lib/auth";
+import { canonicalRole, roleUsesMfa, useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
@@ -8,7 +8,7 @@ import { KeyRound, Lock, AlertCircle, ShieldCheck } from "lucide-react";
 
 export function ForcePasswordChangePage() {
   const { signOut, refreshProfile, profile } = useAuth();
-  const needsMfa = canonicalRole(profile?.role) === "mitra" || canonicalRole(profile?.role) === "submitra";
+  const needsMfa = roleUsesMfa(canonicalRole(profile?.role));
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");

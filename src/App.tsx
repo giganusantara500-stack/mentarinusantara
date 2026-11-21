@@ -103,7 +103,7 @@ function ProtectedApp() {
   }
 
   const role = canonicalRole(profile?.role);
-  const privileged = role === "super_admin" || role === "mitra" || role === "submitra";
+  const requiresMfa = role === "super_admin" || role === "mitra" || role === "submitra";
 
   if (profile?.status === "suspended") {
     return <PendingPage />;
@@ -113,17 +113,17 @@ function ProtectedApp() {
     return <ForcePasswordChangePage />;
   }
 
-  if (privileged && mfaState === "loading") {
+  if (requiresMfa && mfaState === "loading") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">Memeriksa verifikasi dua langkah...</div>
     );
   }
 
-  if (privileged && mfaState === "required") {
+  if (requiresMfa && mfaState === "required") {
     return <MFAVerifyPage />;
   }
 
-  if (privileged && mfaState === "none") {
+  if (requiresMfa && mfaState === "none") {
     return <MFAEnrollPage />;
   }
 
