@@ -81,9 +81,20 @@ async function invokePayload(data: unknown, error: unknown) {
   return null;
 }
 
+function isHtmlDocument(raw: string) {
+  return /^\s*(<!doctype|<html)/i.test(raw);
+}
+
+function accountPayload(data: Record<string, unknown> | null) {
+  if (!data || data.success !== true) return null;
+  const userId = String(data.user_id || data.userId || data.id || "");
+  if (!userId) return null;
+  return { ...data, user_id: userId };
+}
+
 function readableApiError(status: number, data: { error?: string; message?: string; msg?: string } | null, raw: string) {
-  const text = data?.error || data?.message || data?.msg || "";
-  if (!data || /<!doctype|<html/i.test(raw) || /<!doctype|<html/i.test(text)) {
+  const text = String(data?.error || data?.message || data?.msg || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  if (!data || isHtmlDocument(raw)) {
     if (status === 404) return "Layanan belum dikonfigurasi. Username dan password tidak dapat dibuat saat ini.";
     return "Server tidak mengembalikan data akun. Coba lagi.";
   }
@@ -326,62 +337,79 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData.session?.access_token;
     if (!token) { setError("Sesi tidak valid. Silakan login ulang."); setBusy(false); return; }
-    let response: Response;
-    let raw = "";
+    const payload = {
+      role: targetRole === "submitra" ? "sub_mitra" : targetRoleDb,
+      fullName: af.fullName,
+      full_name: af.fullName,
+      email: af.email,
+      phone: af.phone,
+      businessName: af.businessName,
+      business_name: af.businessName,
+      address: af.address,
+      city: af.city,
+      status: af.status,
+      parentId,
+      parent_id: parentId,
+      loketType: targetRole === "loket" ? af.loketType : undefined,
+      loket_type: targetRole === "loket" ? af.loketType : undefined,
+    };
+    const finish = (data: Record<string, unknown>) => {
+      setCreated({
+        name: af.fullName.trim(),
+        username: String(data.username || af.username || "").trim().toLowerCase(),
+        email: af.email.trim().toLowerCase(),
+        userId: String(data.user_id),
+        emailSent: !!data.email_sent,
+        emailError: data.email_error && /<!doctype|<html/i.test(String(data.email_error))
+          ? "Layanan email belum dikonfigurasi. Username dan password sementara tetap tersedia di layar."
+          : (data.email_error as string | null) ?? null,
+        tempPassword: (data.temp_password as string | null) ?? null,
+        loketCode: (data.loket_code as string | null) ?? null,
+        mfaActive: targetRole === "mitra" || targetRole === "submitra" || data.mfa_required === true,
+      });
+      setAf(emptyAddForm(profile.id));
+      setShowAdd(false);
+      setPage(1);
+      setBusy(false);
+      refresh();
+    };
+    const createWithFunction = async () => {
+      const { data, error } = await supabase.functions.invoke("create-subuser", { body: payload });
+      const body = await invokePayload(data, error);
+      const account = accountPayload(body);
+      if (account) return account;
+      const message = String(body?.error || body?.message || (error as { message?: string } | null)?.message || "Fungsi pembuatan akun tidak mengembalikan data akun.");
+      throw new Error(message.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+    };
     try {
-      response = await fetch("/api/create-account", {
+      const response = await fetch("/api/create-account", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          role: targetRole === "submitra" ? "sub_mitra" : targetRoleDb,
-          fullName: af.fullName,
-          email: af.email,
-          phone: af.phone,
-          businessName: af.businessName,
-          address: af.address,
-          city: af.city,
-          status: af.status,
-          parentId,
-          loketType: targetRole === "loket" ? af.loketType : undefined,
-        }),
+        body: JSON.stringify(payload),
       });
-      raw = await response.text();
+      const raw = await response.text();
+      const data = raw ? (() => { try { return JSON.parse(raw) as Record<string, unknown>; } catch { return null; } })() : null;
+      const account = accountPayload(data);
+      if (response.ok && account) {
+        finish(account);
+        return;
+      }
+      if (!data || isHtmlDocument(raw)) {
+        finish(await createWithFunction());
+        return;
+      }
+      const detail = readableApiError(response.status, data as { error?: string; message?: string; msg?: string }, raw);
+      console.error("Supabase/API tambah akun gagal:", { status: response.status, body: data });
+      window.alert(detail);
+      setError(detail);
+      setBusy(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Koneksi ke server gagal.";
       console.error("Tambah akun gagal:", error);
       window.alert(message);
       setError(message);
       setBusy(false);
-      return;
     }
-    const data = raw ? (() => { try { return JSON.parse(raw); } catch { return null; } })() : null;
-    if (!response.ok || !data?.success || !data?.user_id) {
-      const detail = readableApiError(response.status, data, raw);
-      console.error("Supabase/API tambah akun gagal:", { status: response.status, body: data ?? raw });
-      window.alert(detail);
-      setError(detail);
-      setBusy(false);
-      return;
-    }
-
-    setCreated({
-      name: af.fullName.trim(),
-      username: (data.username || af.username || "").trim().toLowerCase(),
-      email: af.email.trim().toLowerCase(),
-      userId: data.user_id,
-      emailSent: !!data.email_sent,
-      emailError: data.email_error && /<!doctype|<html/i.test(String(data.email_error))
-        ? "Layanan email belum dikonfigurasi. Username dan password sementara tetap tersedia di layar."
-        : data.email_error ?? null,
-      tempPassword: data.temp_password ?? null,
-      loketCode: data.loket_code ?? null,
-      mfaActive: targetRole === "mitra" || targetRole === "submitra",
-    });
-    setAf(emptyAddForm(profile.id));
-    setShowAdd(false);
-    setPage(1);
-    setBusy(false);
-    refresh();
   };
 
   const doEdit = async () => {

@@ -22,6 +22,9 @@ export interface CreateAccountResult {
   email_sent: boolean;
   email_error: string | null;
   loket_code: string | null;
+  must_change_password: true;
+  mfa_required: boolean;
+  account: Record<string, unknown>;
 }
 
 interface Env {
@@ -89,38 +92,56 @@ function columnName(message: string) {
     || "";
 }
 
-async function saveProfile(env: Env, userId: string, fields: Record<string, unknown>) {
-  const headers = {
+function serviceHeaders(env: Env, prefer?: string) {
+  return {
     apikey: env.serviceRoleKey,
     Authorization: `Bearer ${env.serviceRoleKey}`,
     "Content-Type": "application/json",
-    Prefer: "return=minimal",
+    ...(prefer ? { Prefer: prefer } : {}),
   };
+}
+
+function firstRow(body: unknown) {
+  if (Array.isArray(body)) return body[0] as Record<string, unknown> | undefined;
+  if (body && typeof body === "object" && "id" in body) return body as Record<string, unknown>;
+  return undefined;
+}
+
+async function saveProfile(env: Env, userId: string, fields: Record<string, unknown>) {
   const payload = { ...fields };
   let lastError = "Profil gagal disimpan.";
   for (let attempt = 0; attempt < 16; attempt += 1) {
-    const listed = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=*`, { headers });
+    const listed = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}&select=*`, { headers: serviceHeaders(env) });
     const rows = await readJson(listed);
     if (!listed.ok) {
       lastError = supabaseError(rows);
       const missing = columnName(lastError);
-      if (missing) continue;
-      return { ok: false, error: lastError };
+      if (missing && missing in payload) {
+        delete payload[missing];
+        continue;
+      }
+      return { ok: false as const, error: lastError };
     }
-    const row = Array.isArray(rows) ? rows[0] as Record<string, unknown> | undefined : undefined;
+    const row = firstRow(rows);
+    const write = async (method: "PATCH" | "POST", body: Record<string, unknown>) => {
+      const url = method === "PATCH"
+        ? `${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`
+        : `${env.supabaseUrl}/rest/v1/profiles`;
+      return fetch(url, {
+        method,
+        headers: serviceHeaders(env, "return=representation"),
+        body: JSON.stringify(body),
+      });
+    };
     if (row) {
       const patch: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(payload)) {
         if (key in row) patch[key] = value;
       }
-      if (Object.keys(patch).length === 0) return { ok: true as const };
-      const response = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${userId}`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify(patch),
-      });
-      if (response.ok) return { ok: true as const };
+      if (Object.keys(patch).length === 0) return { ok: true as const, row };
+      const response = await write("PATCH", patch);
       const detail = await readJson(response);
+      if (response.ok) return { ok: true as const, row: firstRow(detail) ?? { ...row, ...patch } };
       lastError = supabaseError(detail);
       const missing = columnName(lastError);
       if (missing && missing in payload) {
@@ -130,13 +151,9 @@ async function saveProfile(env: Env, userId: string, fields: Record<string, unkn
       console.error("Supabase profil gagal diperbarui:", lastError);
       return { ok: false as const, error: lastError };
     }
-    const response = await fetch(`${env.supabaseUrl}/rest/v1/profiles`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ id: userId, ...payload }),
-    });
-    if (response.ok) return { ok: true as const };
+    const response = await write("POST", { id: userId, ...payload });
     const detail = await readJson(response);
+    if (response.ok) return { ok: true as const, row: firstRow(detail) ?? { id: userId, ...payload } };
     lastError = supabaseError(detail);
     const missing = columnName(lastError);
     if ((missing && missing in payload) || /duplicate key|23505/i.test(lastError)) {
@@ -298,6 +315,7 @@ export async function createNetworkAccount(authorization: string, input: CreateA
         loket_code: loketCode,
         mfa_enabled: false,
         mfa_status: role === "mitra" || role === "submitra" ? "pending" : "off",
+        must_change_password: true,
       },
     }),
   });
@@ -339,7 +357,7 @@ export async function createNetworkAccount(authorization: string, input: CreateA
     { headers: serviceHeaders },
   );
   const savedRows = await readJson(savedResponse);
-  const saved = Array.isArray(savedRows) ? savedRows[0] : null;
+  const saved = (Array.isArray(savedRows) ? savedRows[0] : null) ?? savedProfile.row ?? null;
   const savedRole = normalizeRole(clean(saved?.role));
   if (saved && savedRole && savedRole !== role) {
     await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, { method: "DELETE", headers: serviceHeaders });
@@ -368,14 +386,31 @@ export async function createNetworkAccount(authorization: string, input: CreateA
     emailError = mailed.sent ? null : mailed.error;
   }
 
+  await markMustChangePassword(env, userId);
+  const mfaRequired = role === "mitra" || role === "submitra";
   const result: CreateAccountResult = {
     success: true,
     user_id: userId,
-    username,
+    username: clean(saved?.username) || username,
     temp_password: tempPassword,
     email_sent: emailSent,
     email_error: emailError,
-    loket_code: loketCode,
+    loket_code: clean(saved?.loket_code) || loketCode,
+    must_change_password: true,
+    mfa_required: mfaRequired,
+    account: {
+      id: userId,
+      username: clean(saved?.username) || username,
+      role: savedRole || role,
+      email: contactEmail,
+      full_name: fullName,
+      phone,
+      city,
+      must_change_password: true,
+      mfa_enabled: false,
+      mfa_required: mfaRequired,
+      loket_code: clean(saved?.loket_code) || loketCode,
+    },
   };
   return { status: 200, body: result };
 }

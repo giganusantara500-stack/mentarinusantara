@@ -19,7 +19,7 @@ const corsHeaders = {
 const ROLES = ["mitra", "submitra", "loket"] as const;
 type TargetRole = (typeof ROLES)[number];
 const ALLOWED_TARGETS: Record<string, TargetRole[]> = {
-  super_admin: ["mitra"],
+  super_admin: ["mitra", "loket"],
   mitra: ["submitra", "loket"],
   submitra: ["loket"],
 };
@@ -29,7 +29,6 @@ const PARENT_ROLES: Record<TargetRole, string[]> = {
   loket: ["mitra", "submitra"],
 };
 const VALID_LOKET_TYPES = ["konter", "minimarket", "agen", "lainnya"];
-const USERNAME_PATTERN = /^[a-z0-9_.]{3,30}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const APP_URL_PATTERN = /^https?:\/\/[^\s]+$/;
 const DEFAULT_SENDER_NAME = "Mentari Nusantara";
@@ -53,17 +52,33 @@ interface ProfileRow {
   email: string;
   full_name: string;
   username: string | null;
-  deleted_at: string | null;
 }
 
 async function loadProfile(admin: SupabaseClient, id: string): Promise<ProfileRow | null> {
-  const { data, error } = await admin
+  const modern = await admin
     .from("profiles")
-    .select("id, role, status, parent_id, email, full_name, username, deleted_at")
+    .select("id, role, is_active, parent_id, email, full_name, username")
     .eq("id", id)
     .maybeSingle();
-  if (error) throw new Error(`Gagal membaca profil: ${error.message}`);
-  return (data as ProfileRow) ?? null;
+  if (!modern.error && modern.data) {
+    const row = modern.data as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      role: String(row.role ?? ""),
+      status: row.is_active === false ? "suspended" : "active",
+      parent_id: (row.parent_id as string | null) ?? null,
+      email: String(row.email ?? ""),
+      full_name: String(row.full_name ?? row.username ?? ""),
+      username: (row.username as string | null) ?? null,
+    };
+  }
+  const legacy = await admin
+    .from("profiles")
+    .select("id, role, status, parent_id, email, full_name, username")
+    .eq("id", id)
+    .maybeSingle();
+  if (legacy.error) throw new Error(`Gagal membaca profil: ${legacy.error.message}`);
+  return (legacy.data as ProfileRow) ?? null;
 }
 
 async function isInNetwork(admin: SupabaseClient, nodeId: string, ancestorId: string): Promise<boolean> {
@@ -82,12 +97,40 @@ function generateTempPassword(): string {
   return Array.from(bytes, (byte) => (byte % 10).toString()).join("");
 }
 
-function generateUsername(fullName: string): string {
-  const base = fullName.toLowerCase()
-    .replace(/[^a-z0-9]/g, "")
-    .slice(0, 8) || "mitra";
-  const suffix = Math.floor(1000 + Math.random() * 9000).toString();
-  return `${base}${suffix}`;
+function field(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = clean(record[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function missingColumn(message: string) {
+  return message.match(/'([^']+)' column/)?.[1]
+    || message.match(/column "([^"]+)"/)?.[1]
+    || "";
+}
+
+async function writeProfile(admin: SupabaseClient, userId: string, fields: Record<string, unknown>) {
+  const payload = { ...fields };
+  let lastError = "Profil gagal disimpan.";
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const existing = await admin.from("profiles").select("id").eq("id", userId).maybeSingle();
+    const query = existing.data
+      ? admin.from("profiles").update(payload).eq("id", userId)
+      : admin.from("profiles").insert({ id: userId, ...payload });
+    const written = await query.select("id, username, role").maybeSingle();
+    if (!written.error && written.data) return { ok: true as const, row: written.data as Record<string, unknown> };
+    lastError = written.error?.message || "Profil baru tidak kembali dari database.";
+    const missing = missingColumn(lastError);
+    if (missing && missing in payload) {
+      delete payload[missing];
+      continue;
+    }
+    if (/duplicate key|23505/i.test(lastError)) continue;
+    return { ok: false as const, error: lastError };
+  }
+  return { ok: false as const, error: lastError };
 }
 
 function escapeHtml(str: string): string {
@@ -281,7 +324,7 @@ Deno.serve(async (req: Request) => {
     const callerId = userData.user.id;
 
     const caller = await loadProfile(admin, callerId);
-    if (!caller || caller.status !== "active" || caller.deleted_at) {
+    if (!caller || caller.status !== "active") {
       return json({ error: "Akun pemanggil tidak aktif." }, 403);
     }
 
@@ -289,7 +332,7 @@ Deno.serve(async (req: Request) => {
     if (!body) return json({ error: "Data formulir tidak terbaca." }, 400);
 
     const appUrl = clean(body.app_url).replace(/\/+$/, "");
-    if (!APP_URL_PATTERN.test(appUrl)) {
+    if (appUrl && !APP_URL_PATTERN.test(appUrl)) {
       return json({ error: "Alamat aplikasi tidak valid." }, 400);
     }
 
@@ -298,7 +341,6 @@ Deno.serve(async (req: Request) => {
       const targetId = clean(body.user_id);
       const target = targetId ? await loadProfile(admin, targetId) : null;
       if (!target) return json({ error: "Pengguna tidak ditemukan." }, 404);
-      if (target.deleted_at) return json({ error: "Akun sudah dihapus." }, 400);
       if (caller.role !== "super_admin" && !(await isInNetwork(admin, targetId, callerId))) {
         return json({ error: "Akun berada di luar jaringan Anda." }, 403);
       }
@@ -319,7 +361,6 @@ Deno.serve(async (req: Request) => {
       const targetId = clean(body.user_id);
       const target = targetId ? await loadProfile(admin, targetId) : null;
       if (!target) return json({ error: "Pengguna tidak ditemukan." }, 404);
-      if (target.deleted_at) return json({ error: "Akun sudah dihapus." }, 400);
       if (target.id === callerId) return json({ error: "Gunakan halaman keamanan untuk reset password sendiri." }, 400);
       if (caller.role !== "super_admin" && !(await isInNetwork(admin, target.id, caller.id))) {
         return json({ error: "Akun berada di luar jaringan Anda." }, 403);
@@ -344,7 +385,6 @@ Deno.serve(async (req: Request) => {
       const newEmail = clean(body.email).toLowerCase();
       const target = targetId ? await loadProfile(admin, targetId) : null;
       if (!target) return json({ error: "Pengguna tidak ditemukan." }, 404);
-      if (target.deleted_at) return json({ error: "Akun sudah dihapus." }, 400);
       if (target.role === "super_admin") return json({ error: "Tidak dapat mengubah Super Admin." }, 403);
       if (target.id === callerId) return json({ error: "Tidak dapat mengubah email sendiri." }, 400);
       if (caller.role !== "super_admin" && !(await isInNetwork(admin, target.id, caller.id))) {
@@ -377,57 +417,50 @@ Deno.serve(async (req: Request) => {
 
     // --- Action: create (default) ---
     const callerRole = caller.role === "sub_mitra" ? "submitra" : caller.role;
-    const roleInput = clean(body.role);
+    const roleInput = field(body, "role");
     const role = (roleInput === "sub_mitra" ? "submitra" : roleInput) as TargetRole;
-    const fullName = clean(body.full_name);
-    let username = "";
-    let email = clean(body.email).toLowerCase();
-    const phone = clean(body.phone);
-    const businessName = clean(body.business_name);
-    const address = clean(body.address);
+    const fullName = field(body, "full_name", "fullName");
+    const email = field(body, "email").toLowerCase();
+    const phone = field(body, "phone");
+    const businessName = field(body, "business_name", "businessName");
+    const address = field(body, "address");
+    const city = field(body, "city");
     const status = body.status === "suspended" ? "suspended" : "active";
-    const requestedParentId = clean(body.parent_id);
-    const loketType = clean(body.loket_type);
+    const requestedParentId = field(body, "parent_id", "parentId");
+    const loketType = field(body, "loket_type", "loketType");
 
     if (!ROLES.includes(role)) return json({ error: "Jenis akun tidak valid." }, 400);
     if (!ALLOWED_TARGETS[callerRole]?.includes(role)) {
       return json({ error: "Anda tidak dapat membuat akun dengan peran ini." }, 403);
     }
-    if (!fullName) return json({ error: "Nama lengkap wajib diisi." }, 400);
-    username = generateUsername(fullName);
-    if (!USERNAME_PATTERN.test(username)) {
-      return json({ error: "Username otomatis tidak valid. Periksa nama akun." }, 400);
-    }
-    if (role !== "loket") {
-      if (!EMAIL_PATTERN.test(email)) return json({ error: "Format email tidak valid." }, 400);
-    }
-    if (!phone) return json({ error: "Nomor HP wajib diisi." }, 400);
-    if (role !== "loket") {
-      if (!businessName) return json({ error: "Nama usaha wajib diisi." }, 400);
-      if (!address) return json({ error: "Alamat wajib diisi." }, 400);
-    }
+    if (!fullName || !phone) return json({ error: "Nama dan nomor HP wajib diisi." }, 400);
+    if (!city) return json({ error: "Kota atau wilayah wajib diisi." }, 400);
+    if (role !== "loket" && !EMAIL_PATTERN.test(email)) return json({ error: "Format email tidak valid." }, 400);
+    if (role !== "loket" && (!businessName || !address)) return json({ error: "Nama usaha dan alamat wajib diisi." }, 400);
 
-    // loket_type untuk role loket
     let loketTypeValue: string | null = null;
-    if (role === "loket") {
-      loketTypeValue = VALID_LOKET_TYPES.includes(loketType) ? loketType : "lainnya";
-    }
+    if (role === "loket") loketTypeValue = VALID_LOKET_TYPES.includes(loketType) ? loketType : "lainnya";
 
     const parentId = requestedParentId || callerId;
-    if (!parentId) return json({ error: "Atasan langsung wajib dipilih." }, 400);
-
     const parent = await loadProfile(admin, parentId);
-    if (!parent || parent.status !== "active" || !PARENT_ROLES[role].includes(parent.role === "sub_mitra" ? "submitra" : parent.role)) {
-      const expected = role === "loket" ? "Mitra atau Sub Mitra" : role === "submitra" ? "Mitra" : "Super Admin";
+    const parentRole = parent?.role === "sub_mitra" ? "submitra" : parent?.role;
+    const parentAllowed = Boolean(parent && parent.status === "active" && (
+      (callerRole === "super_admin" && parent.id === callerId && (role === "mitra" || role === "loket"))
+      || (parentRole ? PARENT_ROLES[role].includes(parentRole) : false)
+    ));
+    if (!parent || !parentAllowed) {
+      const expected = role === "loket" ? "Mitra, Sub Mitra, atau Super Admin" : role === "submitra" ? "Mitra" : "Super Admin";
       return json({ error: `Atasan harus berperan sebagai ${expected} yang aktif.` }, 400);
     }
     if (callerRole === "super_admin" && parent.id !== callerId) {
-      return json({ error: "Mitra harus berada di bawah Super Admin yang membuatnya." }, 403);
+      return json({ error: role === "loket"
+        ? "Loket yang dibuat Super Admin berada langsung di bawah Super Admin."
+        : "Mitra harus berada di bawah Super Admin yang membuatnya." }, 403);
     }
     if (callerRole === "mitra" && role === "submitra" && parent.id !== callerId) {
       return json({ error: "Sub Mitra harus berada langsung di bawah Mitra yang membuatnya." }, 403);
     }
-    if (callerRole === "mitra" && role === "loket" && parent.id !== callerId && parent.role !== "submitra" && parent.role !== "sub_mitra") {
+    if (callerRole === "mitra" && role === "loket" && parent.id !== callerId && parentRole !== "submitra") {
       return json({ error: "Loket hanya dapat berada di bawah Mitra atau Sub Mitra di jaringannya." }, 403);
     }
     if (callerRole === "submitra" && parent.id !== callerId) {
@@ -437,98 +470,121 @@ Deno.serve(async (req: Request) => {
       return json({ error: "Atasan berada di luar jaringan Anda." }, 403);
     }
 
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const { data: dupUsername } = await admin
-        .from("profiles").select("id").eq("username", username).maybeSingle();
+    const base = fullName.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 24) || "akun";
+    let username = base;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const { data: dupUsername } = await admin.from("profiles").select("id").eq("username", username).maybeSingle();
       if (!dupUsername) break;
-      username = generateUsername(fullName);
-      if (attempt === 4) return json({ error: "Username otomatis bentrok. Coba simpan lagi." }, 409);
+      username = `${base}${attempt + 1}`;
     }
-    if (role === "loket" && !email) {
-      email = `${username}@loket.local`;
-    }
-
-    // Only check email duplication for real emails (not auto-generated @loket.local)
-    if (!email.endsWith("@loket.local")) {
-      const { data: dupEmail } = await admin
-        .from("profiles").select("id").eq("email", email).maybeSingle();
+    if (email && EMAIL_PATTERN.test(email)) {
+      const { data: dupEmail } = await admin.from("profiles").select("id").eq("email", email).maybeSingle();
       if (dupEmail) return json({ error: "Email sudah terdaftar." }, 409);
     }
 
+    const tempPassword = generateTempPassword();
+    const loginEmail = `${username}@gigamentarinusantara.id`;
+    const mfaRequired = role === "mitra" || role === "submitra";
+    const loketCode = role === "loket" ? String(1000000 + Math.floor(Math.random() * 9000000)) : null;
+    let mitraId: string | null = null;
+    if (callerRole === "mitra") mitraId = callerId;
+    if (callerRole === "submitra") mitraId = caller.parent_id;
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
-      email,
+      email: loginEmail,
+      password: tempPassword,
       email_confirm: true,
-      user_metadata: { full_name: fullName },
+      user_metadata: {
+        full_name: fullName,
+        phone,
+        business_name: businessName,
+        address,
+        city,
+        contact_email: email,
+        parent_id: parent.id,
+        mitra_id: mitraId,
+        created_by: callerId,
+        role,
+        status,
+        username,
+        loket_type: loketTypeValue,
+        loket_code: loketCode,
+        mfa_enabled: false,
+        mfa_status: mfaRequired ? "pending" : "off",
+        must_change_password: true,
+      },
     });
     if (createErr || !created.user) {
       const msg = createErr?.message ?? "";
-      if (/already|registered|exists/i.test(msg)) {
-        return json({ error: "Email sudah terdaftar." }, 409);
-      }
+      if (/already|registered|exists/i.test(msg)) return json({ error: "Username atau email login sudah terdaftar." }, 409);
       return json({ error: `Akun Auth gagal dibuat: ${msg || "kesalahan tidak diketahui"}` }, 500);
     }
     const newId = created.user.id;
-
-    const profileUpdate: Record<string, unknown> = {
-      role,
-      parent_id: parent.id,
-      status,
-      full_name: fullName,
+    const saved = await writeProfile(admin, newId, {
       username,
+      role,
+      is_active: status === "active",
+      status,
+      email,
+      full_name: fullName,
       phone,
       business_name: businessName,
       address,
+      city,
+      parent_id: parent.id,
+      mitra_id: mitraId,
       created_by: callerId,
+      loket_type: loketTypeValue,
+      loket_code: loketCode,
+      mfa_enabled: false,
       must_change_password: true,
-    };
-    if (role === "loket" && loketTypeValue) {
-      profileUpdate.loket_type = loketTypeValue;
-    }
-
-    const { data: updated, error: profileErr } = await admin
-      .from("profiles")
-      .update(profileUpdate)
-      .eq("id", newId)
-      .select("id")
-      .maybeSingle();
-
-    if (profileErr || !updated) {
-      await admin.auth.admin.deleteUser(newId);
-      const reason = profileErr?.message ?? "profil tidak ditemukan setelah akun dibuat";
-      return json({ error: `Profil gagal disimpan, akun dibatalkan: ${reason}` }, 500);
-    }
-
-    const tempPassword = generateTempPassword();
-    const { error: pwdErr } = await admin.rpc("admin_set_user_password", {
-      p_user_id: newId,
-      p_password: tempPassword,
     });
-    if (pwdErr) {
+    if (!saved.ok) {
       await admin.auth.admin.deleteUser(newId);
-      return json({ error: `Gagal mengatur password: ${pwdErr.message}` }, 500);
+      return json({ error: `Profil gagal disimpan, akun dibatalkan: ${saved.error}` }, 500);
     }
-    await admin.from("profiles").update({ must_change_password: true }).eq("id", newId);
-    let emailErr: string | null = null;
-    if (EMAIL_PATTERN.test(email) && !email.endsWith("@loket.local")) {
-      emailErr = await sendTempPasswordEmail(email, fullName, tempPassword, "registration", username);
+    const savedRole = String(saved.row.role ?? role);
+    if (savedRole && savedRole !== role && savedRole !== "sub_mitra") {
+      await admin.auth.admin.deleteUser(newId);
+      return json({ error: `Peran akun tersimpan sebagai ${savedRole}, bukan ${role}. Akun dibatalkan.` }, 500);
     }
-    const setupResult: SetupResult = { passwordError: null, emailError: emailErr, tempPassword };
 
+    let emailErr: string | null = null;
+    if (EMAIL_PATTERN.test(email)) {
+      emailErr = await sendTempPasswordEmail(email, fullName, tempPassword, "registration", username);
+    } else {
+      emailErr = "Email kontak belum diisi. Username dan password sementara tetap tersedia di layar.";
+    }
     await admin.from("audit_logs").insert({
       actor_id: callerId,
       action: "create_subuser",
       target_type: "profile",
       target_id: newId,
-      details: { email, role, parent_id: parent.id, username, status, email_sent: !setupResult.emailError, loket_type: loketTypeValue },
-    });
+      details: { email, role, parent_id: parent.id, username, status, email_sent: !emailErr, loket_type: loketTypeValue, must_change_password: true, mfa_required: mfaRequired },
+    }).then(() => undefined, () => undefined);
 
     return json({
       success: true,
       user_id: newId,
-      username,
-      temp_password: setupResult.tempPassword,
-      email_sent: !setupResult.emailError,
-      email_error: setupResult.emailError,
+      username: String(saved.row.username ?? username),
+      temp_password: tempPassword,
+      email_sent: !emailErr,
+      email_error: emailErr,
+      loket_code: loketCode,
+      must_change_password: true,
+      mfa_required: mfaRequired,
+      account: {
+        id: newId,
+        username: String(saved.row.username ?? username),
+        role,
+        email,
+        full_name: fullName,
+        phone,
+        city,
+        must_change_password: true,
+        mfa_enabled: false,
+        mfa_required: mfaRequired,
+        loket_code: loketCode,
+      },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Kesalahan server tidak diketahui.";
