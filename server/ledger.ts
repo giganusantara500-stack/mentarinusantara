@@ -106,10 +106,14 @@ async function ledgerApi(env: LedgerEnv, action: string, actorId: string, payloa
   } catch {
     return { error: "Database saldo tidak dapat dihubungi.", status: 500 };
   }
-  const body = await response.json().catch(() => null) as LedgerResult & { message?: string; code?: string } | null;
-  if (!response.ok || !body || typeof body !== "object") {
+  const body = await response.json().catch(() => null) as (LedgerResult & { message?: string; details?: string; hint?: string; code?: string }) | null;
+  if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)) {
+    const detail = [body?.message, body?.details, body?.hint, body?.code].filter(Boolean).join(" — ");
     const missing = String(body?.message ?? "").includes("ledger_api");
-    return { error: missing ? "Fungsi saldo di database belum terpasang. Jalankan migrasi terbaru, lalu muat ulang." : "Database saldo menolak permintaan.", status: 500 };
+    return {
+      error: missing ? "Fungsi saldo di database belum terpasang. Jalankan migrasi terbaru, lalu muat ulang." : (detail || "Database saldo menolak permintaan."),
+      status: response.status || 500,
+    };
   }
   if (body.error && !body.status) return { error: body.message || body.error, status: 500 };
   return body;

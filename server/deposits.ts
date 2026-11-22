@@ -148,9 +148,12 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     const requested = "pusat";
     if (clean(body.route) === "jaringan") return { status: 400, body: { error: "Setoran deposit hanya ke rekening pusat. Saldo loket diisi langsung oleh Mitra." } };
     if (!Number.isFinite(amount) || amount < 10000) return { status: 400, body: { error: "Nominal deposit minimal Rp10.000." } };
-    const open = (await listTickets(env, caller.id)).find((ticket) => ticket.loketId === caller.id && ticket.status === "pending" && (ticket.route === "jaringan" ? "jaringan" : "pusat") === requested);
+    const open = (await listTickets(env, caller.id)).find((ticket) => {
+      const expired = Boolean(ticket.expiresAt) && new Date(ticket.expiresAt as string).getTime() <= Date.now();
+      return ticket.loketId === caller.id && ticket.status === "pending" && !expired && (ticket.route === "jaringan" ? "jaringan" : "pusat") === requested;
+    });
     if (open) return { status: 409, body: { error: "Masih ada tiket pada jalur yang sama yang menunggu keputusan." } };
-    const users = await listAuthUsers(env);
+    const users = await listAuthUsers(env).catch(() => []);
     const self = users.find((user) => user.id === caller.id);
     const meta = (self?.user_metadata ?? {}) as Record<string, unknown>;
     const selfProfile = await profileRow(env, caller.id);
@@ -191,7 +194,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     };
     try {
       const created = await createTicket(env, caller.id, ticket);
-      if (created.error || !created.ticket) return { status: created.status, body: { error: created.error } };
+      if (created.error || !created.ticket?.id) return { status: created.status || 500, body: { error: created.error || "Database tidak mengembalikan tiket deposit." } };
       await touchActivity(caller.id, env).catch(() => undefined);
       return { status: 200, body: { ticket: created.ticket } };
     } catch {

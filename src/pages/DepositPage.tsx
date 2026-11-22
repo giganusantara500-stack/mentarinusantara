@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
 import { Badge } from "@/components/ui/Badge";
 import { formatRupiah, formatWaktu } from "@/lib/format";
+import { depositErrorText, depositRequest } from "@/lib/depositApi";
 import { openDepositTicket, ticketPhase } from "@/lib/depositStatus";
 import { TicketTransferCard } from "@/components/deposit/TicketTransferCard";
 
@@ -49,8 +50,8 @@ function scopeText(role: string) {
   return "Hanya milik loket ini.";
 }
 
-function normalizeTicket(ticket: Ticket): Ticket {
-  const uniqueCode = String(ticket.uniqueCode ?? "").replace(/\D/g, "").padStart(3, "0").slice(-3);
+function normalizeTicket(ticket: Ticket & { unique_code?: string }): Ticket {
+  const uniqueCode = String(ticket.uniqueCode ?? ticket.unique_code ?? "").replace(/\D/g, "").padStart(3, "0").slice(-3);
   const baseAmount = Number(ticket.baseAmount ?? ticket.amount) || 0;
   const createdAt = ticket.createdAt || new Date().toISOString();
   const expiresAt = ticket.expiresAt || new Date(new Date(createdAt).getTime() + 6 * 60 * 60 * 1000).toISOString();
@@ -112,14 +113,13 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
   const load = async () => {
     try {
       const session = await supabase.auth.getSession();
-      const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
-      const response = await fetch("/api/deposits", { headers });
-      const text = await response.text();
-      const body = text ? JSON.parse(text) : {};
-      if (!response.ok) return;
-      setBalance(Number(body.balance ?? 0));
-      setMutations(body.mutations ?? []);
-      setTickets(((body.tickets ?? []) as Ticket[]).map(normalizeTicket));
+      const token = session.data.session?.access_token ?? "";
+      if (!token) return;
+      const result = await depositRequest("/api/deposits", "GET", token);
+      if (!result.ok) return;
+      setBalance(Number(result.body.balance ?? 0));
+      setMutations((result.body.mutations ?? []) as MutationRow[]);
+      setTickets(((result.body.tickets ?? []) as Ticket[]).map(normalizeTicket));
     } catch {
       /* daftar lama tetap tampil bila penyegaran gagal */
     }
@@ -145,21 +145,17 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
         setError("Sesi login berakhir. Masuk kembali, lalu buat tiket.");
         return;
       }
-      const response = await fetch("/api/deposits", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ amount: Number(amount), bank, route: "pusat" }),
-      });
-      const text = await response.text();
-      let body: { error?: string; ticket?: Ticket } = {};
-      try { body = text ? JSON.parse(text) : {}; } catch { body = { error: response.status === 431 ? "Sesi login terlalu besar untuk dikirim. Muat ulang server, lalu coba lagi." : "Server tidak mengembalikan tiket." }; }
-      const ticket = body.ticket ? normalizeTicket(body.ticket) : null;
-      if (!response.ok || !ticket?.id || !ticket.uniqueCode || ticket.uniqueCode === "000") {
-        setError(body.error || (response.status === 431 ? "Sesi login terlalu besar untuk dikirim. Muat ulang server, lalu coba lagi." : "Tiket gagal dibuat."));
+      const result = await depositRequest("/api/deposits", "POST", token, { amount: Number(amount), bank, route: "pusat" });
+      const rawTicket = result.body.ticket as (Ticket & { unique_code?: string }) | undefined;
+      const ticket = rawTicket ? normalizeTicket(rawTicket) : null;
+      if (!result.ok || !ticket?.id || !ticket.uniqueCode || ticket.uniqueCode === "000") {
+        if (ticket?.id) await load();
+        setError(depositErrorText(result.status, result.body, "Tiket gagal dibuat."));
         return;
       }
       setTickets((current) => [ticket, ...current.filter((item) => item.id !== ticket.id)]);
       setAmount("");
+      await load();
       requestRefresh();
       window.setTimeout(() => receiptRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 30);
     } catch {
@@ -183,13 +179,8 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
   const cancelTicket = async () => {
     if (!openTicket) return;
     const session = await supabase.auth.getSession();
-    const response = await fetch("/api/deposits/cancel", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
-      body: JSON.stringify({ id: openTicket.id }),
-    });
-    const body = await response.json();
-    if (!response.ok) { setError(body.error || "Tiket gagal dibatalkan."); return; }
+    const result = await depositRequest("/api/deposits/cancel", "POST", session.data.session?.access_token ?? "", { id: openTicket.id });
+    if (!result.ok) { setError(depositErrorText(result.status, result.body, "Tiket gagal dibatalkan.")); return; }
     await load();
     requestRefresh();
   };
@@ -197,13 +188,8 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
   const claimTicket = async () => {
     if (!openTicket) return;
     const session = await supabase.auth.getSession();
-    const response = await fetch("/api/deposits/claim", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
-      body: JSON.stringify({ id: openTicket.id }),
-    });
-    const body = await response.json().catch(() => null);
-    if (!response.ok) { setError(body?.error || "Status tiket gagal diperbarui."); return; }
+    const result = await depositRequest("/api/deposits/claim", "POST", session.data.session?.access_token ?? "", { id: openTicket.id });
+    if (!result.ok) { setError(depositErrorText(result.status, result.body, "Status tiket gagal diperbarui.")); return; }
     await load();
   };
 
@@ -215,13 +201,8 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
     setError("");
     try {
       const session = await supabase.auth.getSession();
-      const response = await fetch("/api/deposits/decide", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
-        body: JSON.stringify({ id, action }),
-      });
-      const body = await response.json().catch(() => null);
-      if (!response.ok) { setError(body?.error || "Keputusan gagal disimpan."); return; }
+      const result = await depositRequest("/api/deposits/decide", "POST", session.data.session?.access_token ?? "", { id, action });
+      if (!result.ok) { setError(depositErrorText(result.status, result.body, "Keputusan gagal disimpan.")); return; }
       await load();
     } finally {
       decideLock.current = "";
