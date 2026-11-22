@@ -671,6 +671,7 @@ interface CollectiveRow {
   ownerName: string;
   loketCode?: string;
   collector?: string;
+  category?: string;
   status?: "aktif" | "nonaktif";
   members?: CollectiveMember[];
   bills?: { number: string; status: string; product?: string }[];
@@ -816,7 +817,7 @@ export function CollectiveAdminPage() {
                 return (
                   <tr key={row.id} className="border-t border-slate-100">
                     <td className="px-2.5 py-2 break-words font-mono text-xs">{row.id.slice(0, 8)}</td>
-                    <td className="px-2.5 py-2 break-words font-medium">{row.collector || row.name}</td>
+                    <td className="px-2.5 py-2 break-words font-medium">{row.collector || row.name}{row.category ? ` · ${row.category}` : ""}</td>
                     {showMitra && <td className="px-2.5 py-2 break-words">{owners.mitra ? profileLabel(owners.mitra) : "—"}</td>}
                     <td className="px-2.5 py-2 break-words">{row.loketCode ? `${row.loketCode} - ${row.ownerName}` : row.ownerName}</td>
                     <td className="px-2.5 py-2 break-words">{(row.members ?? []).length}</td>
@@ -866,7 +867,7 @@ export function CollectiveAdminPage() {
       {detail && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
           <div className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-5 shadow-xl">
-            <h2 className="font-semibold text-slate-900">Kelola Pelanggan - {detail.collector || detail.name}</h2>
+            <h2 className="font-semibold text-slate-900">Kelola Pelanggan - {detail.collector || detail.name}{detail.category ? ` · ${detail.category}` : ""}</h2>
             <div className="mt-3 w-full max-w-full">
               <table className="w-full table-fixed text-sm">
                 <colgroup>

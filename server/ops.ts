@@ -14,6 +14,7 @@ interface Collective {
   loketCode: string;
   name: string;
   collector: string;
+  category: string;
   members: Member[];
   bills: Bill[];
   history: { at: string; count: number; total: number }[];
@@ -52,6 +53,7 @@ function normalizeCollective(row: Partial<Collective> & { numbers?: string[] }):
     loketCode: row.loketCode || "",
     name: row.name || "Kolektif",
     collector: row.collector || row.ownerName || "Loket",
+    category: typeof row.category === "string" ? row.category.trim() : "",
     members,
     bills: Array.isArray(row.bills) ? row.bills : [],
     history: Array.isArray(row.history) ? row.history : [],
@@ -254,6 +256,7 @@ export async function handleOpsRequest(
           }
           if (name) row.name = name;
           if (typeof body.collector === "string" && body.collector.trim()) row.collector = body.collector.trim();
+          if (typeof body.category === "string" && body.category.trim()) row.category = body.category.trim();
           if (body.status === "aktif" || body.status === "nonaktif") row.status = body.status;
           const members = mapMembers(body, row.members);
           if (members) {
@@ -291,6 +294,7 @@ export async function handleOpsRequest(
         loketCode,
         name,
         collector: typeof body.collector === "string" && body.collector.trim() ? body.collector.trim() : name,
+        category: typeof body.category === "string" ? body.category.trim() : "",
         members: mapMembers(body) ?? [],
         status: body.status === "nonaktif" ? "nonaktif" : "aktif",
         createdAt: new Date().toISOString(),
