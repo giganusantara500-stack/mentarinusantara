@@ -113,7 +113,7 @@ export function LoginPage({ variant }: { variant: "monitor" | "loket" }) {
           <div className="w-full max-w-md rounded-2xl border border-amber-200 bg-white p-8 shadow-xl">
             <div className="text-center">
               <h2 className="text-2xl font-black tracking-tight text-neutral-950">Selamat Datang</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500">Masuk dengan username dan password meja loket.</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500">Masuk dengan username dan password.</p>
             </div>
             <form onSubmit={onSubmit} className="mt-6 space-y-4">
               <Field label="Username">

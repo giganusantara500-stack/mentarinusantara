@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>Mentari Nusantara</title>
+  <style>
+    html, body { margin: 0; width: 100%; height: 36px; overflow: hidden; background: #0f172a; }
+    .bar {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      height: 36px;
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: "Segoe UI", sans-serif;
+      user-select: none;
+      -webkit-app-region: drag;
+      box-shadow: inset 0 -1px 0 #f59e0b;
+    }
+    .brand { display: flex; align-items: center; gap: 8px; min-width: 0; padding-left: 10px; }
+    .brand img { width: 18px; height: 18px; border-radius: 4px; display: block; -webkit-app-region: no-drag; }
+    .name { font-size: 13px; font-weight: 700; white-space: nowrap; letter-spacing: 0.01em; }
+    .spacer { flex: 1; height: 36px; }
+    .controls { display: flex; height: 36px; -webkit-app-region: no-drag; }
+    button {
+      width: 46px;
+      height: 36px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: #f8fafc;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      -webkit-app-region: no-drag;
+    }
+    button[hidden] { display: none !important; }
+    button svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+    button:hover { background: rgba(255, 255, 255, 0.14); }
+    button.close:hover { background: #e11d48; }
+  </style>
+</head>
+<body>
+  <div class="bar" id="bar">
+    <div class="brand">
+      <img src="./build/icon.png" alt="" />
+      <span class="name">Mentari Nusantara</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="controls">
+      <button id="min" type="button" aria-label="Minimize" title="Minimize">
+        <svg viewBox="0 0 12 12"><path d="M2 6h8" /></svg>
+      </button>
+      <button id="max" type="button" aria-label="Maximize" title="Maximize">
+        <svg viewBox="0 0 12 12"><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="0.6" /></svg>
+      </button>
+      <button id="restore" type="button" aria-label="Restore" title="Restore" hidden>
+        <svg viewBox="0 0 12 12"><rect x="3.4" y="1.8" width="6.2" height="6.2" rx="0.5" /><path d="M2.2 4.1V9.4a.6.6 0 0 0 .6.6H8" /></svg>
+      </button>
+      <button id="close" class="close" type="button" aria-label="Close" title="Tutup">
+        <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3L3 9" /></svg>
+      </button>
+    </div>
+  </div>
+  <script>
+    const chrome = window.loketDesktop;
+    const maxButton = document.getElementById("max");
+    const restoreButton = document.getElementById("restore");
+    document.getElementById("min").addEventListener("click", () => chrome.minimize());
+    maxButton.addEventListener("click", () => chrome.maximizeToggle());
+    restoreButton.addEventListener("click", () => chrome.maximizeToggle());
+    document.getElementById("close").addEventListener("click", () => chrome.close());
+    document.getElementById("bar").addEventListener("dblclick", (event) => {
+      if (event.target.closest("button")) return;
+      chrome.maximizeToggle();
+    });
+    chrome.onMaximized((maximized) => {
+      maxButton.hidden = maximized;
+      restoreButton.hidden = !maximized;
+    });
+  </script>
+</body>
+</html>

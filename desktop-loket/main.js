@@ -1,9 +1,10 @@
-const { app, BrowserWindow, Menu, ipcMain } = require("electron");
+const { app, BaseWindow, WebContentsView, Menu, ipcMain } = require("electron");
 const path = require("path");
 
 const APP_URL = "https://mentarinusantara.giganusantara500.workers.dev/#/loket-login";
 const APP_ORIGIN = "https://mentarinusantara.giganusantara500.workers.dev";
-const WINDOW_TITLE = "Mentari Nusantara - Meja Loket";
+const WINDOW_TITLE = "Mentari Nusantara";
+const BAR_HEIGHT = 36;
 
 const pageOptions = {
   contextIsolation: true,
@@ -14,6 +15,9 @@ const pageOptions = {
 };
 
 let mainWindow = null;
+let titlebarContents = null;
+let contentView = null;
+let titlebarView = null;
 
 function isAllowedUrl(raw) {
   if (!raw || raw === "about:blank" || raw.startsWith("about:blank")) return true;
@@ -27,15 +31,21 @@ function isAllowedUrl(raw) {
   return parsed.origin === APP_ORIGIN;
 }
 
-function ownWindow(event) {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win || win.isDestroyed() || win !== mainWindow) return null;
-  return win;
+function isTitlebar(contents) {
+  return Boolean(titlebarContents && contents === titlebarContents);
 }
 
-function sendMaximized(win) {
-  if (!win || win.isDestroyed()) return;
-  win.webContents.send("window-maximized", win.isMaximized());
+function sendMaximized() {
+  if (!mainWindow || mainWindow.isDestroyed() || !titlebarContents || titlebarContents.isDestroyed()) return;
+  titlebarContents.send("window-maximized", mainWindow.isMaximized());
+}
+
+function layout() {
+  if (!mainWindow || mainWindow.isDestroyed() || !titlebarView || !contentView) return;
+  const [width, height] = mainWindow.getContentSize();
+  const bar = Math.min(BAR_HEIGHT, Math.max(0, height));
+  titlebarView.setBounds({ x: 0, y: 0, width, height: bar });
+  contentView.setBounds({ x: 0, y: bar, width, height: Math.max(0, height - bar) });
 }
 
 function blockDevTools(contents) {
@@ -49,21 +59,27 @@ function blockDevTools(contents) {
 
 function harden(contents) {
   contents.on("will-navigate", (event, url) => {
-    if (!isAllowedUrl(url)) event.preventDefault();
+    if (isTitlebar(contents) || !isAllowedUrl(url)) event.preventDefault();
   });
   contents.on("will-redirect", (event, url) => {
-    if (!isAllowedUrl(url)) event.preventDefault();
+    if (isTitlebar(contents) || !isAllowedUrl(url)) event.preventDefault();
   });
   contents.on("will-attach-webview", (event) => event.preventDefault());
+  if (isTitlebar(contents)) {
+    blockDevTools(contents);
+    return;
+  }
   contents.setWindowOpenHandler(({ url }) => {
     if (!isAllowedUrl(url)) return { action: "deny" };
     return {
       action: "allow",
       overrideBrowserWindowOptions: {
         title: WINDOW_TITLE,
-        autoHideMenuBar: true,
-        fullscreen: false,
+        parent: undefined,
+        modal: false,
         frame: true,
+        fullscreen: false,
+        autoHideMenuBar: true,
         width: 980,
         height: 760,
         webPreferences: pageOptions,
@@ -74,8 +90,6 @@ function harden(contents) {
     child.setAutoHideMenuBar(true);
     child.setMenuBarVisibility(false);
     child.setTitle(WINDOW_TITLE);
-    child.show();
-    child.focus();
     if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFullScreen()) {
       mainWindow.setFullScreen(false);
       mainWindow.maximize();
@@ -85,7 +99,7 @@ function harden(contents) {
 }
 
 function createWindow() {
-  const win = new BrowserWindow({
+  const win = new BaseWindow({
     title: WINDOW_TITLE,
     width: 1280,
     height: 800,
@@ -96,52 +110,84 @@ function createWindow() {
     backgroundColor: "#0f172a",
     autoHideMenuBar: true,
     icon: path.join(__dirname, "build", "icon.png"),
+  });
+  mainWindow = win;
+
+  titlebarView = new WebContentsView({
     webPreferences: {
       ...pageOptions,
       preload: path.join(__dirname, "preload.js"),
     },
   });
-  mainWindow = win;
-  win.setMenuBarVisibility(false);
-  win.on("maximize", () => sendMaximized(win));
-  win.on("unmaximize", () => sendMaximized(win));
-  win.once("ready-to-show", () => {
-    win.maximize();
-    win.show();
-    sendMaximized(win);
+  contentView = new WebContentsView({ webPreferences: pageOptions });
+  titlebarContents = titlebarView.webContents;
+  titlebarView.setBackgroundColor("#0f172a");
+  contentView.setBackgroundColor("#0f172a");
+
+  win.contentView.addChildView(contentView);
+  win.contentView.addChildView(titlebarView);
+  layout();
+
+  const relayout = () => {
+    layout();
+    sendMaximized();
+  };
+  win.on("resize", relayout);
+  win.on("maximize", relayout);
+  win.on("unmaximize", relayout);
+  win.on("enter-full-screen", relayout);
+  win.on("leave-full-screen", relayout);
+  win.on("show", relayout);
+
+  titlebarView.webContents.on("did-finish-load", () => {
+    relayout();
+    if (!win.isDestroyed() && !win.isVisible()) {
+      win.show();
+      win.maximize();
+      relayout();
+    }
   });
-  win.webContents.on("did-finish-load", () => sendMaximized(win));
-  win.webContents.on("page-title-updated", (event) => {
+  contentView.webContents.on("page-title-updated", (event) => {
     event.preventDefault();
     win.setTitle(WINDOW_TITLE);
   });
-  win.webContents.on("did-fail-load", (_event, code, _desc, url, isMainFrame) => {
+  contentView.webContents.on("did-fail-load", (_event, code, _desc, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return;
     if (!isAllowedUrl(url) && url !== APP_URL) return;
     setTimeout(() => {
-      if (!win.isDestroyed()) win.loadURL(APP_URL);
+      if (!contentView.webContents.isDestroyed()) contentView.webContents.loadURL(APP_URL);
     }, 4000);
   });
-  win.loadURL(APP_URL);
+
+  titlebarView.webContents.loadFile(path.join(__dirname, "titlebar.html"));
+  contentView.webContents.loadURL(APP_URL);
   win.on("closed", () => {
     mainWindow = null;
+    titlebarContents = null;
+    titlebarView = null;
+    contentView = null;
   });
 }
 
+function shellWindow(event) {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== titlebarContents) return null;
+  return mainWindow;
+}
+
 ipcMain.on("window-minimize", (event) => {
-  ownWindow(event)?.minimize();
+  shellWindow(event)?.minimize();
 });
 
 ipcMain.on("window-maximize-toggle", (event) => {
-  const win = ownWindow(event);
+  const win = shellWindow(event);
   if (!win) return;
   if (win.isMaximized()) win.unmaximize();
   else win.maximize();
-  sendMaximized(win);
+  sendMaximized();
 });
 
 ipcMain.on("window-close", (event) => {
-  ownWindow(event)?.close();
+  shellWindow(event)?.close();
 });
 
 app.whenReady().then(() => {
