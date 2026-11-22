@@ -21,8 +21,7 @@
     },
     "files": [
       "main.js",
-      "preload-titlebar.js",
-      "titlebar.html",
+      "preload.js",
       "package.json",
       "build/icon.png"
     ],
