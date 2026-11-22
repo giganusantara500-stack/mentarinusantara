@@ -3,6 +3,7 @@ import { useAuth, dbRoleToAppRole, roleUsesMfa } from "@/lib/auth";
 import { PLATFORM_NAME } from "@/lib/brand";
 import { territoryMarker } from "@/lib/territory";
 import { NAV_CONFIG, ROLE_LABELS } from "@/lib/nav";
+import { pathAllowed } from "@/lib/access";
 import { initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { LogOut, Menu, X, Zap, ChevronRight, ChevronDown, ShieldCheck } from "lucide-react";
@@ -21,15 +22,17 @@ export function Sidebar({ current, onNavigate, onLogout, onSecurity }: Props) {
 
   if (!profile) return null;
   const role = dbRoleToAppRole(profile.role);
-  if (role === "pending") return null;
-  const items = NAV_CONFIG[role];
+  if (role === "pending" || role === "loket") return null;
+  const items = NAV_CONFIG[role]
+    .map((section) => ({ ...section, items: section.items.filter((item) => pathAllowed(profile.role, item.path)) }))
+    .filter((section) => section.items.length > 0);
   const displayName = profile.full_name || profile.email;
   const marker = territoryMarker(role, profile.city);
 
   useEffect(() => {
     const active = items.find((section) => section.items.length > 1 && section.items.some((item) => item.path === current));
     if (active) setExpanded((rows) => rows.includes(active.category) ? rows : [...rows, active.category]);
-  }, [current, items]);
+  }, [current, role]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const content = (
     <div className="flex flex-col h-full bg-purple-950 text-purple-200">

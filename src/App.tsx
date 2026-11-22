@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AuthProvider, canonicalRole, useAuth } from "@/lib/auth";
-import { homeForRole, isLoketArea, pathAllowed } from "@/lib/access";
+import { isLoketArea, resolvePath } from "@/lib/access";
 import { applyDisplayMode } from "@/lib/displayMode";
 import { AppShell } from "@/components/layout/AppShell";
 import { LoketShell } from "@/components/layout/LoketShell";
@@ -66,17 +66,9 @@ function ProtectedApp() {
 
   useEffect(() => {
     if (!profile || path === "/reset-password") return;
-    const home = homeForRole(profile.role);
-    const loket = canonicalRole(profile.role) === "loket";
-    if (loket && !path.startsWith("/meja")) {
-      window.location.hash = home;
-      return;
-    }
-    if (!loket && isLoketArea(path)) {
-      window.location.hash = home;
-      return;
-    }
-    if (!pathAllowed(profile.role, path)) window.location.hash = home;
+    const next = resolvePath(profile.role, path);
+    const base = path.split("?")[0] || "/";
+    if (base !== next) window.location.hash = next;
   }, [profile, path]);
 
   const navigate = (p: string) => {
@@ -143,17 +135,10 @@ function ProtectedApp() {
     );
   }
 
-  const home = homeForRole(profile.role);
-  const visiblePath = pathAllowed(profile.role, path) ? path : home;
+  const visiblePath = resolvePath(profile.role, path);
+  const loketAccount = canonicalRole(profile.role) === "loket";
 
-  const render = () => {
-    // Detail pages: /mitra/detail/:id, /submitra/detail/:id, /loket/detail/:id
-    const detailMatch = visiblePath.match(/^\/(mitra|submitra|loket)\/detail\/(.+)$/);
-    if (detailMatch) {
-      const [, role, userId] = detailMatch;
-      return <UserDetailPage userId={userId} onBack={() => navigate(`/${role}`)} />;
-    }
-
+  const renderLoket = () => {
     switch (visiblePath) {
       case "/meja": return <LoketHomePage />;
       case "/meja/beli": return <LoketTransaksiPage />;
@@ -164,6 +149,18 @@ function ProtectedApp() {
       case "/meja/laporan": return <LoketReportPage />;
       case "/meja/pengaturan": return <LoketSettingPage />;
       case "/meja/deposit": return null;
+      default: return <LoketHomePage />;
+    }
+  };
+
+  const renderMonitor = () => {
+    const detailMatch = visiblePath.match(/^\/(mitra|submitra|loket)\/detail\/(.+)$/);
+    if (detailMatch) {
+      const [, area, userId] = detailMatch;
+      return <UserDetailPage userId={userId} onBack={() => navigate(`/${area}`)} />;
+    }
+
+    switch (visiblePath) {
       case "/dashboard":
         if (isSuperAdmin || canonicalRole(profile?.role) === "mitra" || canonicalRole(profile?.role) === "submitra") return <OpsDashboardPage />;
         return <DashboardPage onNavigate={navigate} />;
@@ -197,23 +194,22 @@ function ProtectedApp() {
       case "/pengumuman": return <AnnouncementsPage />;
       case "/pengaturan": return <SettingsPage />;
       default:
-        if (canonicalRole(profile.role) === "loket") return <LoketHomePage />;
         if (isSuperAdmin || canonicalRole(profile?.role) === "mitra" || canonicalRole(profile?.role) === "submitra") return <OpsDashboardPage />;
         return <DashboardPage onNavigate={navigate} />;
     }
   };
 
-  if (canonicalRole(profile.role) === "loket") {
+  if (loketAccount) {
     return (
       <LoketShell current={visiblePath} onNavigate={navigate} onLogout={() => signOut()}>
-        {render()}
+        {renderLoket()}
       </LoketShell>
     );
   }
 
   return (
     <AppShell current={visiblePath} onNavigate={navigate} onLogout={() => signOut()} onSecurity={() => navigate("/keamanan")}>
-      {render()}
+      {renderMonitor()}
     </AppShell>
   );
 }

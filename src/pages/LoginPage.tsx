@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useAuth } from "@/lib/auth";
+import { canonicalRole, useAuth } from "@/lib/auth";
 import { LOKET_VERSION_LABEL, PLATFORM_NAME } from "@/lib/brand";
-import { LOKET_HOME, MONITOR_HOME } from "@/lib/access";
+import { homeForRole, LOKET_HOME, MONITOR_HOME } from "@/lib/access";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
@@ -49,7 +49,9 @@ export function LoginPage({ variant }: { variant: "monitor" | "loket" }) {
       setError(res.error);
       return;
     }
-    window.location.hash = variant === "loket" ? LOKET_HOME : MONITOR_HOME;
+    const signed = await supabase.auth.getUser();
+    const role = canonicalRole(typeof signed.data.user?.user_metadata?.role === "string" ? signed.data.user.user_metadata.role : null);
+    window.location.hash = role === "pending" ? (variant === "loket" ? LOKET_HOME : MONITOR_HOME) : homeForRole(role);
   };
 
   const onRecover = async (e: React.FormEvent) => {
@@ -109,7 +111,7 @@ export function LoginPage({ variant }: { variant: "monitor" | "loket" }) {
             {mode === "login" ? (
               <>
                 <h2 className="text-lg font-black text-neutral-950">Masuk Loket</h2>
-                <p className="mt-1 text-sm text-slate-500">Username dan password meja loket.</p>
+                <p className="mt-1 text-sm text-slate-500">Username dan password meja loket. Tautan ini hanya untuk akun Loket.</p>
                 <form onSubmit={onSubmit} className="mt-6 space-y-4">
                   <Field label="Username">
                     <div className="relative">
@@ -169,7 +171,7 @@ export function LoginPage({ variant }: { variant: "monitor" | "loket" }) {
             <>
               <div className="mb-6 text-center">
                 <h2 className="text-xl font-bold text-slate-900">Dashboard</h2>
-                <p className="mt-1 text-sm text-slate-500">Monitoring & Management System</p>
+                <p className="mt-1 text-sm text-slate-500">Khusus Super Admin, Mitra, dan Sub Mitra.</p>
               </div>
               <form onSubmit={onSubmit} className="space-y-4">
                 <Field label="Username">

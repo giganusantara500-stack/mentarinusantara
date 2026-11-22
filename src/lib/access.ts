@@ -2,8 +2,13 @@ import { canonicalRole } from "@/lib/auth";
 
 export const MONITOR_HOME = "/dashboard";
 export const MONITOR_LOGIN = "/login";
+export const MONITOR_DOOR = "/masuk-dashboard";
 export const LOKET_HOME = "/meja";
 export const LOKET_LOGIN = "/loket-login";
+export const LOKET_DOOR = "/masuk-loket";
+
+const LOKET_DOORS = new Set([LOKET_LOGIN, LOKET_DOOR]);
+const MONITOR_DOORS = new Set([MONITOR_LOGIN, MONITOR_DOOR]);
 
 const LOKET = new Set([
   "/meja",
@@ -27,13 +32,31 @@ const MITRA = new Set([...SUBMITRA, "/submitra", "/runtext"]);
 
 const SUPER = new Set([...MITRA, "/mitra", "/harga", "/pembagian", "/produk", "/beli", "/setup-superadmin"]);
 
+export function routeBase(path: string) {
+  const base = (path.split("?")[0] || "/").replace(/\/+$/, "") || "/";
+  return base.startsWith("/") ? base : `/${base}`;
+}
+
 export function isLoketArea(path: string) {
-  const base = path.split("?")[0] || "/";
-  return base === LOKET_LOGIN || base === LOKET_HOME || base.startsWith(`${LOKET_HOME}/`);
+  const base = routeBase(path);
+  return LOKET_DOORS.has(base) || base === LOKET_HOME || base.startsWith(`${LOKET_HOME}/`);
+}
+
+export function isMonitorDoor(path: string) {
+  return MONITOR_DOORS.has(routeBase(path));
 }
 
 export function homeForRole(role: string | null | undefined) {
   return canonicalRole(role) === "loket" ? LOKET_HOME : MONITOR_HOME;
+}
+
+export function resolvePath(role: string | null | undefined, path: string) {
+  const base = routeBase(path);
+  const home = homeForRole(role);
+  if (LOKET_DOORS.has(base) || MONITOR_DOORS.has(base)) return home;
+  if (canonicalRole(role) === "loket") return pathAllowed(role, base) ? base : LOKET_HOME;
+  if (isLoketArea(base) || !pathAllowed(role, base)) return home;
+  return base;
 }
 
 export function pathAllowed(role: string | null | undefined, path: string) {

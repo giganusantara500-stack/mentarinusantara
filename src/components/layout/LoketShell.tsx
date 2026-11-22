@@ -62,7 +62,7 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
 
   if (!profile) return null;
   const role = dbRoleToAppRole(profile.role);
-  if (role === "pending") return null;
+  if (role !== "loket") return null;
   return (
     <LoketRefreshContext.Provider value={{ tick, requestRefresh, loketCode, openDeposit: () => setDepositOpen(true) }}>
       <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-white">

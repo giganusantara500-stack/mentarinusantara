@@ -1,4 +1,5 @@
 import { canonicalRole } from "@/lib/auth";
+import { isLoketArea } from "@/lib/access";
 
 const BROWSER_MANIFEST = "/manifest.webmanifest";
 const LOKET_MANIFEST = "/loket.webmanifest";
@@ -27,8 +28,7 @@ function setManifest(href: string) {
 
 function loketEntryRequested() {
   if (new URLSearchParams(window.location.search).get("app") === "loket") return true;
-  const hash = window.location.hash.replace(/^#/, "").split("?")[0];
-  return hash === "/loket-login" || hash === "/meja" || hash.startsWith("/meja/");
+  return isLoketArea(window.location.hash.replace(/^#/, ""));
 }
 
 export function isLoketWindow() {
