@@ -673,7 +673,7 @@ interface CollectiveRow {
   collector?: string;
   status?: "aktif" | "nonaktif";
   members?: CollectiveMember[];
-  bills?: { number: string; status: string }[];
+  bills?: { number: string; status: string; product?: string }[];
   createdAt?: string;
 }
 
@@ -688,7 +688,7 @@ export function CollectiveAdminPage() {
   const [editor, setEditor] = useState<CollectiveRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ ownerId: "", name: "", status: "aktif" });
-  const [memberEdit, setMemberEdit] = useState<(CollectiveMember & { original: string }) | null>(null);
+  const [memberEdit, setMemberEdit] = useState<(CollectiveMember & { original: string; originalProduct: string }) | null>(null);
   const [error, setError] = useState("");
   const showMitra = profile?.role === "super_admin";
   const directory = profilesWithSelf(profiles, profile);
@@ -753,7 +753,7 @@ export function CollectiveAdminPage() {
 
   const saveMember = async () => {
     if (!detail || !memberEdit) return;
-    const members = (detail.members ?? []).map((item) => item.number === memberEdit.original ? { number: memberEdit.number, name: memberEdit.name, product: memberEdit.product, createdAt: item.createdAt } : item);
+    const members = (detail.members ?? []).map((item) => item.number === memberEdit.original && (item.product || "") === memberEdit.originalProduct ? { number: memberEdit.number, name: memberEdit.name, product: memberEdit.product, createdAt: item.createdAt } : item);
     const response = await fetch("/api/kolektif", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: detail.id, members }) });
     if (!response.ok) { setError("Pelanggan gagal diperbarui."); return; }
     setMemberEdit(null);
@@ -762,7 +762,7 @@ export function CollectiveAdminPage() {
 
   const removeMember = async (member: CollectiveMember) => {
     if (!detail) return;
-    const members = (detail.members ?? []).filter((item) => item.number !== member.number);
+    const members = (detail.members ?? []).filter((item) => !(item.number === member.number && (item.product || "") === (member.product || "")));
     await fetch("/api/kolektif", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: detail.id, members }) });
     await load();
   };
@@ -884,9 +884,9 @@ export function CollectiveAdminPage() {
                 <tbody>
                   {(detail.members ?? []).length === 0 && <tr><td colSpan={7} className="px-3 py-6 text-center text-slate-500">Belum ada pelanggan.</td></tr>}
                   {(detail.members ?? []).map((member, index) => {
-                    const bill = (detail.bills ?? []).find((item) => item.number === member.number);
+                    const bill = (detail.bills ?? []).find((item) => item.number === member.number && (!item.product || !member.product || item.product.toUpperCase() === member.product.toUpperCase()));
                     return (
-                      <tr key={member.number} className="border-t border-slate-100">
+                      <tr key={`${member.product || ""}:${member.number}`} className="border-t border-slate-100">
                         <td className="px-2 py-2">{index + 1}</td>
                         <td className="px-2 py-2 font-mono">{member.number}</td>
                         <td className="px-2 py-2">{member.product || "—"}</td>
@@ -895,7 +895,7 @@ export function CollectiveAdminPage() {
                         <td className="px-3 py-2 text-slate-500">{formatWaktu(member.createdAt || detail.createdAt || "")}</td>
                         <td className="px-3 py-2">
                           <div className="flex gap-2">
-                            <button onClick={() => setMemberEdit({ ...member, original: member.number })} className="text-xs font-semibold text-amber-700">Edit</button>
+                            <button onClick={() => setMemberEdit({ ...member, original: member.number, originalProduct: member.product || "" })} className="text-xs font-semibold text-amber-700">Edit</button>
                             <button onClick={() => removeMember(member)} className="text-xs font-semibold text-rose-600">Hapus</button>
                           </div>
                         </td>

@@ -12,6 +12,7 @@ import { PRINT_FORMATS, PRINT_KINDS, PRINTER_PRESETS, loadPrinterSettings, print
 export { LoketTransaksiPage } from "./TransaksiPane";
 
 const CATEGORIES = ["PLN", "Telkom", "PDAM", "BPJS", "Finance", "Gas", "Pajak PBB", "Internet & TV", "Topup", "Telco"];
+const KOLEKTIF_CATEGORIES = ["PLN", "PDAM", "GAS", "TELKOM", "BPJS", "TELCO", "FINANCE", "INTERNET & TV", "PAJAK PBB", "CUSTID"] as const;
 const PRODUCTS: Record<string, string[]> = {
   PLN: ["Postpaid", "Nontaglis", "Prepaid 20", "Prepaid 50", "Prepaid 100", "Prepaid 200", "Prepaid 500", "Prepaid 1000", "Prepaid 2000", "Prepaid 3000", "Prepaid 5000"],
   Telkom: ["Telkom PSTN", "Speedy/Indihome", "IndiHome", "Telepon"],
@@ -257,14 +258,50 @@ function isCustomerId(value: string) {
   return /\d/.test(text);
 }
 
+function canonicalCategory(product?: string): string {
+  const raw = (product || "").trim();
+  if (!raw) return "CUSTID";
+  const key = raw.toUpperCase().replace(/\s+/g, " ");
+  if ((KOLEKTIF_CATEGORIES as readonly string[]).includes(key)) return key;
+  for (const [category, names] of Object.entries(PRODUCTS)) {
+    const canon = category.toUpperCase().replace(/\s+/g, " ");
+    if (!(KOLEKTIF_CATEGORIES as readonly string[]).includes(canon)) continue;
+    if (key === canon || names.some((name) => name.toUpperCase() === key)) return canon;
+  }
+  const prefixed = KOLEKTIF_CATEGORIES.find((item) => key === item || key.startsWith(`${item} `) || key.startsWith(`${item}-`));
+  if (prefixed) return prefixed;
+  const token = key.split(" ")[0];
+  if (token !== key) {
+    const fromToken = canonicalCategory(token);
+    if ((KOLEKTIF_CATEGORIES as readonly string[]).includes(fromToken)) return fromToken;
+  }
+  return key;
+}
+
+function sameCategory(product: string | undefined, category: string) {
+  return canonicalCategory(product) === canonicalCategory(category);
+}
+
+function memberKey(member: { number: string; product?: string }) {
+  return `${canonicalCategory(member.product)}:${member.number}`;
+}
+
+function findBill(bills: GroupBill[], member: Member, peers: Member[]) {
+  const exact = bills.find((bill) => bill.number === member.number && sameCategory(bill.product, member.product || "") && Boolean((bill.product || "").trim() || (member.product || "").trim()));
+  if (exact) return exact;
+  const siblings = peers.filter((item) => item.number === member.number);
+  if (siblings.length !== 1) return undefined;
+  return bills.find((bill) => bill.number === member.number && !(bill.product || "").trim());
+}
+
 function buildBills(group: Group): GroupBill[] {
   return group.members.map((member) => {
-    const existing = group.bills.find((bill) => bill.number === member.number);
+    const existing = findBill(group.bills, member, group.members);
     if (existing && existing.period && existing.period !== "Memuat") {
       return { ...existing, name: member.name || existing.name, product: member.product || existing.product };
     }
-    const product = member.product || "PDAM";
-    const bill = inquire(product, member.number, product, 0);
+    const product = member.product || "CUSTID";
+    const bill = inquire(canonicalCategory(product), member.number, product, 0);
     return bill
       ? { number: member.number, name: member.name, product, period: bill.period, total: bill.total, status: "BL LNS" as const }
       : { number: member.number, name: member.name, product, period: "-", total: 0, status: "LAINNYA" as const };
@@ -278,9 +315,19 @@ function withBills(group: Group) {
 function mergeMembers(current: Member[], incoming: Member[]) {
   const merged = current.map((member) => ({ ...member }));
   incoming.forEach((member) => {
-    const index = merged.findIndex((item) => item.number === member.number);
-    if (index >= 0) merged[index] = { ...merged[index], name: member.name || merged[index].name, product: member.product || merged[index].product };
-    else merged.push(member);
+    const index = merged.findIndex((item) => item.number === member.number && sameCategory(item.product, member.product || ""));
+    if (index >= 0) {
+      merged[index] = { ...merged[index], name: member.name || merged[index].name, product: member.product || merged[index].product };
+      return;
+    }
+    const blank = canonicalCategory(member.product) !== "CUSTID"
+      ? merged.findIndex((item) => item.number === member.number && !(item.product || "").trim())
+      : -1;
+    if (blank >= 0) {
+      merged[blank] = { ...merged[blank], name: member.name || merged[blank].name, product: member.product };
+      return;
+    }
+    merged.push(member);
   });
   return merged;
 }
@@ -360,6 +407,7 @@ export function LoketKolektifPage() {
   const [historyPage, setHistoryPage] = useState(1);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [filter, setFilter] = useState<"semua" | "BL LNS" | "LUNAS" | "LAINNYA">("semua");
+  const [productFilter, setProductFilter] = useState<string>("semua");
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [sessionOmit, setSessionOmit] = useState<string[]>([]);
@@ -445,9 +493,11 @@ export function LoketKolektifPage() {
   useEffect(() => { void load(); }, [tick, userId]); // eslint-disable-line react-hooks/exhaustive-deps
   const active = groups.find((group) => group.id === activeId) ?? null;
   const activeLabel = active?.collector || active?.name || "";
+  const modalMembers = (active?.members ?? []).filter((member) => sameCategory(member.product, biller));
   const omitted = new Set(sessionOmit);
-  const tableRows: GroupBill[] = (active?.members ?? []).filter((member) => !omitted.has(member.number)).map((member) => {
-    const bill = active?.bills.find((row) => row.number === member.number);
+  const scopedMembers = (active?.members ?? []).filter((member) => productFilter === "semua" || sameCategory(member.product, productFilter));
+  const tableRows: GroupBill[] = scopedMembers.filter((member) => !omitted.has(memberKey(member))).map((member) => {
+    const bill = active ? findBill(active.bills, member, active.members) : undefined;
     if (bill) return { ...bill, name: member.name || bill.name, product: member.product || bill.product };
     return { number: member.number, name: member.name, product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" };
   });
@@ -464,7 +514,7 @@ export function LoketKolektifPage() {
     if (!q) return true;
     return row.number.toLowerCase().includes(q) || row.name.toLowerCase().includes(q);
   });
-  const payable = (picked.length ? bills.filter((row) => picked.includes(row.number)) : bills)
+  const payable = (picked.length ? bills.filter((row) => picked.includes(memberKey(row))) : bills)
     .filter((row) => row.status !== "LUNAS" && row.total >= 1000);
   const listTotal = bills.filter((row) => row.status !== "LUNAS").reduce((sum, row) => sum + row.total, 0);
   const nextBatch = payable.slice(0, 10);
@@ -552,22 +602,26 @@ export function LoketKolektifPage() {
     }
     const current = groupsRef.current;
     const target = current.find((group) => group.id === activeIdRef.current) ?? null;
+    const categoryLabel = canonicalCategory(incoming[0]?.product || biller);
     if (target) {
       const members = mergeMembers(target.members, incoming);
       const next = current.map((group) => group.id === target.id ? { ...group, members } : group);
-      commitLocal(next, `${incoming.length} pelanggan masuk ke daftar.`, target.id);
+      commitLocal(next, `${incoming.length} pelanggan ${categoryLabel} masuk ke daftar.`, target.id);
       return;
     }
     const name = collectorName.trim() || seedName || "Kolektor";
     const row: Group = { id: crypto.randomUUID(), name, collector: name, members: mergeMembers([], incoming), bills: [], history: [] };
     setCollectorName("");
-    commitLocal([row, ...current], `${incoming.length} pelanggan masuk ke ${name}.`, row.id);
+    commitLocal([row, ...current], `${incoming.length} pelanggan ${categoryLabel} masuk ke ${name}.`, row.id);
   };
 
   const importFile = async (file: File) => {
+    const category = biller;
+    if (manageOpen) setProductFilter(category);
+    const stamp = (rows: Member[]) => rows.map((row) => ({ ...row, product: category }));
     const lower = file.name.toLowerCase();
     const seed = file.name.replace(/\.[^.]+$/, "") || "Kolektor";
-    const fromText = async () => membersFromTable(rowsFromText(await file.text()), biller);
+    const fromText = async () => stamp(membersFromTable(rowsFromText(await file.text()), category));
     if (lower.endsWith(".txt") || lower.endsWith(".csv")) {
       const parsed = await fromText();
       if (parsed.length > 0 || lower.endsWith(".txt")) {
@@ -578,7 +632,7 @@ export function LoketKolektifPage() {
     let members: Member[] = [];
     try {
       const book = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      members = membersFromTable(sheetRows(book), biller);
+      members = stamp(membersFromTable(sheetRows(book), category));
     } catch {
       members = [];
     }
@@ -601,12 +655,17 @@ export function LoketKolektifPage() {
         const response = await fetch("/api/loket-sales", {
           method: "POST",
           headers: await authHeader(),
-          body: JSON.stringify({ channel: "simulation", clientRef: `kolektif:${active.id}:${row.number}:${row.period}`, category: "Kolektif", product: `${row.product || "Kolektif"} ${active.name}`, customerNumber: row.number, customerName: row.name, amount: row.total, period: row.period, loketName }),
+          body: JSON.stringify({ channel: "simulation", clientRef: `kolektif:${active.id}:${canonicalCategory(row.product)}:${row.number}:${row.period}`, category: "Kolektif", product: `${canonicalCategory(row.product)} ${active.name}`, customerNumber: row.number, customerName: row.name, amount: row.total, period: row.period, loketName }),
         });
         const parsed = await readApi(response);
         if (!parsed.ok) { stopped = parsed.body.error || "Batch berhenti."; break; }
-        const target = next.find((item) => item.number === row.number);
-        if (target) target.status = "LUNAS";
+        const numbered = next.filter((item) => item.number === row.number);
+        const target = numbered.find((item) => sameCategory(item.product, row.product || ""))
+          ?? (numbered.length === 1 && !(numbered[0].product || "").trim() ? numbered[0] : undefined);
+        if (target) {
+          target.status = "LUNAS";
+          if (!(target.product || "").trim()) target.product = row.product || "";
+        }
         paidCount += 1;
         paidTotal += row.total;
       }
@@ -661,7 +720,8 @@ export function LoketKolektifPage() {
     const members = mergeMembers(group.members, [{ number, name, product: biller }]);
     const next = groupsRef.current.map((item) => item.id === group.id ? { ...item, members } : item);
     setCustNo("");
-    commitLocal(next, `${number} masuk ke ${group.collector || group.name}.`, group.id);
+    setProductFilter(biller);
+    commitLocal(next, `${number} masuk ke ${group.collector || group.name} sebagai ${biller}.`, group.id);
     requestAnimationFrame(() => custNoRef.current?.focus());
   };
 
@@ -673,33 +733,35 @@ export function LoketKolektifPage() {
   };
 
   const exportCustomers = () => {
-    if (!active || active.members.length === 0) {
-      tell("Belum ada pelanggan untuk diekspor.");
+    const rows = (active?.members ?? []).filter((member) => sameCategory(member.product, biller));
+    if (!active || rows.length === 0) {
+      tell(active ? `Belum ada data pelanggan ${biller} untuk kolektor ini.` : "Pilih kolektor terlebih dahulu.");
       return;
     }
     const sheet = XLSX.utils.aoa_to_sheet([
       ["ID Pelanggan", "Nama Pelanggan", "Produk"],
-      ...active.members.map((member) => [member.number, member.name, member.product || ""]),
+      ...rows.map((member) => [member.number, member.name, canonicalCategory(member.product)]),
     ]);
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, "Pelanggan");
     const safeName = (active.collector || active.name || "kolektif").replace(/[\\/:*?"<>|]/g, "-");
-    XLSX.writeFile(book, `${safeName}.xlsx`);
+    XLSX.writeFile(book, `${safeName}-${biller}.xlsx`);
   };
 
-  const removeCustomer = (number: string) => {
+  const removeCustomer = (number: string, product?: string) => {
     const group = groupsRef.current.find((item) => item.id === activeIdRef.current);
     if (!group) return;
-    const members = group.members.filter((member) => member.number !== number);
-    const next = groupsRef.current.map((item) => item.id === group.id ? { ...item, members, bills: item.bills.filter((bill) => bill.number !== number) } : item);
-    setPicked((rows) => rows.filter((item) => item !== number));
-    setSessionOmit((rows) => rows.filter((item) => item !== number));
+    const key = memberKey({ number, product });
+    const members = group.members.filter((member) => memberKey(member) !== key);
+    const next = groupsRef.current.map((item) => item.id === group.id ? { ...item, members, bills: item.bills.filter((bill) => memberKey(bill) !== key) } : item);
+    setPicked((rows) => rows.filter((item) => item !== key));
+    setSessionOmit((rows) => rows.filter((item) => item !== key));
     commitLocal(next, "Pelanggan dihapus.", group.id);
   };
 
-  const releaseCustomer = (number: string) => {
-    setSessionOmit((rows) => rows.includes(number) ? rows : [...rows, number]);
-    setPicked((rows) => rows.filter((item) => item !== number));
+  const releaseCustomer = (key: string) => {
+    setSessionOmit((rows) => rows.includes(key) ? rows : [...rows, key]);
+    setPicked((rows) => rows.filter((item) => item !== key));
     tell("Pelanggan dikeluarkan dari daftar transaksi ini.", "ok");
   };
 
@@ -716,19 +778,20 @@ export function LoketKolektifPage() {
 
   const historyRows = useMemo(() => {
     if (!active) return [];
-    const members = new Set(active.members.map((member) => member.number));
+    const members = new Set(active.members.filter((member) => productFilter === "semua" || sameCategory(member.product, productFilter)).map((member) => member.number));
     const collector = (active.collector || active.name || "").toLowerCase();
     const needle = historyQuery.trim().toLowerCase();
     return historySales.filter((sale) => {
       if (sale.category !== "Kolektif") return false;
-      const inGroup = members.has(sale.customerNumber) || (collector.length > 0 && sale.product.toLowerCase().includes(collector));
+      const inGroup = members.has(sale.customerNumber) || (productFilter === "semua" && collector.length > 0 && sale.product.toLowerCase().includes(collector));
       if (!inGroup) return false;
+      if (productFilter !== "semua" && canonicalCategory(sale.product) !== canonicalCategory(productFilter)) return false;
       const date = new Date(sale.createdAt);
       if (date.getMonth() + 1 !== Number(historyApplied.month) || date.getFullYear() !== Number(historyApplied.year)) return false;
       if (!needle) return true;
       return sale.customerNumber.toLowerCase().includes(needle) || sale.customerName.toLowerCase().includes(needle);
     });
-  }, [active, historySales, historyApplied, historyQuery]);
+  }, [active, historySales, historyApplied, historyQuery, productFilter]);
   const historyPageCount = Math.max(1, Math.ceil(historyRows.length / 8));
   const historySlice = historyRows.slice((historyPage - 1) * 8, historyPage * 8);
   const historySelected = historyRows.filter((sale) => historyPicked.includes(sale.id));
@@ -759,12 +822,15 @@ export function LoketKolektifPage() {
         <div className="mb-2 shrink-0 px-2 pt-2 text-xs font-bold uppercase text-slate-500">Kolektor</div>
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2">
           {groups.length === 0 && <p className="text-xs text-slate-400">Belum ada kolektor.</p>}
-          {groups.map((group) => (
+          {groups.map((group) => {
+            const count = productFilter === "semua" ? group.members.length : group.members.filter((member) => sameCategory(member.product, productFilter)).length;
+            return (
             <button key={group.id} onClick={() => { setActiveId(group.id); setPicked([]); setSessionOmit([]); }} className={`block w-full rounded-lg border px-3 py-2 text-left text-sm ${activeId === group.id ? "border-amber-600 bg-amber-500 font-semibold text-white shadow-sm ring-2 ring-amber-300" : "border-transparent text-slate-700 hover:bg-slate-50"}`}>
               {group.collector || group.name}
-              <div className={`text-xs ${activeId === group.id ? "text-amber-100" : "text-slate-400"}`}>{group.members.length} pelanggan</div>
+              <div className={`text-xs ${activeId === group.id ? "text-amber-100" : "text-slate-400"}`}>{count} pelanggan{productFilter === "semua" ? "" : ` ${productFilter}`}</div>
             </button>
-          ))}
+            );
+          })}
         </div>
         <div className="mt-2 flex shrink-0 items-center px-2 py-2.5">
           <button onClick={() => setManageOpen(true)} className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700">Kelola Kolektif</button>
@@ -772,7 +838,12 @@ export function LoketKolektifPage() {
       </aside>
       <section className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-md border border-slate-300 bg-white">
         <div className="shrink-0 border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-900">
-          {activeLabel ? `Kelola Pelanggan - ${activeLabel}` : "Kelola Pelanggan"}
+          {activeLabel ? `Kelola Pelanggan - ${activeLabel}${productFilter === "semua" ? "" : ` · ${productFilter}`}` : "Kelola Pelanggan"}
+        </div>
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-100 px-3 py-2">
+          {(["semua", ...KOLEKTIF_CATEGORIES] as const).map((key) => (
+            <button key={key} type="button" onClick={() => { setProductFilter(key); if (key !== "semua") setBiller(key); setPicked([]); }} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${productFilter === key ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>{key === "semua" ? "Semua" : key}</button>
+          ))}
         </div>
         <div className="flex shrink-0 flex-wrap gap-2 border-b border-slate-100 p-3">
           <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) importFile(file); event.target.value = ""; }} />
@@ -807,23 +878,23 @@ export function LoketKolektifPage() {
             </colgroup>
             <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
               <tr>
-                <th className="px-2 py-2"><input type="checkbox" checked={visible.length > 0 && visible.every((row) => picked.includes(row.number))} onChange={(event) => setPicked(event.target.checked ? visible.map((row) => row.number) : [])} /></th>
+                <th className="px-2 py-2"><input type="checkbox" checked={visible.length > 0 && visible.every((row) => picked.includes(memberKey(row)))} onChange={(event) => setPicked(event.target.checked ? visible.map((row) => memberKey(row)) : [])} /></th>
                 {["No", "ID Pelanggan", "Nama Pelanggan", "Produk", "Periode", "Total Bayar", "Status", ""].map((head) => <th key={head || "aksi"} className="px-2 py-2 font-semibold">{head}</th>)}
               </tr>
             </thead>
             <tbody>
-              {visible.length === 0 && <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">{active ? "Belum ada pelanggan pada kolektor ini." : "Pilih kolektor di panel kiri."}</td></tr>}
+              {visible.length === 0 && <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">{!active ? "Pilih kolektor di panel kiri." : bills.length === 0 ? (productFilter === "semua" ? "Belum ada pelanggan pada kolektor ini." : `Belum ada data pelanggan ${productFilter} untuk kolektor ini.`) : "Tidak ada pelanggan pada filter ini."}</td></tr>}
               {visible.map((row, index) => (
-                <tr key={row.number} className="border-t border-slate-100 text-slate-700">
-                  <td className="px-3 py-2"><input type="checkbox" checked={picked.includes(row.number)} onChange={(event) => setPicked((rows) => event.target.checked ? [...rows, row.number] : rows.filter((item) => item !== row.number))} /></td>
+                <tr key={memberKey(row)} className="border-t border-slate-100 text-slate-700">
+                  <td className="px-3 py-2"><input type="checkbox" checked={picked.includes(memberKey(row))} onChange={(event) => setPicked((rows) => event.target.checked ? [...rows, memberKey(row)] : rows.filter((item) => item !== memberKey(row)))} /></td>
                   <td className="px-3 py-2">{index + 1}</td>
                   <td className="px-3 py-2 font-mono">{row.number}</td>
                   <td className="px-2 py-2 break-words">{row.name}</td>
-                  <td className="px-3 py-2">{row.product || "-"}</td>
+                  <td className="px-3 py-2">{canonicalCategory(row.product)}</td>
                   <td className="px-3 py-2">{row.period}</td>
                   <td className="px-3 py-2 font-semibold">{formatRupiah(row.total)}</td>
                   <td className="px-3 py-2">{statusText(row.status)}</td>
-                  <td className="px-3 py-2 text-right"><button onClick={() => releaseCustomer(row.number)} className="text-xs font-semibold text-rose-600">Keluarkan</button></td>
+                  <td className="px-3 py-2 text-right"><button onClick={() => releaseCustomer(memberKey(row))} className="text-xs font-semibold text-rose-600">Keluarkan</button></td>
                 </tr>
               ))}
             </tbody>
@@ -950,8 +1021,8 @@ export function LoketKolektifPage() {
             <div className="flex min-h-0 flex-col">
               <h2 className="font-semibold text-slate-900">{activeLabel ? `Kelola Pelanggan - ${activeLabel}` : "Kelola Pelanggan"}</h2>
               <div className="mt-3 grid gap-2">
-                <Select value={biller} onChange={(event) => setBiller(event.target.value)}>
-                  {["GAS", "PLN", "BPJS", "PDAM", "TELCO", "TELKOM", "FINANCE", "INTERNET & TV", "PAJAK PBB", "CUSTID"].map((item) => <option key={item}>{item}</option>)}
+                <Select value={biller} onChange={(event) => { const next = event.target.value; setBiller(next); setProductFilter(next); setPicked([]); }}>
+                  {KOLEKTIF_CATEGORIES.map((item) => <option key={item}>{item}</option>)}
                 </Select>
                 <Input ref={custNoRef} value={custNo} onChange={(event) => setCustNo(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomer(); } }} placeholder="Nomor pelanggan, lalu Enter" />
                 <div className="flex flex-wrap gap-2">
@@ -960,11 +1031,13 @@ export function LoketKolektifPage() {
                   <button type="button" onClick={exportCustomers} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Ekspor Excel</button>
                 </div>
               </div>
-              <div className="mt-3 max-h-80 min-h-48 divide-y overflow-auto text-sm">
-                {(active?.members ?? []).map((member) => (
-                  <div key={member.number} className="flex items-center justify-between py-1.5">
-                    <span>{member.product || "CUSTID"} · {member.number} · {member.name}</span>
-                    <button type="button" onClick={() => removeCustomer(member.number)} className="text-xs text-rose-600">Hapus</button>
+              <div className="mt-3 max-h-80 min-h-48 overflow-auto text-sm">
+                {!active && <p className="py-6 text-center text-sm text-slate-400">Pilih kolektor terlebih dahulu.</p>}
+                {active && modalMembers.length === 0 && <p className="py-6 text-center text-sm text-slate-400">Belum ada data pelanggan {biller} untuk kolektor ini.</p>}
+                {modalMembers.map((member) => (
+                  <div key={memberKey(member)} className="flex items-center justify-between border-b border-slate-100 py-1.5">
+                    <span>{canonicalCategory(member.product)} · {member.number} · {member.name}</span>
+                    <button type="button" onClick={() => removeCustomer(member.number, member.product)} className="text-xs text-rose-600">Hapus</button>
                   </div>
                 ))}
               </div>

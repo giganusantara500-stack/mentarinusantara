@@ -203,11 +203,13 @@ function mapMembers(body: Record<string, unknown>, previous: Member[] = []) {
   if (!source) return null;
   return source.map((item) => {
     const number = String((item as Member)?.number ?? "").trim();
-    const current = previous.find((member) => member.number === number);
+    const product = String((item as Member)?.product ?? "").trim();
+    const current = previous.find((member) => member.number === number && String(member.product ?? "").trim().toUpperCase() === product.toUpperCase())
+      ?? previous.find((member) => member.number === number && !String(member.product ?? "").trim());
     return {
       number,
       name: String((item as Member)?.name ?? "").trim() || "Pelanggan",
-      product: String((item as Member)?.product ?? "").trim(),
+      product,
       createdAt: current?.createdAt || new Date().toISOString(),
     };
   }).filter((item) => item.number);
