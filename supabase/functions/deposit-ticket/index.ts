@@ -3,11 +3,15 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Client-Info, Apikey",
-};
+function corsHeaders(req?: Request) {
+  const requested = req?.headers.get("Access-Control-Request-Headers");
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": requested || "authorization, apikey, content-type, x-client-info, x-region, prefer",
+    "Access-Control-Max-Age": "86400",
+  };
+}
 
 const DEPOSIT_ACCOUNT = {
   bank: "BRI",
@@ -15,10 +19,10 @@ const DEPOSIT_ACCOUNT = {
   holder: "Aris Purwanto",
 };
 
-function json(obj: unknown, status = 200) {
+function json(obj: unknown, status = 200, req?: Request) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...corsHeaders(req), "Content-Type": "application/json" },
   });
 }
 
@@ -54,29 +58,31 @@ async function ledger(
 }
 
 Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders });
-  if (req.method !== "POST") return json({ error: "Metode tidak didukung." }, 405);
+  if (req.method === "OPTIONS") return new Response(null, { status: 200, headers: corsHeaders(req) });
+  if (req.method !== "POST") return json({ error: "Metode tidak didukung." }, 405, req);
+  try {
+  const respond = (obj: unknown, status = 200) => json(obj, status, req);
 
   const url = Deno.env.get("SUPABASE_URL") ?? "";
   const anon = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
   const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-  if (!url || !anon || !service) return json({ error: "Konfigurasi Supabase pada fungsi tiket belum lengkap." }, 500);
+  if (!url || !anon || !service) return respond({ error: "Konfigurasi Supabase pada fungsi tiket belum lengkap." }, 500);
 
   const authorization = req.headers.get("Authorization") ?? "";
   const userClient = createClient(url, anon, { global: { headers: { Authorization: authorization } } });
   const userResult = await userClient.auth.getUser();
   const user = userResult.data.user;
-  if (userResult.error || !user) return json({ error: "Sesi tidak valid. Silakan login ulang." }, 401);
+  if (userResult.error || !user) return respond({ error: "Sesi tidak valid. Silakan login ulang." }, 401);
 
   const admin = createClient(url, service);
   const profileResult = await admin.from("profiles").select("*").eq("id", user.id).maybeSingle();
-  if (profileResult.error) return json({ error: `Profil tidak terbaca: ${profileResult.error.message}` }, 500);
+  if (profileResult.error) return respond({ error: `Profil tidak terbaca: ${profileResult.error.message}` }, 500);
   const profile = (profileResult.data ?? null) as Record<string, unknown> | null;
   if (!profile || profile.is_active === false || profile.status === "suspended") {
-    return json({ error: "Akun tidak aktif, jadi tiket deposit tidak dapat dibuat." }, 403);
+    return respond({ error: "Akun tidak aktif, jadi tiket deposit tidak dapat dibuat." }, 403);
   }
   const role = canonRole(profile.role) || canonRole(user.user_metadata?.role);
-  if (!role) return json({ error: "Peran akun tidak dikenali, jadi tiket deposit tidak dapat dibuat." }, 403);
+  if (!role) return respond({ error: "Peran akun tidak dikenali, jadi tiket deposit tidak dapat dibuat." }, 403);
 
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const action = clean(body.action) || "create";
@@ -88,8 +94,8 @@ Deno.serve(async (req) => {
       ledger(admin, "balance", user.id, { userId: user.id }),
     ]);
     const failure = [tickets, mutations, balance].find((item) => item.status >= 400);
-    if (failure) return json(failure.body, failure.status);
-    return json({
+    if (failure) return respond(failure.body, failure.status);
+    return respond({
       tickets: tickets.body.tickets ?? [],
       mutations: mutations.body.mutations ?? [],
       balance: balance.body.balance ?? 0,
@@ -99,12 +105,12 @@ Deno.serve(async (req) => {
 
   if (action === "create") {
     if (!["loket", "mitra", "submitra"].includes(role)) {
-      return json({ error: "Hanya Mitra, Sub Mitra, atau Loket yang dapat membuat tiket deposit." }, 403);
+      return respond({ error: "Hanya Mitra, Sub Mitra, atau Loket yang dapat membuat tiket deposit." }, 403);
     }
     const amount = Number(body.amount);
-    if (!Number.isFinite(amount) || amount < 10000) return json({ error: "Nominal deposit minimal Rp10.000." }, 400);
+    if (!Number.isFinite(amount) || amount < 10000) return respond({ error: "Nominal deposit minimal Rp10.000." }, 400);
     const bank = clean(body.bank) || DEPOSIT_ACCOUNT.bank;
-    if (bank !== DEPOSIT_ACCOUNT.bank) return json({ error: "Rekening tujuan yang dipilih tidak dikenali." }, 400);
+    if (bank !== DEPOSIT_ACCOUNT.bank) return respond({ error: "Rekening tujuan yang dipilih tidak dikenali." }, 400);
     const parentId = clean(profile.parent_id);
     const parent = parentId
       ? await admin.from("profiles").select("role,full_name,username").eq("id", parentId).maybeSingle()
@@ -122,25 +128,29 @@ Deno.serve(async (req) => {
       uplineRole: canonRole(parentRow?.role) || "super_admin",
     });
     if (created.status >= 400 || !created.body.ticket) {
-      return json({ error: created.body.error || "Database tidak mengembalikan tiket deposit." }, created.status || 500);
+      return respond({ error: created.body.error || "Database tidak mengembalikan tiket deposit." }, created.status || 500);
     }
-    return json({ ticket: created.body.ticket });
+    return respond({ ticket: created.body.ticket });
   }
 
   if (action === "cancel" || action === "claim" || action === "decide") {
     const id = clean(body.id);
-    if (!id) return json({ error: "Tiket yang dipilih tidak ditemukan." }, 400);
+    if (!id) return respond({ error: "Tiket yang dipilih tidak ditemukan." }, 400);
     const decision = clean(body.decision);
     if (action === "decide" && !["approve", "cancel", "pending", "void"].includes(decision)) {
-      return json({ error: "Aksi keputusan tiket tidak valid." }, 400);
+      return respond({ error: "Aksi keputusan tiket tidak valid." }, 400);
     }
     const ledgerAction = action === "cancel" ? "cancel_ticket" : action === "claim" ? "claim_ticket" : "decide_ticket";
     const result = await ledger(admin, ledgerAction, user.id, action === "decide" ? { id, action: decision } : { id });
     if (result.status >= 400 || !result.body.ticket) {
-      return json({ error: result.body.error || "Status tiket gagal diperbarui." }, result.status || 500);
+      return respond({ error: result.body.error || "Status tiket gagal diperbarui." }, result.status || 500);
     }
-    return json({ ticket: result.body.ticket, balance: result.body.balance });
+    return respond({ ticket: result.body.ticket, balance: result.body.balance });
   }
 
-  return json({ error: "Aksi tiket deposit tidak dikenali." }, 404);
+  return respond({ error: "Aksi tiket deposit tidak dikenali." }, 404);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Fungsi tiket deposit gagal diproses.";
+    return json({ error: message }, 500, req);
+  }
 });

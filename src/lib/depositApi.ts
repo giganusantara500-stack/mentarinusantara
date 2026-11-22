@@ -1,4 +1,5 @@
-import { supabase } from "@/lib/supabase";
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 export interface DepositApiResult {
   ok: boolean;
@@ -20,26 +21,36 @@ export function depositErrorText(status: number, body: Record<string, unknown>, 
   return status ? `${fallback} (HTTP ${status}).` : fallback;
 }
 
-async function invokeBody(data: unknown, error: unknown) {
-  if (data && typeof data === "object") return data as Record<string, unknown>;
-  const context = (error as { context?: Response })?.context;
-  if (context && typeof context.json === "function") {
-    try {
-      const parsed = await context.json();
-      if (parsed && typeof parsed === "object") return parsed as Record<string, unknown>;
-    } catch {
-      /* respons fungsi bukan JSON */
-    }
+async function invokeDeposit(action: string, token: string, payload: Record<string, unknown>): Promise<DepositApiResult> {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return { ok: false, status: 500, body: { error: "Alamat Supabase belum dikonfigurasi di aplikasi." } };
   }
-  const message = error instanceof Error ? error.message : "";
-  return { error: message || "Fungsi tiket deposit tidak dapat dihubungi." };
-}
-
-async function invokeDeposit(action: string, payload: Record<string, unknown>) {
-  const { data, error } = await supabase.functions.invoke("deposit-ticket", { body: { ...payload, action } });
-  const body = await invokeBody(data, error);
-  const status = typeof body.status === "number" ? body.status : body.error ? 400 : 200;
-  return { ok: status < 400 && !body.error, status, body };
+  const endpoint = `${supabaseUrl.replace(/\/$/, "")}/functions/v1/deposit-ticket`;
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ ...payload, action }),
+    });
+  } catch {
+    return { ok: false, status: 0, body: { error: "Fungsi deposit-ticket belum terpasang di Supabase, jadi permintaan tidak sampai ke server." } };
+  }
+  const text = await response.text();
+  let body: Record<string, unknown> = {};
+  if (looksLikeApiJson(text)) {
+    body = JSON.parse(text) as Record<string, unknown>;
+  } else if (response.status === 404) {
+    body = { error: "Fungsi deposit-ticket belum di-deploy ke Supabase." };
+  } else {
+    body = { error: `Fungsi deposit-ticket membalas HTTP ${response.status}.` };
+  }
+  if (!body.error && !response.ok) body = { ...body, error: `Fungsi deposit-ticket menolak permintaan (HTTP ${response.status}).` };
+  return { ok: response.ok && !body.error, status: response.status, body };
 }
 
 export async function depositRequest(path: string, method: "GET" | "POST", token: string, payload: Record<string, unknown> = {}): Promise<DepositApiResult> {
@@ -62,5 +73,5 @@ export async function depositRequest(path: string, method: "GET" | "POST", token
     /* hosting statis atau koneksi putus: lanjut ke fungsi Supabase */
   }
   const decision = action === "decide" ? String(payload.action ?? "") : "";
-  return invokeDeposit(action, action === "decide" ? { ...payload, decision } : payload);
+  return invokeDeposit(action, token, action === "decide" ? { ...payload, decision } : payload);
 }
