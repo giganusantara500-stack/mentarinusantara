@@ -1,0 +1,55 @@
+{
+  "name": "mentari-nusantara-loket",
+  "productName": "Mentari Nusantara - Meja Loket",
+  "version": "1.0.0",
+  "description": "Aplikasi desktop Meja Loket Giga Mentari Nusantara",
+  "author": "Giga Mentari Nusantara",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win nsis --x64"
+  },
+  "build": {
+    "appId": "id.giganusantara.mentari.loket",
+    "productName": "Mentari Nusantara - Meja Loket",
+    "executableName": "MentariNusantara-Loket",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload-titlebar.js",
+      "titlebar.html",
+      "package.json",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "MentariNusantara-Loket-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Mentari Nusantara - Meja Loket",
+      "uninstallDisplayName": "Mentari Nusantara - Meja Loket"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  }
+}

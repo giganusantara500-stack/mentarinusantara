@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <title>Mentari Nusantara - Meja Loket</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #0f172a; color: #f8fafc; font-family: "Segoe UI", sans-serif; user-select: none; }
+    .bar { display: flex; align-items: stretch; height: 100%; -webkit-app-region: drag; }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 14px; }
+    .brand img { width: 22px; height: 22px; border-radius: 6px; -webkit-app-region: no-drag; }
+    .name { font-size: 13px; font-weight: 700; letter-spacing: 0.01em; white-space: nowrap; }
+    .role { margin-left: 8px; color: #fbbf24; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+    .spacer { flex: 1; }
+    .controls { display: flex; -webkit-app-region: no-drag; }
+    button { width: 46px; height: 100%; border: 0; background: transparent; color: #e2e8f0; display: grid; place-items: center; cursor: pointer; }
+    button:hover { background: rgba(255, 255, 255, 0.08); }
+    button.close:hover { background: #e11d48; color: white; }
+    svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 1.4; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <div class="brand">
+      <img src="./build/icon.png" alt="" />
+      <span class="name">Mentari Nusantara</span>
+      <span class="role">Meja Loket</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="controls">
+      <button id="min" type="button" aria-label="Minimize" title="Minimize">
+        <svg viewBox="0 0 12 12"><path d="M2 6h8" /></svg>
+      </button>
+      <button id="max" type="button" aria-label="Maximize" title="Maximize">
+        <svg id="icon-max" viewBox="0 0 12 12"><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="0.6" /></svg>
+        <svg id="icon-restore" viewBox="0 0 12 12" hidden><rect x="3.4" y="1.8" width="6.2" height="6.2" rx="0.5" /><path d="M2.2 4.1V9.4a.6.6 0 0 0 .6.6H8" /></svg>
+      </button>
+      <button id="close" class="close" type="button" aria-label="Close" title="Tutup">
+        <svg viewBox="0 0 12 12"><path d="M3 3l6 6M9 3L3 9" /></svg>
+      </button>
+    </div>
+  </div>
+  <script>
+    const chrome = window.loketChrome;
+    const maxButton = document.getElementById("max");
+    document.getElementById("min").addEventListener("click", () => chrome.minimize());
+    maxButton.addEventListener("click", () => chrome.toggleMaximize());
+    document.getElementById("close").addEventListener("click", () => chrome.close());
+    document.querySelector(".bar").addEventListener("dblclick", (event) => {
+      if (event.target.closest("button")) return;
+      chrome.toggleMaximize();
+    });
+    chrome.onState((maximized) => {
+      document.getElementById("icon-max").hidden = maximized;
+      document.getElementById("icon-restore").hidden = !maximized;
+      maxButton.setAttribute("aria-label", maximized ? "Restore" : "Maximize");
+      maxButton.title = maximized ? "Restore" : "Maximize";
+    });
+  </script>
+</body>
+</html>
