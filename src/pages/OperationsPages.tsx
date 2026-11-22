@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
+import { depositErrorText, depositRequest } from "@/lib/depositApi";
 import { ticketPhase } from "@/lib/depositStatus";
 import { ROLE_LABELS } from "@/lib/nav";
 import { CATEGORY_LABELS, type ProductCategory } from "@/lib/types";
@@ -204,12 +205,12 @@ export function ManageSetoranPage() {
 
   const load = async () => {
     const headers = await authHeader();
-    const response = await fetch("/api/deposits", { headers });
-    const body = await response.json();
-    if (!response.ok) { setError(body.error || "Daftar setoran gagal dimuat."); return; }
+    const session = await supabase.auth.getSession();
+    const result = await depositRequest("/api/deposits", "GET", session.data.session?.access_token ?? "");
+    if (!result.ok) { setError(depositErrorText(result.status, result.body, "Daftar setoran gagal dimuat.")); return; }
     setError("");
-    setTickets(body.tickets ?? []);
-    setMutations(body.mutations ?? []);
+    setTickets((result.body.tickets ?? []) as Ticket[]);
+    setMutations((result.body.mutations ?? []) as FundMutation[]);
     const wallet = await fetch("/api/wallet", { headers });
     if (wallet.ok) setPool(Number((await wallet.json()).balance) || 0);
   };
@@ -222,14 +223,10 @@ export function ManageSetoranPage() {
   const decide = async (id: string, action: "approve" | "cancel" | "pending" | "void") => {
     setBusyId(id);
     setError("");
-    const response = await fetch("/api/deposits/decide", {
-      method: "POST",
-      headers: await authHeader(),
-      body: JSON.stringify({ id, action }),
-    });
-    const body = await response.json();
+    const session = await supabase.auth.getSession();
+    const result = await depositRequest("/api/deposits/decide", "POST", session.data.session?.access_token ?? "", { id, action });
     setBusyId("");
-    if (!response.ok) { setError(body.error || "Keputusan gagal disimpan."); return; }
+    if (!result.ok) { setError(depositErrorText(result.status, result.body, "Keputusan gagal disimpan.")); return; }
     await load();
   };
 
@@ -272,7 +269,7 @@ export function ManageSetoranPage() {
       title="Persetujuan Deposit"
       description={globalQueue
         ? `Antrean deposit Loket, Sub Mitra, dan Mitra. Menyetujui tiket memindahkan Saldo Utama ke pemohon tepat satu kali. Saldo Utama saat ini ${formatRupiah(pool)}.`
-        : "Pantauan setoran di jaringan Anda. Persetujuan tiket rekening pusat hanya dilakukan Super Admin."}
+        : "Pantauan setoran di jaringan Anda. Persetujuan tiket rekening pusat dilakukan di pusat."}
     >
       {canRequest && (
         <Card className="mb-4">
@@ -326,7 +323,7 @@ export function ManageSetoranPage() {
                   <tr key={ticket.id} className="border-t border-slate-100">
                     <td className="px-3 py-2"><div className="font-semibold text-slate-900">{loket.name}</div><div className="text-xs text-slate-500">{loket.code ? `Kode ${loket.code}` : formatWaktu(ticket.transferAt)}</div></td>
                     <td className="px-3 py-2">{roleText(ticket.applicantRole)}</td>
-                    <td className="px-3 py-2">{ticket.uplineName || "Pusat"}<div className="text-xs text-slate-500">{roleText(ticket.uplineRole)}</div></td>
+                    <td className="px-3 py-2">{!globalQueue && (ticket.uplineRole === "super_admin" || ticket.uplineRole === "superadmin") ? "Pusat" : (ticket.uplineName || "Pusat")}<div className="text-xs text-slate-500">{roleText(ticket.uplineRole)}</div></td>
                     <td className="px-3 py-2">{ticket.bank}<div className="text-xs text-slate-500">{ticket.accountNumber}</div></td>
                     <td className="px-3 py-2 font-semibold">{formatRupiah(ticket.transferAmount ?? ticket.amount)}<div className="font-mono text-xs text-slate-500">kode {ticket.uniqueCode || "—"} · masuk {formatRupiah(ticket.baseAmount ?? ticket.amount)}</div></td>
                     <td className="px-3 py-2"><Badge tone={ticketPhase(ticket).tone}>{ticketPhase(ticket).label}</Badge></td>
@@ -340,7 +337,7 @@ export function ManageSetoranPage() {
                           {(ticket.status === "cancelled" || ticket.status === "reversed") && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "pending")}>Kembalikan</Button>}
                         </div>
                       ) : (
-                        <button type="button" className="text-xs font-semibold text-sky-700" onClick={() => setDetail(ticket)}>{routeOf(ticket) === "pusat" ? "Menunggu Super Admin" : "Detail"}</button>
+                        <button type="button" className="text-xs font-semibold text-sky-700" onClick={() => setDetail(ticket)}>{routeOf(ticket) === "pusat" ? "Menunggu keputusan" : "Detail"}</button>
                       )}
                     </td>
                   </tr>

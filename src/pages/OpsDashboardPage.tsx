@@ -7,6 +7,7 @@ import { CapaianChart } from "@/components/dashboard/CapaianChart";
 import { WelcomeGreeting } from "@/components/dashboard/WelcomeGreeting";
 import { buildThreeMonthSheets, isCountedSale } from "@/lib/sheetChart";
 import { formatRupiah } from "@/lib/format";
+import { depositRequest } from "@/lib/depositApi";
 import { ticketPhase } from "@/lib/depositStatus";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
@@ -46,14 +47,9 @@ function DepositTasks({ tickets, onChanged }: { tickets: CmsTicket[]; onChanged:
     setBusy(id + action);
     setNote("");
     const session = await supabase.auth.getSession();
-    const response = await fetch("/api/deposits/decide", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ id, action }),
-    });
-    const body = await response.json().catch(() => null);
+    const result = await depositRequest("/api/deposits/decide", "POST", session.data.session?.access_token ?? "", { id, action });
     setBusy("");
-    if (!response.ok) { setNote(body?.error || "Tiket gagal diproses."); return; }
+    if (!result.ok) { setNote(String(result.body.error || "Tiket gagal diproses.")); return; }
     setNote(action === "approve" ? "Tiket disetujui. Saldo Utama berkurang dan pindah ke pemohon satu kali." : "Tiket dibatalkan.");
     onChanged();
   };
@@ -104,12 +100,17 @@ export function OpsDashboardPage() {
     () => new Set(profiles.filter((row) => row.role === "loket").map((row) => row.id)),
     [profiles],
   );
+  const networkAccountIds = useMemo(() => {
+    const ids = new Set(profiles.map((row) => row.id));
+    if (profile?.id) ids.add(profile.id);
+    return ids;
+  }, [profiles, profile?.id]);
   const archive = loketRows;
   const chart = useMemo(() => buildThreeMonthSheets(archive.map((row) => ({ at: row.created_at, ok: isCountedSale(row.status) }))), [archive]);
   const scopedTickets = useMemo(() => {
     if (!networkView) return tickets;
-    return tickets.filter((ticket) => !!ticket.loketId && networkLoketIds.has(ticket.loketId));
-  }, [tickets, networkView, networkLoketIds]);
+    return tickets.filter((ticket) => !!ticket.loketId && networkAccountIds.has(ticket.loketId));
+  }, [tickets, networkView, networkAccountIds]);
 
   useEffect(() => {
     let stop = false;
@@ -117,10 +118,10 @@ export function OpsDashboardPage() {
       const session = await supabase.auth.getSession();
       const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
       const [depositRes, walletRes] = await Promise.all([
-        fetch("/api/deposits", { headers }),
+        depositRequest("/api/deposits", "GET", session.data.session?.access_token ?? ""),
         fetch("/api/wallet", { headers }),
       ]);
-      const body = depositRes.ok ? await depositRes.json() : null;
+      const body = depositRes.ok ? depositRes.body : null;
       const wallet = walletRes.ok ? await walletRes.json() : null;
       if (stop) return;
       setTickets((body?.tickets ?? []) as CmsTicket[]);
@@ -137,16 +138,13 @@ export function OpsDashboardPage() {
         const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
         const [walletRes, depositRes] = await Promise.all([
           fetch("/api/wallet", { headers }),
-          fetch("/api/deposits", { headers }),
+          depositRequest("/api/deposits", "GET", session.data.session?.access_token ?? ""),
         ]);
         if (walletRes.ok) {
           const wallet = await walletRes.json();
           setMainBalance(Number(wallet?.mainBalance ?? wallet?.balance ?? 0));
         }
-        if (depositRes.ok) {
-          const body = await depositRes.json();
-          setTickets((body?.tickets ?? []) as CmsTicket[]);
-        }
+        if (depositRes.ok) setTickets((depositRes.body.tickets ?? []) as CmsTicket[]);
       })();
     }, 5000);
     return () => window.clearInterval(timer);
@@ -230,10 +228,10 @@ export function OpsDashboardPage() {
           const session = await supabase.auth.getSession();
           const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
           const [depositRes, walletRes] = await Promise.all([
-            fetch("/api/deposits", { headers }),
+            depositRequest("/api/deposits", "GET", session.data.session?.access_token ?? ""),
             fetch("/api/wallet", { headers }),
           ]);
-          const body = depositRes.ok ? await depositRes.json() : null;
+          const body = depositRes.ok ? depositRes.body : null;
           const wallet = walletRes.ok ? await walletRes.json() : null;
           setTickets((body?.tickets ?? []) as CmsTicket[]);
           setMainBalance(Number(wallet?.mainBalance ?? wallet?.balance ?? 0));

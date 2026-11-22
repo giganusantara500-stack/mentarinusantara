@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
 import { PDAM_AREAS } from "@/lib/pdam";
+import { depositRequest } from "@/lib/depositApi";
 import { setoranDays, setoranLines } from "@/lib/setoranReport";
 import { PRINT_FORMATS, PRINT_KINDS, PRINTER_PRESETS, loadPrinterSettings, printReceipts, renderReceipts, sampleBill, savePrinterSettings, type PrinterSettings } from "@/lib/printer";
 export { LoketTransaksiPage } from "./TransaksiPane";
@@ -1343,14 +1344,15 @@ export function LoketReportPage() {
 
   useEffect(() => {
     (async () => {
-      const headers = await authHeader();
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token ?? "";
       const [salesRes, depositRes] = await Promise.all([
-        fetch("/api/loket-sales", { headers }),
-        fetch("/api/deposits", { headers }),
+        fetch("/api/loket-sales", { headers: { Authorization: `Bearer ${token}` } }),
+        depositRequest("/api/deposits", "GET", token),
       ]);
       const salesBody = salesRes.ok ? await salesRes.json() : { sales: [], simulations: [] };
       setSales([...(salesBody.simulations ?? []), ...(salesBody.sales ?? [])]);
-      setTickets(depositRes.ok ? (await depositRes.json()).tickets ?? [] : []);
+      setTickets(depositRes.ok ? (depositRes.body.tickets ?? []) as typeof tickets : []);
     })();
   }, [tick]);
 

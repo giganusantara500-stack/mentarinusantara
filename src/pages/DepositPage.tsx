@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
 import { Badge } from "@/components/ui/Badge";
 import { formatRupiah, formatWaktu } from "@/lib/format";
+import { CopyChip } from "@/components/deposit/CopyChip";
 import { depositErrorText, depositRequest } from "@/lib/depositApi";
 import { openDepositTicket, ticketPhase } from "@/lib/depositStatus";
 import { TicketTransferCard } from "@/components/deposit/TicketTransferCard";
@@ -27,6 +28,8 @@ interface Ticket {
   accountHolder?: string;
   status: "pending" | "approved" | "cancelled" | "reversed";
   route?: "pusat" | "jaringan";
+  uplineRole?: string;
+  uplineName?: string;
   transferAt: string;
   expiresAt?: string;
   createdAt: string;
@@ -36,11 +39,53 @@ interface Ticket {
 const QUICK_AMOUNTS = [50000, 100000, 250000, 500000, 1000000];
 
 function roleText(role?: string) {
-  if (role === "super_admin" || role === "superadmin") return "Super Admin";
+  if (role === "super_admin" || role === "superadmin") return "Pusat";
   if (role === "mitra") return "Mitra";
   if (role === "submitra" || role === "sub_mitra") return "Sub Mitra";
   if (role === "loket") return "Loket";
   return "Pemohon";
+}
+
+function forLoketEyes(ticket: Ticket, viewer: string): Ticket {
+  if (viewer === "superadmin") return ticket;
+  const upline = String(ticket.uplineRole ?? "").toLowerCase().replace(/[\s-]+/g, "_");
+  if (upline !== "super_admin" && upline !== "superadmin") return ticket;
+  return { ...ticket, uplineRole: undefined, uplineName: "Pusat" };
+}
+
+function publicNote(note: string, viewer: string) {
+  if (viewer === "superadmin") return note;
+  return note.replace(/super\s*admin/gi, "pusat");
+}
+
+function DestinationAccount({ account, amount, ticket }: { account: { bank: string; accountNumber: string; holder: string }; amount: string; ticket: Ticket | null }) {
+  const base = ticket ? Number(ticket.baseAmount ?? ticket.amount) || 0 : Number(amount) || 0;
+  const transfer = ticket ? Number(ticket.transferAmount ?? ticket.amount) || 0 : base;
+  const digits = transfer > 0 ? String(transfer) : "";
+  return (
+    <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-800">
+      <div className="font-semibold">{account.bank}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-xs text-slate-500">Nomor rekening</div>
+          <div className="break-all font-mono text-base font-semibold">{account.accountNumber}</div>
+        </div>
+        <CopyChip value={account.accountNumber} done="Nomor rekening tersalin." />
+      </div>
+      <div>
+        <div className="text-xs text-slate-500">Atas nama</div>
+        <div className="break-words font-medium">{account.holder}</div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3">
+        <div className="min-w-0">
+          <div className="text-xs text-slate-500">Nilai yang ditransfer</div>
+          <div className="break-words text-base font-semibold">{digits ? formatRupiah(transfer) : "Isi nominal terlebih dahulu"}</div>
+          {ticket?.uniqueCode && <div className="break-words text-xs text-slate-500">Nominal {formatRupiah(base)} + kode {ticket.uniqueCode}</div>}
+        </div>
+        <CopyChip value={digits} done="Nilai transfer tersalin." disabled={!digits} />
+      </div>
+    </div>
+  );
 }
 
 function scopeText(role: string) {
@@ -69,7 +114,7 @@ function normalizeTicket(ticket: Ticket & { unique_code?: string }): Ticket {
 export function DepositModal({ open, onClose, tick, requestRefresh }: { open: boolean; onClose: () => void; tick: number; requestRefresh: () => void }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/45 px-[1.5cm] pb-6 pt-16" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/45 px-3 pb-6 pt-16 sm:px-[1.5cm]" onClick={onClose}>
       <div className="max-h-[82vh] w-full max-w-2xl overflow-auto rounded-2xl bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
         <DepositPanel onClose={onClose} tick={tick} requestRefresh={requestRefresh} />
       </div>
@@ -150,7 +195,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
       const ticket = rawTicket ? normalizeTicket(rawTicket) : null;
       if (!result.ok || !ticket?.id || !ticket.uniqueCode || ticket.uniqueCode === "000") {
         if (ticket?.id) await load();
-        setError(depositErrorText(result.status, result.body, "Tiket gagal dibuat."));
+        setError(publicNote(depositErrorText(result.status, result.body, "Tiket gagal dibuat."), role));
         return;
       }
       setTickets((current) => [ticket, ...current.filter((item) => item.id !== ticket.id)]);
@@ -165,11 +210,12 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
     }
   };
 
-  const ownTickets = tickets.filter((ticket) => ticket.loketId === profile?.id);
+  const visibleTickets = tickets.map((ticket) => forLoketEyes(ticket, role));
+  const ownTickets = visibleTickets.filter((ticket) => ticket.loketId === profile?.id);
   const openTicket = canCreate ? openDepositTicket(ownTickets, now) : null;
   const account = DEPOSIT_ACCOUNTS[0];
-  const waiting = tickets.filter((ticket) => ticket.status === "pending" && ticketPhase(ticket, now).label !== "Kedaluwarsa");
-  const archive = tickets.filter((ticket) => !waiting.some((item) => item.id === ticket.id));
+  const waiting = visibleTickets.filter((ticket) => ticket.status === "pending" && ticketPhase(ticket, now).label !== "Kedaluwarsa");
+  const archive = visibleTickets.filter((ticket) => !waiting.some((item) => item.id === ticket.id));
 
   const refreshStatus = async () => {
     await load();
@@ -180,7 +226,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
     if (!openTicket) return;
     const session = await supabase.auth.getSession();
     const result = await depositRequest("/api/deposits/cancel", "POST", session.data.session?.access_token ?? "", { id: openTicket.id });
-    if (!result.ok) { setError(depositErrorText(result.status, result.body, "Tiket gagal dibatalkan.")); return; }
+    if (!result.ok) { setError(publicNote(depositErrorText(result.status, result.body, "Tiket gagal dibatalkan."), role)); return; }
     await load();
     requestRefresh();
   };
@@ -189,7 +235,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
     if (!openTicket) return;
     const session = await supabase.auth.getSession();
     const result = await depositRequest("/api/deposits/claim", "POST", session.data.session?.access_token ?? "", { id: openTicket.id });
-    if (!result.ok) { setError(depositErrorText(result.status, result.body, "Status tiket gagal diperbarui.")); return; }
+    if (!result.ok) { setError(publicNote(depositErrorText(result.status, result.body, "Status tiket gagal diperbarui."), role)); return; }
     await load();
   };
 
@@ -202,7 +248,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
     try {
       const session = await supabase.auth.getSession();
       const result = await depositRequest("/api/deposits/decide", "POST", session.data.session?.access_token ?? "", { id, action });
-      if (!result.ok) { setError(depositErrorText(result.status, result.body, "Keputusan gagal disimpan.")); return; }
+      if (!result.ok) { setError(publicNote(depositErrorText(result.status, result.body, "Keputusan gagal disimpan."), role)); return; }
       await load();
     } finally {
       decideLock.current = "";
@@ -212,19 +258,19 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
 
   return (
     <div>
-      <div className="flex items-center justify-between border-b border-slate-100 px-[1.5cm] py-3">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 sm:px-[1.5cm]">
         <div>
           <div className="text-sm font-semibold text-slate-900">Deposit</div>
           <div className="text-xs text-slate-500">Saldo {formatRupiah(balance)} · {scopeText(role)}</div>
         </div>
         <button onClick={onClose} className="rounded-full px-3 py-1 text-xs font-semibold text-slate-500">{page ? "Kembali" : "Tutup"}</button>
       </div>
-      <div className="flex gap-1 overflow-x-auto border-b border-slate-100 px-[1.5cm] py-2">
+      <div className="flex gap-1 overflow-x-auto border-b border-slate-100 px-4 py-2 sm:px-[1.5cm]">
         {([["request", "Request Tiket Deposit"], ["history", "History"], ["mutasi", "Mutasi Saldo"], ["pantauan", "Pantauan Setoran"]] as const).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${tab === key ? "bg-sky-700 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>
         ))}
       </div>
-      <div className="space-y-3 px-[1.5cm] py-4">
+      <div className="space-y-3 px-4 py-4 sm:px-[1.5cm]">
       {error && tab !== "request" && <p className="text-sm text-rose-600">{error}</p>}
 
       {tab === "request" && <div className="space-y-3">
@@ -245,7 +291,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
             <Input inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value.replace(/\D/g, ""))} placeholder="100000" />
           </Field>
           <Field label="Rekening tujuan">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">{account.bank} · {account.accountNumber}<div className="text-xs text-slate-500">a.n. {account.holder}. Disetujui Super Admin.</div></div>
+            <DestinationAccount account={account} amount={amount} ticket={openTicket} />
           </Field>
           {error && <div className="sm:col-span-2 text-sm text-rose-600">{error}</div>}
           <div className="sm:col-span-2 space-y-2">
@@ -253,7 +299,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
             <Button onClick={create} disabled={busy || !!openTicket || Number(amount) < 10000}>{busy ? "Menyimpan..." : "Buat Tiket Deposit"}</Button>
           </div>
         </div>
-        </div> : <p className="text-sm text-slate-600">Super Admin tidak membuat tiket. Buka tab Pantauan Setoran untuk menyetujui atau menolak pengajuan.</p>}
+        </div> : <p className="text-sm text-slate-600">Akun ini tidak membuat tiket. Buka tab Pantauan Setoran untuk menyetujui atau menolak pengajuan.</p>}
       </div>}
 
       {tab === "history" && <Card>
@@ -261,9 +307,9 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
         <div className="divide-y divide-slate-100">
           {archive.length === 0 && <div className="p-6 text-sm text-center text-slate-500">Belum ada riwayat. Tiket yang masih berjalan ada di tab Request atau Pantauan.</div>}
           {archive.map((ticket) => (
-            <div key={ticket.id} className="flex items-center justify-between gap-3 px-5 py-3">
-              <div>
-                <div className="text-sm font-medium text-slate-800">{ticket.loketName || "Pemohon"} · {roleText(ticket.applicantRole)}</div>
+            <div key={ticket.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <div className="break-words text-sm font-medium text-slate-800">{ticket.loketName || "Pemohon"} · {roleText(ticket.applicantRole)}</div>
                 <div className="text-xs text-slate-500">Kode {ticket.uniqueCode || "-"} · {formatRupiah(ticket.transferAmount ?? ticket.amount)} · {formatWaktu(ticket.transferAt)}</div>
               </div>
               <Badge tone={ticketPhase(ticket, now).tone}>{ticketPhase(ticket, now).label}</Badge>
@@ -273,13 +319,13 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
       </Card>}
 
       {tab === "pantauan" && <Card>
-        <CardHeader title="Antrean yang menunggu keputusan" subtitle={role === "superadmin" ? `${waiting.length} tiket menunggu. Setujui memindahkan saldo satu kali.` : `${waiting.length} tiket menunggu Super Admin.`} />
+        <CardHeader title="Antrean yang menunggu keputusan" subtitle={role === "superadmin" ? `${waiting.length} tiket menunggu. Setujui memindahkan saldo satu kali.` : `${waiting.length} tiket menunggu keputusan.`} />
         <div className="divide-y divide-slate-100">
           {waiting.length === 0 && <div className="p-6 text-center text-sm text-slate-500">Tidak ada tiket yang menunggu. Riwayat selesai ada di tab History.</div>}
           {waiting.map((ticket) => (
-            <div key={ticket.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3">
-              <div>
-                <div className="text-sm font-medium text-slate-800">{ticket.loketName || "Pemohon"} · {roleText(ticket.applicantRole)}</div>
+            <div key={ticket.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+              <div className="min-w-0">
+                <div className="break-words text-sm font-medium text-slate-800">{ticket.loketName || "Pemohon"} · {roleText(ticket.applicantRole)}</div>
                 <div className="text-xs text-slate-500">Kode {ticket.uniqueCode || "-"} · transfer {formatRupiah(ticket.transferAmount ?? ticket.amount)} · saldo {formatRupiah(ticket.baseAmount ?? ticket.amount)}</div>
               </div>
               <div className="flex items-center gap-2">
@@ -303,7 +349,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
           {mutations.length === 0 && <div className="px-5 py-6 text-center text-sm text-slate-500">Belum ada perubahan saldo pada jangkauan peran ini.</div>}
           {mutations.map((row) => (
             <div key={row.id} className="grid grid-cols-4 gap-2 px-5 py-3 text-sm">
-              <div className="font-medium text-slate-800">{row.direction === "credit" ? "Masuk" : "Keluar"} · {row.note}<div className="text-xs font-normal text-slate-500">{formatWaktu(row.at)}</div></div>
+              <div className="min-w-0 break-words font-medium text-slate-800">{row.direction === "credit" ? "Masuk" : "Keluar"} · {publicNote(row.note, role)}<div className="text-xs font-normal text-slate-500">{formatWaktu(row.at)}</div></div>
               <div>{formatRupiah(openingBalance(row))}</div>
               <div className={`font-semibold ${row.direction === "credit" ? "text-emerald-700" : "text-rose-700"}`}>{row.direction === "credit" ? "+" : "-"}{formatRupiah(row.amount)}</div>
               <div>{formatRupiah(Number(row.balanceAfter ?? 0))}</div>

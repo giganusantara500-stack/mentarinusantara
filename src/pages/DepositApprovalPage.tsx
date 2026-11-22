@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/ui/Common";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
+import { depositErrorText, depositRequest } from "@/lib/depositApi";
 import { formatRupiah, formatWaktu } from "@/lib/format";
 
 interface Ticket {
@@ -27,12 +28,9 @@ export function DepositApprovalPage() {
 
   const load = async () => {
     const session = await supabase.auth.getSession();
-    const response = await fetch("/api/deposits", {
-      headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
-    });
-    const body = await response.json();
-    if (!response.ok) { setError(body.error || "Daftar setoran gagal dimuat."); return; }
-    setTickets(body.tickets ?? []);
+    const result = await depositRequest("/api/deposits", "GET", session.data.session?.access_token ?? "");
+    if (!result.ok) { setError(depositErrorText(result.status, result.body, "Daftar setoran gagal dimuat.")); return; }
+    setTickets((result.body.tickets ?? []) as Ticket[]);
   };
 
   useEffect(() => { load(); }, []);
@@ -41,17 +39,9 @@ export function DepositApprovalPage() {
     setBusyId(id);
     setError("");
     const session = await supabase.auth.getSession();
-    const response = await fetch("/api/deposits/decide", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${session.data.session?.access_token ?? ""}`,
-      },
-      body: JSON.stringify({ id, action }),
-    });
-    const body = await response.json();
+    const result = await depositRequest("/api/deposits/decide", "POST", session.data.session?.access_token ?? "", { id, action });
     setBusyId("");
-    if (!response.ok) { setError(body.error || "Keputusan gagal disimpan."); return; }
+    if (!result.ok) { setError(depositErrorText(result.status, result.body, "Keputusan gagal disimpan.")); return; }
     await load();
   };
 
