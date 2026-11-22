@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 
 interface LoketDesktopApi {
   minimize: () => void;
@@ -50,22 +50,23 @@ export function WindowCaptionButtons() {
   const { desktop, maximized, toggle } = useWindowCaption();
   if (!desktop) return null;
   const button = "grid h-12 w-12 shrink-0 place-items-center text-white hover:bg-white/15";
+  const press = (run: () => void) => (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    run();
+  };
   return (
     <div className="flex h-12 shrink-0" style={noDrag}>
-      <button type="button" className={button} aria-label="Minimize" title="Minimize" onClick={() => window.loketDesktop?.minimize()}>
+      <button type="button" className={button} style={noDrag} aria-label="Minimize" title="Minimize" onClick={press(() => window.loketDesktop?.minimize())}>
         <CaptionIcon><path d="M2 6h8" /></CaptionIcon>
       </button>
-      <button type="button" className={button} aria-label={maximized ? "Restore" : "Maximize"} title={maximized ? "Restore" : "Maximize"} onClick={toggle}>
-        {maximized ? (
-          <CaptionIcon>
-            <rect x="3.4" y="1.8" width="6.2" height="6.2" rx="0.5" />
-            <path d="M2.2 4.1V9.4a.6.6 0 0 0 .6.6H8" />
-          </CaptionIcon>
-        ) : (
-          <CaptionIcon><rect x="2.2" y="2.2" width="7.6" height="7.6" rx="0.6" /></CaptionIcon>
-        )}
+      <button type="button" className={button} style={noDrag} aria-label={maximized ? "Restore" : "Maximize"} title={maximized ? "Restore" : "Maximize"} onClick={press(toggle)}>
+        <CaptionIcon>
+          <rect x="3.2" y="3.4" width="6.2" height="6.2" rx="0.4" />
+          <path d="M4.6 3.4V2.4a.6.6 0 0 1 .6-.6H9.6a.6.6 0 0 1 .6.6V6.8a.6.6 0 0 1-.6.6H8.8" />
+        </CaptionIcon>
       </button>
-      <button type="button" className="grid h-12 w-12 shrink-0 place-items-center text-white hover:bg-rose-600" aria-label="Close" title="Tutup" onClick={() => window.loketDesktop?.close()}>
+      <button type="button" className="grid h-12 w-12 shrink-0 place-items-center text-white hover:bg-rose-600" style={noDrag} aria-label="Close" title="Close" onClick={press(() => window.loketDesktop?.close())}>
         <CaptionIcon><path d="M3 3l6 6M9 3L3 9" /></CaptionIcon>
       </button>
     </div>
