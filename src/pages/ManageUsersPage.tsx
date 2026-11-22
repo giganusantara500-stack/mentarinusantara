@@ -55,7 +55,6 @@ interface CreatedAccount {
   email: string;
   userId: string;
   emailSent: boolean;
-  emailError: string | null;
   tempPassword: string | null;
   loketCode: string | null;
   mfaActive: boolean;
@@ -158,7 +157,6 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
     email: string;
     tempPassword: string | null;
     emailSent: boolean;
-    emailError: string | null;
   } | null>(null);
 
   const editForm = useState(emptyEditForm());
@@ -361,9 +359,6 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
         email: af.email.trim().toLowerCase(),
         userId: String(data.user_id),
         emailSent: !!data.email_sent,
-        emailError: data.email_error && /<!doctype|<html/i.test(String(data.email_error))
-          ? "Layanan email belum dikonfigurasi. Username dan password sementara tetap tersedia di layar."
-          : (data.email_error as string | null) ?? null,
         tempPassword: (data.temp_password as string | null) ?? null,
         loketCode: (data.loket_code as string | null) ?? null,
         mfaActive: targetRole === "mitra" || targetRole === "submitra",
@@ -516,7 +511,6 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
       email: sentTo,
       tempPassword,
       emailSent,
-      emailError: emailSent ? null : plainResetEmailError(payload?.email_error || payload?.message),
     });
   };
 
@@ -982,21 +976,16 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
               <CopyableCredential label="Username" value={created.username || "—"} />
               <CopyableCredential label="Password Sementara" value={created.tempPassword || "—"} mono />
               <p className="text-xs text-slate-500">
-                Password sementara berupa 6 digit angka. Berikan username dan password ini kepada pengguna, lalu minta diganti saat login pertama.
+                Salin username dan password sementara 6 digit ini, lalu berikan kepada pengguna. Minta password diganti segera setelah login.
               </p>
               {created.mfaActive && (
                 <p className="text-xs font-semibold text-amber-800">Login pertama wajib mengganti password, lalu mengaktifkan 2FA dengan memindai QR atau memasukkan kunci rahasia dan kode OTP.</p>
               )}
             </div>
-            {created.emailSent ? (
+            {created.emailSent && (
               <div className="flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
                 <CheckCircle2 size={14} className="mt-0.5 shrink-0" />
                 <span>Email berisi username dan password sementara sudah dikirim ke {created.email}.</span>
-              </div>
-            ) : (
-              <div className="flex items-start gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                <AlertCircle size={14} className="mt-0.5 shrink-0" />
-                <span>{created.emailError || "Email belum terkirim. Salin password sementara di atas."}</span>
               </div>
             )}
           </div>
@@ -1117,16 +1106,11 @@ export function ManageUsersPage({ targetRole, onNavigate }: Props) {
           <div className="space-y-5">
             <LargeCopyField label="Email terdaftar" value={resetResult.email} />
             <LargeCopyField label="Password sementara 6 digit" value={resetResult.tempPassword || ""} emphasis />
-            <p className="text-base leading-relaxed text-slate-600">Simpan password ini untuk petugas yang tidak membuka email. Minta diganti setelah berhasil login.</p>
-            {resetResult.emailSent ? (
+            <p className="text-base leading-relaxed text-slate-600">Salin password sementara ini dan berikan kepada pengguna. Minta password diganti segera setelah login.</p>
+            {resetResult.emailSent && (
               <div className="flex items-start gap-3 text-base text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
                 <CheckCircle2 size={22} className="mt-0.5 shrink-0" />
                 <span>Email terkirim ke {resetResult.email}.</span>
-              </div>
-            ) : (
-              <div className="flex items-start gap-3 text-base text-amber-900 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-                <AlertCircle size={22} className="mt-0.5 shrink-0" />
-                <span>Email gagal dikirim. {resetResult.emailError || "Fungsi tidak memberi alasan."}</span>
               </div>
             )}
           </div>
