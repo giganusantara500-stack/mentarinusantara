@@ -1,3 +1,5 @@
+import { supabase } from "@/lib/supabase";
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
@@ -19,6 +21,22 @@ export function depositErrorText(status: number, body: Record<string, unknown>, 
   if (status === 401) return "Sesi login berakhir. Masuk kembali, lalu buat tiket.";
   if (status === 409) return "Masih ada tiket deposit yang menunggu keputusan.";
   return status ? `${fallback} (HTTP ${status}).` : fallback;
+}
+
+function missingDatabaseFunction(error: { message?: string; code?: string; details?: string } | null) {
+  const text = `${error?.message ?? ""} ${error?.code ?? ""} ${error?.details ?? ""}`;
+  return /schema cache|could not find the function|PGRST202/i.test(text);
+}
+
+async function saveViaDatabase(action: string, payload: Record<string, unknown>): Promise<DepositApiResult | null> {
+  const { data, error } = await supabase.rpc("own_deposit_request", { p_action: action, p_payload: payload });
+  if (error) {
+    if (missingDatabaseFunction(error)) return null;
+    return { ok: false, status: 400, body: { error: [error.message, error.details].filter(Boolean).join(" — ") } };
+  }
+  const body = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
+  const status = typeof body.status === "number" ? body.status : body.error ? 400 : 200;
+  return { ok: status < 400 && !body.error, status, body };
 }
 
 async function invokeDeposit(action: string, token: string, payload: Record<string, unknown>): Promise<DepositApiResult> {
@@ -70,8 +88,10 @@ export async function depositRequest(path: string, method: "GET" | "POST", token
       return { ok: response.ok && !body.error, status: response.status, body };
     }
   } catch {
-    /* hosting statis atau koneksi putus: lanjut ke fungsi Supabase */
+    /* hosting statis atau koneksi putus: lanjut ke database */
   }
-  const decision = action === "decide" ? String(payload.action ?? "") : "";
-  return invokeDeposit(action, token, action === "decide" ? { ...payload, decision } : payload);
+  const dbPayload = action === "decide" ? { id: payload.id, decision: payload.action } : payload;
+  const saved = await saveViaDatabase(action, dbPayload);
+  if (saved) return saved;
+  return invokeDeposit(action, token, action === "decide" ? { ...payload, decision: String(payload.action ?? "") } : payload);
 }
