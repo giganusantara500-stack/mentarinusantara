@@ -1,8 +1,8 @@
 const { app, BaseWindow, WebContentsView, Menu, ipcMain } = require("electron");
 const path = require("path");
 
-const APP_URL = "https://mentarinusantara.giganusantara500.workers.dev/#/loket-login";
-const APP_ORIGIN = "https://mentarinusantara.giganusantara500.workers.dev";
+const APP_URL = process.env.LOKET_APP_URL || "https://mentarinusantara.giganusantara500.workers.dev/#/loket-login";
+const APP_ORIGIN = new URL(APP_URL).origin;
 const WINDOW_TITLE = "Mentari Nusantara";
 const BAR_HEIGHT = 36;
 
@@ -18,6 +18,9 @@ let mainWindow = null;
 let titlebarContents = null;
 let contentView = null;
 let titlebarView = null;
+let chromeAttached = false;
+let barVisible = false;
+let fallbackTimer = null;
 
 function isAllowedUrl(raw) {
   if (!raw || raw === "about:blank" || raw.startsWith("about:blank")) return true;
@@ -35,17 +38,38 @@ function isTitlebar(contents) {
   return Boolean(titlebarContents && contents === titlebarContents);
 }
 
+function pageContents() {
+  return contentView && !contentView.webContents.isDestroyed() ? contentView.webContents : null;
+}
+
 function sendMaximized() {
-  if (!mainWindow || mainWindow.isDestroyed() || !titlebarContents || titlebarContents.isDestroyed()) return;
-  titlebarContents.send("window-maximized", mainWindow.isMaximized());
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const maximized = mainWindow.isMaximized();
+  if (titlebarContents && !titlebarContents.isDestroyed()) titlebarContents.send("window-maximized", maximized);
+  const page = pageContents();
+  if (page) page.send("window-maximized", maximized);
 }
 
 function layout() {
   if (!mainWindow || mainWindow.isDestroyed() || !titlebarView || !contentView) return;
   const [width, height] = mainWindow.getContentSize();
-  const bar = Math.min(BAR_HEIGHT, Math.max(0, height));
+  const bar = barVisible ? Math.min(BAR_HEIGHT, Math.max(0, height)) : 0;
   titlebarView.setBounds({ x: 0, y: 0, width, height: bar });
   contentView.setBounds({ x: 0, y: bar, width, height: Math.max(0, height - bar) });
+}
+
+function setBarVisible(visible) {
+  barVisible = visible;
+  layout();
+}
+
+function armChromeFallback(delay) {
+  if (chromeAttached) return;
+  if (fallbackTimer) clearTimeout(fallbackTimer);
+  setBarVisible(false);
+  fallbackTimer = setTimeout(() => {
+    if (!chromeAttached) setBarVisible(true);
+  }, delay);
 }
 
 function blockDevTools(contents) {
@@ -119,7 +143,12 @@ function createWindow() {
       preload: path.join(__dirname, "preload.js"),
     },
   });
-  contentView = new WebContentsView({ webPreferences: pageOptions });
+  contentView = new WebContentsView({
+    webPreferences: {
+      ...pageOptions,
+      preload: path.join(__dirname, "preload.js"),
+    },
+  });
   titlebarContents = titlebarView.webContents;
   titlebarView.setBackgroundColor("#0f172a");
   contentView.setBackgroundColor("#0f172a");
@@ -151,6 +180,16 @@ function createWindow() {
     event.preventDefault();
     win.setTitle(WINDOW_TITLE);
   });
+  contentView.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+    if (!isMainFrame || isInPlace) return;
+    chromeAttached = false;
+    if (fallbackTimer) clearTimeout(fallbackTimer);
+    setBarVisible(false);
+  });
+  contentView.webContents.on("did-finish-load", () => {
+    armChromeFallback(2500);
+    sendMaximized();
+  });
   contentView.webContents.on("did-fail-load", (_event, code, _desc, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return;
     if (!isAllowedUrl(url) && url !== APP_URL) return;
@@ -170,7 +209,9 @@ function createWindow() {
 }
 
 function shellWindow(event) {
-  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== titlebarContents) return null;
+  const page = pageContents();
+  const allowed = event.sender === titlebarContents || event.sender === page;
+  if (!mainWindow || mainWindow.isDestroyed() || !allowed) return null;
   return mainWindow;
 }
 
@@ -188,6 +229,23 @@ ipcMain.on("window-maximize-toggle", (event) => {
 
 ipcMain.on("window-close", (event) => {
   shellWindow(event)?.close();
+});
+
+ipcMain.on("window-chrome-ready", (event) => {
+  if (event.sender !== pageContents()) return;
+  chromeAttached = true;
+  if (fallbackTimer) clearTimeout(fallbackTimer);
+  setBarVisible(false);
+  sendMaximized();
+});
+
+ipcMain.on("window-chrome-hidden", (event) => {
+  if (event.sender !== pageContents()) return;
+  chromeAttached = false;
+  if (fallbackTimer) clearTimeout(fallbackTimer);
+  fallbackTimer = setTimeout(() => {
+    if (!chromeAttached) setBarVisible(true);
+  }, 200);
 });
 
 app.whenReady().then(() => {

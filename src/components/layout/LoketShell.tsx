@@ -66,7 +66,7 @@ export function LoketShell({ current, onNavigate, onLogout, children }: Props) {
   return (
     <LoketRefreshContext.Provider value={{ tick, requestRefresh, loketCode, openDeposit: () => setDepositOpen(true) }}>
       <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-white">
-        <DeskHeader brand={LOKET_BRAND} version={LOKET_VERSION_LABEL} stats={stats} onDeposit={() => setDepositOpen(true)} onRefresh={requestRefresh} onLogout={onLogout} allowFullscreen />
+        <DeskHeader brand={LOKET_BRAND} version={LOKET_VERSION_LABEL} stats={stats} onDeposit={() => setDepositOpen(true)} onRefresh={requestRefresh} onLogout={onLogout} />
         {notice && <div className="bg-emerald-50 px-3 py-0.5 text-sm font-black text-emerald-800">{notice}</div>}
         <main className="loket-desk flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden px-3 pt-0">
           <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>

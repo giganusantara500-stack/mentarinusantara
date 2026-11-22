@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import { BadgeAlert, Landmark, LogOut, Maximize2, Minimize2, Receipt, RefreshCw, RotateCw, Store, SunMedium, Wallet } from "lucide-react";
-import { requestLoketFullscreen } from "@/lib/displayMode";
+import { useEffect, useState, type CSSProperties } from "react";
+import { BadgeAlert, Landmark, LogOut, Receipt, RefreshCw, RotateCw, Store, SunMedium, Wallet } from "lucide-react";
+import { WindowCaptionButtons } from "@/components/layout/WindowCaption";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { formatRupiah } from "@/lib/format";
@@ -103,18 +103,10 @@ interface HeaderProps {
   onLogout: () => void;
   showStats?: boolean;
   version?: string;
-  allowFullscreen?: boolean;
 }
 
-export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showStats = true, version, allowFullscreen = false }: HeaderProps) {
+export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showStats = true, version }: HeaderProps) {
   const { profile, user } = useAuth();
-  const [full, setFull] = useState(Boolean(document.fullscreenElement));
-  const [fullHint, setFullHint] = useState("");
-  useEffect(() => {
-    const sync = () => setFull(Boolean(document.fullscreenElement));
-    document.addEventListener("fullscreenchange", sync);
-    return () => document.removeEventListener("fullscreenchange", sync);
-  }, []);
   if (!profile) return null;
   const mfaOn = profile.role === "mitra" || user?.user_metadata?.mfa_enabled === true || user?.user_metadata?.mfa_status === true || user?.user_metadata?.mfa_status === "active";
   const code = stats.loketCode || profile.loket_code || "";
@@ -123,48 +115,35 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showS
 
   return (
     <header className="shrink-0">
-      <div className="flex h-12 items-center justify-between gap-2 bg-neutral-950 px-3 text-white">
-        <div className="flex min-w-0 items-center gap-2">
+      <div className="flex h-12 items-stretch bg-neutral-950 text-white">
+        <div className="flex min-w-0 items-center gap-2 px-3" style={{ WebkitAppRegion: "drag" } as CSSProperties} onDoubleClick={() => window.loketDesktop?.maximizeToggle()}>
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white text-neutral-950">
             <SunMedium size={22} strokeWidth={2.6} />
           </span>
           <span className="truncate text-base font-black tracking-tight">{brand}</span>
           {version && <span className="shrink-0 text-[11px] font-semibold text-amber-200">{version}</span>}
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-          <button onClick={onDeposit} className="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-2.5 py-1 text-sm font-black text-slate-900">
-            <Landmark size={18} strokeWidth={2.6} /> Deposit
-          </button>
-          <button onClick={onRefresh} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-sm font-black">
-            <RefreshCw size={18} strokeWidth={2.6} /> Update
-          </button>
-          <button onClick={onRefresh} className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-sm font-black">
-            <RotateCw size={18} strokeWidth={2.6} /> Refresh
-          </button>
-          {mfaOn && profile.role === "mitra" && (
-            <span className="inline-flex items-center rounded-full bg-emerald-400 px-2.5 py-1 text-sm font-black text-slate-950">2FA Aktif</span>
-          )}
-          {allowFullscreen && (
-            <button
-              type="button"
-              onClick={() => {
-                void requestLoketFullscreen().then((result) => {
-                  setFullHint(result === "unavailable" ? "Layar penuh tidak tersedia pada tab browser ini." : "");
-                });
-              }}
-              className="inline-flex items-center gap-1.5 rounded-full bg-amber-400 px-2.5 py-1 text-sm font-black text-slate-900"
-              title={fullHint || "Memenuhi layar. Di tab biasa, bilah alamat kembali setelah keluar dari layar penuh."}
-            >
-              {full ? <Minimize2 size={18} strokeWidth={2.6} /> : <Maximize2 size={18} strokeWidth={2.6} />}
-              {full ? "Keluar" : "Layar penuh"}
+        <div className="ml-auto flex min-w-0 items-center">
+          <div className="flex items-center gap-1.5 overflow-x-auto px-2" style={{ WebkitAppRegion: "no-drag" } as CSSProperties}>
+            <button onClick={onDeposit} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-400 px-2.5 py-1 text-sm font-black text-slate-900">
+              <Landmark size={18} strokeWidth={2.6} /> Deposit
             </button>
-          )}
-          <button onClick={onLogout} className="inline-flex items-center gap-1.5 rounded-full border border-white/30 px-2.5 py-1 text-sm font-black" aria-label="Logout">
-            <LogOut size={18} strokeWidth={2.6} /> Logout
-          </button>
+            <button onClick={onRefresh} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-sm font-black">
+              <RefreshCw size={18} strokeWidth={2.6} /> Update
+            </button>
+            <button onClick={onRefresh} className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-sm font-black">
+              <RotateCw size={18} strokeWidth={2.6} /> Refresh
+            </button>
+            {mfaOn && profile.role === "mitra" && (
+              <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-400 px-2.5 py-1 text-sm font-black text-slate-950">2FA Aktif</span>
+            )}
+            <button onClick={onLogout} className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/30 px-2.5 py-1 text-sm font-black" aria-label="Logout">
+              <LogOut size={18} strokeWidth={2.6} /> Logout
+            </button>
+          </div>
+          <WindowCaptionButtons />
         </div>
       </div>
-      {fullHint && <div className="bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">{fullHint} Bilah alamat tab biasa tetap ada sampai aplikasi dipasang atau layar penuh berhasil.</div>}
       {showStats && (
         <div className="flex w-full items-stretch justify-start gap-2 overflow-x-auto border-b border-slate-200 bg-white px-3 py-2 text-slate-900">
           <Stat icon={Wallet} tone="bg-cyan-400 text-sky-950" label="Saldo" value={formatRupiah(stats.balance)} hint={stats.ticketHint || undefined} className="w-[220px]" />

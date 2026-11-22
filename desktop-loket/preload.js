@@ -11,6 +11,14 @@ contextBridge.exposeInMainWorld("loketDesktop", {
     ipcRenderer.send("window-close");
   },
   onMaximized(callback) {
-    ipcRenderer.on("window-maximized", (_event, maximized) => callback(Boolean(maximized)));
+    const listener = (_event, maximized) => callback(Boolean(maximized));
+    ipcRenderer.on("window-maximized", listener);
+    return () => ipcRenderer.removeListener("window-maximized", listener);
+  },
+  notifyChrome() {
+    ipcRenderer.send("window-chrome-ready");
+  },
+  notifyChromeHidden() {
+    ipcRenderer.send("window-chrome-hidden");
   },
 });

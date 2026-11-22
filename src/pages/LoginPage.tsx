@@ -5,6 +5,7 @@ import { homeForRole, LOKET_HOME, MONITOR_HOME } from "@/lib/access";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Form";
+import { LoketDesktopBar } from "@/components/layout/WindowCaption";
 import { Zap, User, Lock, AlertCircle, ArrowLeft, KeyRound, Eye, EyeOff } from "lucide-react";
 
 export function LoginPage({ variant }: { variant: "monitor" | "loket" }) {
@@ -96,7 +97,9 @@ export function LoginPage({ variant }: { variant: "monitor" | "loket" }) {
 
   if (loketWindow) {
     return (
-      <div className="min-h-screen bg-neutral-100 lg:grid lg:grid-cols-[minmax(300px,44%)_1fr]">
+      <div className="flex h-dvh min-h-0 flex-col bg-neutral-100">
+        <LoketDesktopBar />
+        <div className="grid min-h-0 flex-1 overflow-auto lg:grid-cols-[minmax(300px,44%)_1fr]">
         <aside className="relative flex items-center overflow-hidden bg-[#0b1220] px-8 py-12 text-white sm:px-12">
           <div className="pointer-events-none absolute -left-20 -top-16 h-64 w-64 rounded-full bg-amber-400/20 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-24 right-0 h-72 w-72 rounded-full bg-amber-500/10 blur-3xl" />
@@ -139,6 +142,7 @@ export function LoginPage({ variant }: { variant: "monitor" | "loket" }) {
             <p className="mt-6 text-right text-xs font-semibold tracking-wide text-slate-400">{LOKET_VERSION_LABEL}</p>
           </div>
         </main>
+        </div>
       </div>
     );
   }
