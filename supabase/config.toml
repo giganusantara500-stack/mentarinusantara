@@ -12,3 +12,6 @@ verify_jwt = false
 
 [functions.deposit-ticket]
 verify_jwt = false
+
+[functions.h2h]
+verify_jwt = false
