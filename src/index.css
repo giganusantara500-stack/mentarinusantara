@@ -72,6 +72,11 @@ body {
   overflow: hidden;
 }
 
+.loket-no-drag,
+.loket-no-drag * {
+  -webkit-app-region: no-drag;
+}
+
 .loket-desk table {
   font-size: 0.9375rem;
   font-weight: 700;

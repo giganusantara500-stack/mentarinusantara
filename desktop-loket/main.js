@@ -138,7 +138,10 @@ function createWindow() {
     event.preventDefault();
     win.setTitle(WINDOW_TITLE);
   });
-  contentView.webContents.on("did-finish-load", () => reveal(win));
+  contentView.webContents.on("did-finish-load", () => {
+    reveal(win);
+    sendMaximized();
+  });
   contentView.webContents.on("did-fail-load", (_event, code, _desc, url, isMainFrame) => {
     if (!isMainFrame || code === -3) return;
     reveal(win);
@@ -175,6 +178,11 @@ ipcMain.on("window-maximize-toggle", (event) => {
 
 ipcMain.on("window-close", (event) => {
   shellWindow(event)?.close();
+});
+
+ipcMain.on("window-chrome-ready", (event) => {
+  if (!shellWindow(event)) return;
+  sendMaximized();
 });
 
 app.whenReady().then(() => {

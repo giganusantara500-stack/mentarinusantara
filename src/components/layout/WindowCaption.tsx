@@ -56,7 +56,7 @@ export function WindowCaptionButtons() {
     run();
   };
   return (
-    <div className="flex h-12 shrink-0" style={noDrag}>
+    <div className="loket-no-drag flex h-12 shrink-0" data-loket-caption="controls" style={noDrag}>
       <button type="button" className={button} style={noDrag} aria-label="Minimize" title="Minimize" onClick={press(() => window.loketDesktop?.minimize())}>
         <CaptionIcon><path d="M2 6h8" /></CaptionIcon>
       </button>
@@ -76,7 +76,7 @@ export function WindowCaptionButtons() {
 export function LoketDesktopBar() {
   if (typeof window === "undefined" || !window.loketDesktop) return null;
   return (
-    <header className="flex h-12 shrink-0 items-center bg-neutral-950 text-white">
+    <header className="flex h-12 shrink-0 items-center bg-neutral-950 text-white" data-loket-caption="login">
       <div className="flex h-full min-w-0 flex-1 items-center gap-2 px-3" style={drag} onDoubleClick={() => window.loketDesktop?.maximizeToggle()}>
         <img src="/icons/icon-512.png" alt="" className="h-7 w-7 rounded-md" />
         <span className="truncate text-base font-black tracking-tight">Mentari Nusantara</span>

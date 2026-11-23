@@ -115,7 +115,7 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showS
 
   return (
     <header className="shrink-0">
-      <div className="flex h-12 items-stretch bg-neutral-950 text-white">
+      <div className="flex h-12 items-stretch bg-neutral-950 text-white" data-loket-caption="desk">
         <div className="flex min-w-0 items-center gap-2 px-3" style={{ WebkitAppRegion: "drag" } as CSSProperties} onDoubleClick={() => window.loketDesktop?.maximizeToggle()}>
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white text-neutral-950">
             <SunMedium size={22} strokeWidth={2.6} />
