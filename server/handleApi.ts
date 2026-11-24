@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createNetworkAccount, requestPasswordReset, resetAccountPassword, type CreateAccountInput } from "./createAccount";
-import { handleBillerRequest } from "./biller";
+import { digiflazzReady } from "./digiflazz";
+import { handleBillerRequest, handleDigiflazzCallback } from "./biller";
 import { handleDepositRequest, loadCaller } from "./deposits";
 import { importLegacyLedger } from "./ledgerSync";
 import { handleOpsRequest } from "./ops";
@@ -35,6 +36,7 @@ export async function handleApi(input: {
   pathname: string;
   search?: string;
   authorization: string;
+  callbackSecret?: string;
   body: Record<string, unknown>;
   env: ApiEnv;
 }) {
@@ -51,10 +53,17 @@ async function routeApi(input: {
   pathname: string;
   search?: string;
   authorization: string;
+  callbackSecret?: string;
   body: Record<string, unknown>;
   env: ApiEnv;
 }) {
   const { method, pathname, authorization, body, env } = input;
+  if (pathname === "/api/health" && method === "GET") {
+    return { status: 200, body: { ok: true, digiflazz: digiflazzReady(), testing: (process.env.DIGIFLAZZ_TESTING || "").trim().toLowerCase() === "true" } };
+  }
+  if (method === "POST" && (pathname === "/api/digiflazz/callback" || pathname.startsWith("/api/digiflazz/callback/"))) {
+    return handleDigiflazzCallback(method, pathname, body, input.callbackSecret || "", env);
+  }
   if (pathname === "/api/me" && method === "GET") return sessionProfile(authorization, env);
   if (pathname === "/api/assign-role" && method === "POST") return assignOwnRole(authorization, String(body.role ?? ""), env);
   if (pathname === "/api/create-account" && method === "POST") return createNetworkAccount(authorization, body as CreateAccountInput, env);
@@ -97,11 +106,13 @@ export async function handleNodeApi(req: IncomingMessage, res: ServerResponse, e
       return;
     }
   }
+  const secretHeader = req.headers["x-callback-secret"];
   const result = await handleApi({
     method: req.method ?? "GET",
     pathname: url.pathname,
     search: url.search,
     authorization: req.headers.authorization ?? "",
+    callbackSecret: Array.isArray(secretHeader) ? secretHeader[0] : secretHeader ?? "",
     body,
     env,
   });

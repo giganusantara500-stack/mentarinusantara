@@ -8,6 +8,7 @@ import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
 import { PDAM_AREAS } from "@/lib/pdam";
 import { loadPrinterSettings, printReceipts, type ReceiptBill } from "@/lib/printer";
+import { apiUrl } from "@/lib/apiBase";
 
 const CATEGORIES = ["PLN", "Telkom", "PDAM", "BPJS", "Finance", "Gas", "Pajak PBB", "Internet & TV", "Topup", "Telco"];
 const PRODUCTS: Record<string, string[]> = {
@@ -64,6 +65,8 @@ interface CartRow {
   admin: number;
   collfee: number;
   total: number;
+  providerRef?: string;
+  sku?: string;
 }
 
 async function authHeader() {
@@ -158,6 +161,8 @@ export function LoketTransaksiPage() {
   const [adminFee, setAdminFee] = useState(4800);
   const [months, setMonths] = useState("01");
   const [taxYear, setTaxYear] = useState(String(new Date().getFullYear()));
+  const [channel, setChannel] = useState<"simulation" | "digiflazz">("simulation");
+  const [sku, setSku] = useState("");
   const [number, setNumber] = useState("");
   const [cart, setCart] = useState<CartRow[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -167,6 +172,8 @@ export function LoketTransaksiPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingRef, setPendingRef] = useState("");
+  const draftRef = useRef(0);
   const loketName = profile?.full_name || profile?.username || "Loket";
   const productLabel = category === "PDAM" || category === "Pajak PBB" ? "Wilayah" : "Produk";
   const idLabel = category === "BPJS" ? "Nomor VA" : category === "Pajak PBB" ? "NOP" : "Customer ID";
@@ -176,27 +183,52 @@ export function LoketTransaksiPage() {
     ? ["No", "Produk", "Cust.ID", "Nama", "Periode", "Tot. Tagihan", "Tagihan", "Denda", "Admin Bank", "Collfee"]
     : ["No", "Produk", "Cust.ID", "Nama", "Periode", "Tot. Tagihan", "Tagihan", "Denda", "Collfee"];
 
-  const openCategory = (item: string) => {
-    setCategory(item);
-    setProduct(item === "PDAM" ? "Kab. Sragen" : PRODUCTS[item][0]);
-    setNumber("");
+  const clearDraft = () => {
+    draftRef.current += 1;
     setCart([]);
+    setNumber("");
+    setSku("");
     setMessage("");
     setError("");
     setReprintId("");
     setReprintDate("");
     setReprintHits([]);
+    setAdminFee(4800);
     setMonths("01");
     setTaxYear(String(new Date().getFullYear()));
+    setPendingRef("");
+    setBusy(false);
+  };
+
+  const openCategory = (item: string) => {
+    if (item === category) return;
+    clearDraft();
+    setCategory(item);
+    setProduct(item === "PDAM" ? "Kab. Sragen" : PRODUCTS[item][0]);
     setMode("bayar");
   };
 
+  const changeProduct = (next: string) => {
+    if (next === product) return;
+    clearDraft();
+    setProduct(next);
+  };
+
+  const openMode = (next: "bayar" | "cetak") => {
+    if (next === mode) return;
+    clearDraft();
+    setMode(next);
+  };
+
   useEffect(() => {
+    let active = true;
     (async () => {
-      const response = await fetch("/api/loket-sales", { headers: await authHeader() });
+      const response = await fetch(apiUrl("/api/loket-sales"), { headers: await authHeader() });
       const body = response.ok ? await response.json() : { sales: [], simulations: [] };
+      if (!active) return;
       setSales([...(body.simulations ?? []), ...(body.sales ?? [])]);
     })();
+    return () => { active = false; };
   }, [tick]);
 
   const rows = cart.filter((row) => row.category === category);
@@ -217,43 +249,64 @@ export function LoketTransaksiPage() {
   };
 
   const lookup = async () => {
-    const response = await fetch("/api/biller/inquiry", {
+    const generation = draftRef.current;
+    const activeCategory = category;
+    const activeProduct = product;
+    if (channel === "digiflazz" && !sku.trim()) { setError("Isi kode produk DigiFlazz (buyer_sku_code)."); return; }
+    let response: Response;
+    try {
+      response = await fetch(apiUrl("/api/biller/inquiry"), {
       method: "POST",
       headers: await authHeader(),
-      body: JSON.stringify({ mode: "simulation", category, product, customerNumber: number, adminFee: appliedAdmin, months, taxYear }),
+      body: JSON.stringify({ mode: channel, category, product, customerNumber: number, adminFee: appliedAdmin, months, taxYear, buyerSkuCode: sku.trim() }),
     });
+    } catch {
+      if (draftRef.current !== generation) return;
+      setError("Backend VPS tidak dapat dihubungi.");
+      return;
+    }
+    if (draftRef.current !== generation) return;
     const body = await response.json().catch(() => ({}));
     const bill = body.bill as { customerName?: string; period?: string; amount?: number; denda?: number; adminFee?: number; collfee?: number; total?: number } | undefined;
     const found = response.ok && bill
       ? { name: bill.customerName || "Pelanggan", period: bill.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || 0, admin: Number(bill.adminFee) || 0, collfee: Number(bill.collfee) || 0, total: Number(bill.total) || 0 }
-      : inquire(number, product, appliedAdmin);
+      : channel === "simulation" ? inquire(number, product, appliedAdmin) : null;
+    if (draftRef.current !== generation) return;
     if (!found) { setError(body.error || "Nomor minimal 5 digit."); return; }
-    if (!response.ok && category === "BPJS") {
+    if (!response.ok && activeCategory === "BPJS") {
       const count = Number(months);
       found.amount *= count;
       found.denda *= count;
       found.total = found.amount + found.denda + found.admin + found.collfee;
       found.period = `${months} Bulan`;
     }
-    if (!response.ok && category === "Pajak PBB") found.period = taxYear;
-    setCart((rows) => [...rows, { ...found, key: crypto.randomUUID(), category, product, customerId: number.trim() }]);
+    if (!response.ok && activeCategory === "Pajak PBB") found.period = taxYear;
+    if (draftRef.current !== generation) return;
+    const refId = typeof body.providerRef === "string" && body.providerRef ? body.providerRef : crypto.randomUUID();
+    setCart((rows) => [...rows, { ...found, key: refId, providerRef: channel === "digiflazz" ? refId : undefined, sku: sku.trim(), category: activeCategory, product: activeProduct, customerId: number.trim() }]);
     setError("");
     setMessage("");
     setNumber("");
   };
 
   const pay = async () => {
+    const generation = draftRef.current;
     if (rows.length === 0 || busy) return;
     setBusy(true);
     setError("");
     let balance = 0;
+    let lastStatus = "";
     for (const row of rows) {
-      const response = await fetch("/api/loket-sales", {
+      let response: Response;
+      try {
+      response = await fetch(apiUrl("/api/loket-sales"), {
         method: "POST",
         headers: await authHeader(),
         body: JSON.stringify({
-          channel: "simulation",
-          clientRef: row.key,
+          channel,
+          clientRef: row.providerRef || row.key,
+          providerRef: row.providerRef,
+          buyerSkuCode: row.sku,
           category: row.category,
           product: `${row.category} ${row.product}`,
           customerNumber: row.customerId,
@@ -267,6 +320,14 @@ export function LoketTransaksiPage() {
           loketName,
         }),
       });
+      } catch {
+        if (draftRef.current !== generation) return;
+        setBusy(false);
+        setError("Backend VPS tidak dapat dihubungi. Ulangi cek status sebelum membayar lagi.");
+        requestRefresh();
+        return;
+      }
+      if (draftRef.current !== generation) return;
       const body = await response.json();
       if (!response.ok) {
         setBusy(false);
@@ -275,10 +336,42 @@ export function LoketTransaksiPage() {
         return;
       }
       balance = Number(body.balance);
+      lastStatus = String(body.statusText || "");
+      if (lastStatus === "pending") setPendingRef(row.providerRef || row.key);
     }
+    if (draftRef.current !== generation) return;
     setBusy(false);
     setCart([]);
-    setMessage(`Simulasi ${rows.length} tagihan tercatat. Status: Simulasi. Saldo produksi ${formatRupiah(balance)} tidak berubah.`);
+    setMessage(channel === "digiflazz"
+      ? `DigiFlazz menjawab ${lastStatus || "pending"}. Saldo produksi ${formatRupiah(balance)}.${lastStatus === "success" ? "" : " Status pending belum memotong saldo."}`
+      : `Simulasi ${rows.length} tagihan tercatat. Status: Simulasi. Saldo produksi ${formatRupiah(balance)} tidak berubah.`);
+    requestRefresh();
+  };
+
+  const checkStatus = async () => {
+    const generation = draftRef.current;
+    if (!pendingRef || busy) return;
+    setBusy(true);
+    let response: Response;
+    try {
+    response = await fetch(apiUrl("/api/biller/status"), {
+      method: "POST",
+      headers: await authHeader(),
+      body: JSON.stringify({ clientRef: pendingRef }),
+    });
+    } catch {
+      if (draftRef.current !== generation) return;
+      setBusy(false);
+      setError("Backend VPS tidak dapat dihubungi.");
+      return;
+    }
+    if (draftRef.current !== generation) return;
+    const body = await response.json().catch(() => ({}));
+    setBusy(false);
+    if (!response.ok) { setError(body.error || "Status DigiFlazz belum terbaca."); return; }
+    setError("");
+    setMessage(`Status DigiFlazz: ${body.statusText || "pending"}. ${body.message || ""} Saldo ${formatRupiah(Number(body.balance) || 0)}.`);
+    if (body.statusText === "success" || body.statusText === "failed") setPendingRef("");
     requestRefresh();
   };
 
@@ -295,18 +388,23 @@ export function LoketTransaksiPage() {
           </button>
         ))}
       </div>
+      <div className="flex flex-wrap items-center gap-2 px-1">
+        <button type="button" onClick={() => setChannel("simulation")} className={`rounded px-2.5 py-1 text-xs font-black ${channel === "simulation" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>Simulasi</button>
+        <button type="button" onClick={() => setChannel("digiflazz")} className={`rounded px-2.5 py-1 text-xs font-black ${channel === "digiflazz" ? "bg-sky-700 text-white" : "bg-slate-100 text-slate-600"}`}>DigiFlazz</button>
+        {channel === "digiflazz" && <Input className="h-8 max-w-xs font-mono text-xs" value={sku} onChange={(event) => setSku(event.target.value)} placeholder="buyer_sku_code" />}
+      </div>
       <div className="flex gap-2 border-b border-slate-200">
-        <button onClick={() => setMode("bayar")} className={`px-3 py-1.5 text-sm font-black ${mode === "bayar" ? "border-b-2 border-amber-500 text-amber-700" : "text-slate-500"}`}>TRANSAKSI</button>
-        <button onClick={() => setMode("cetak")} className={`px-3 py-1.5 text-sm font-black ${mode === "cetak" ? "border-b-2 border-amber-500 text-amber-700" : "text-slate-500"}`}>CETAK ULANG</button>
+        <button onClick={() => openMode("bayar")} className={`px-3 py-1.5 text-sm font-black ${mode === "bayar" ? "border-b-2 border-amber-500 text-amber-700" : "text-slate-500"}`}>TRANSAKSI</button>
+        <button onClick={() => openMode("cetak")} className={`px-3 py-1.5 text-sm font-black ${mode === "cetak" ? "border-b-2 border-amber-500 text-amber-700" : "text-slate-500"}`}>CETAK ULANG</button>
       </div>
       <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-slate-300 bg-white">
         {mode === "bayar" ? (
           <div className="grid h-[78px] shrink-0 grid-cols-4 items-end gap-2 overflow-visible px-2 py-1.5">
             <Field label={productLabel}>
               {category === "PDAM" ? (
-                <AreaPicker value={product} onChange={setProduct} />
+                <AreaPicker value={product} onChange={changeProduct} />
               ) : (
-                <Select value={product} onChange={(event) => setProduct(event.target.value)}>
+                <Select value={product} onChange={(event) => changeProduct(event.target.value)}>
                   {PRODUCTS[category].map((item) => <option key={item}>{item}</option>)}
                 </Select>
               )}
@@ -407,6 +505,7 @@ export function LoketTransaksiPage() {
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
               <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-3 font-black" disabled={rows.length === 0} onClick={() => printReceipts(loadPrinterSettings(loketCode), rows.map((row): ReceiptBill => ({ id: row.customerId, name: row.name, product: `${row.category} ${row.product}`, period: row.period, tagihan: row.amount + row.denda, admin: row.admin, total: row.total })), `${loketCode} - ${loketName}`)}>Cetak Info Tagihan</Button>
               <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-4 font-black" onClick={() => { setCart([]); setNumber(""); setError(""); setMessage(""); }}>Hapus</Button>
+              {pendingRef && <button type="button" onClick={checkStatus} disabled={busy} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/40 px-3 text-sm font-black text-white">Cek status</button>}
               <button onClick={pay} disabled={busy || rows.length === 0} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-50">
                 {busy ? "Memproses..." : `BAYAR ${formatRupiah(total)}`}
               </button>

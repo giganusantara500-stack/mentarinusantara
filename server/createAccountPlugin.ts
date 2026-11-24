@@ -5,7 +5,13 @@ export function createAccountPlugin(): Plugin {
   return {
     name: "direct-account-create",
     configureServer(server) {
-      const configOf = () => apiEnvFrom(loadEnv(server.config.mode, process.cwd(), ""));
+      const configOf = () => {
+        const source = loadEnv(server.config.mode, process.cwd(), "");
+        for (const [key, value] of Object.entries(source)) {
+          if (process.env[key] === undefined) process.env[key] = value;
+        }
+        return apiEnvFrom(source);
+      };
       server.middlewares.use(async (req, res, next) => {
         const pathname = req.url?.split("?")[0] ?? "";
         if (!pathname.startsWith("/api/")) return next();

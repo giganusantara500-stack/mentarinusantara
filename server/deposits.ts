@@ -129,6 +129,9 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       period: clean(body.period),
       parentId,
       clientRef,
+      buyerSkuCode: clean(body.buyerSkuCode),
+      kind: clean(body.kind),
+      providerRef: clean(body.providerRef),
     });
     if (result.error || !result.sale) return { status: result.status, body: { error: result.error } };
     await touchActivity(caller.id, env).catch(() => undefined);

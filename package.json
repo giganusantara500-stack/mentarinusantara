@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "node --max-http-header-size=131072 ./node_modules/vite/bin/vite.js preview",
-    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+    "typecheck": "tsc --noEmit -p tsconfig.app.json",
+    "api": "tsx server/serve.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
@@ -16,6 +17,7 @@
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "tsx": "^4.20.5",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

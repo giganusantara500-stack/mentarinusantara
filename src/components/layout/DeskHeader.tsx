@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { apiUrl } from "@/lib/apiBase";
 
 export function useDeskStats(tick: number) {
   const { profile } = useAuth();
@@ -23,8 +24,8 @@ export function useDeskStats(tick: number) {
       const session = await supabase.auth.getSession();
       const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
       const [walletRes, salesRes, txRes, runRes] = await Promise.all([
-        fetch("/api/wallet", { headers }),
-        fetch("/api/loket-sales", { headers }),
+        fetch(apiUrl("/api/wallet"), { headers }),
+        fetch(apiUrl("/api/loket-sales"), { headers }),
         supabase.from("transactions").select("amount,status,created_at").eq("user_id", profile.id),
         fetch("/api/runtext", { headers }),
       ]);
@@ -60,8 +61,8 @@ export function useDeskStats(tick: number) {
         const session = await supabase.auth.getSession();
         const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
         const [walletRes, salesRes, runRes] = await Promise.all([
-          fetch("/api/wallet", { headers }),
-          fetch("/api/loket-sales", { headers }),
+          fetch(apiUrl("/api/wallet"), { headers }),
+          fetch(apiUrl("/api/loket-sales"), { headers }),
           fetch("/api/runtext", { headers }),
         ]);
         if (walletRes.ok) {
