@@ -6,6 +6,7 @@ import { useLoketRefresh } from "@/components/layout/LoketShell";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
+import { BILLER_CATEGORIES, BILLER_CATALOG, productsFor } from "@/lib/billerCatalog";
 import { PDAM_AREAS } from "@/lib/pdam";
 import { depositRequest } from "@/lib/depositApi";
 import { setoranDays, setoranLines } from "@/lib/setoranReport";
@@ -1354,7 +1355,10 @@ export function LoketReportPage() {
     })();
   }, [tick]);
 
-  const products = biller === "semua" ? Object.values(PRODUCTS).flat() : (PRODUCTS[biller] ?? []);
+  const reportCategories = [...new Set([...CATEGORIES, ...BILLER_CATEGORIES])];
+  const products = biller === "semua"
+    ? [...new Set([...Object.values(PRODUCTS).flat(), ...BILLER_CATALOG.map((entry) => entry.label)])]
+    : (PRODUCTS[biller] ?? productsFor(biller));
   const filtered = useMemo(() => sales.filter((sale) => {
     if (biller !== "semua" && sale.category !== biller) return false;
     if (product !== "semua" && !sale.product.toLowerCase().includes(product.toLowerCase())) return false;
@@ -1398,7 +1402,7 @@ export function LoketReportPage() {
             <Field label="Biller">
               <Select value={biller} onChange={(event) => { setBiller(event.target.value); setProduct("semua"); }}>
                 <option value="semua">Semua biller</option>
-                {CATEGORIES.map((item) => <option key={item}>{item}</option>)}
+                {reportCategories.map((item) => <option key={item}>{item}</option>)}
               </Select>
             </Field>
             <Field label="Produk">

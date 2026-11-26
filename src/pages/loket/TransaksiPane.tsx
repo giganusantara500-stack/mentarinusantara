@@ -6,36 +6,31 @@ import { useLoketRefresh } from "@/components/layout/LoketShell";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
-import { PDAM_AREAS } from "@/lib/pdam";
+import { BILLER_CATEGORIES, productsFor } from "@/lib/billerCatalog";
 import { loadPrinterSettings, printReceipts, type ReceiptBill } from "@/lib/printer";
 import { apiUrl } from "@/lib/apiBase";
 
-const CATEGORIES = ["PLN", "Telkom", "PDAM", "BPJS", "Finance", "Gas", "Pajak PBB", "Internet & TV", "Topup", "Telco"];
-const PRODUCTS: Record<string, string[]> = {
-  PLN: ["Postpaid", "Nontaglis", "Prepaid 20", "Prepaid 50", "Prepaid 100", "Prepaid 200", "Prepaid 500", "Prepaid 1000", "Prepaid 2000", "Prepaid 3000", "Prepaid 5000"],
-  Telkom: ["Telkom PSTN", "Speedy/Indihome", "IndiHome", "Telepon"],
-  PDAM: PDAM_AREAS,
-  BPJS: ["BPJS Kesehatan", "BPJS Tenaga Kerja"],
-  Finance: ["BAF Finance", "WOM Finance", "BCA Multifinance Mobil", "BCA Multifinance Motor", "Adira", "Mandiri Utama Finance", "Mega Finance", "Clipan Finance"],
-  Gas: ["PGN", "Pertagas", "PGN 3000"],
-  "Pajak PBB": ["Pajak Daerah DKI Jakarta", "PBB Depok", "PBB Aceh Utara", "PBB Banyuwangi", "PBB Bandung", "PBB Surabaya"],
-  "Internet & TV": ["Indihome", "Firstmedia", "Indovision", "MyRepublic", "CBN", "Transvision", "Biznet Home", "Iconnet"],
-  Topup: ["Pulsa HP", "Data/Internet", "E-Money", "E-Wallet"],
-  Telco: ["Tagihan Halo", "XL Pascabayar", "Indosat Pascabayar", "Three Pascabayar", "Smartfren Pascabayar"],
-};
+const CATEGORIES = BILLER_CATEGORIES;
 const ADMIN_FEES = [4800, 4900, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 10000, 11000, 12000, 13000, 14000, 15000];
 const BPJS_MONTHS = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
 const TAX_YEARS = Array.from({ length: new Date().getFullYear() - 2017 }, (_, index) => String(2019 + index));
 const BILLER_ADMIN: Record<string, number> = {
-  Telkom: 2500,
-  PDAM: 2500,
-  BPJS: 2500,
-  Finance: 6500,
+  Pulsa: 1500,
+  "Paket Data": 1500,
+  Games: 1500,
+  "E-Money": 1500,
+  "SMS & Telpon": 1500,
+  Voucher: 1500,
+  TV: 1500,
+  "Masa Aktif": 1500,
   Gas: 2500,
-  "Pajak PBB": 2500,
-  "Internet & TV": 3000,
-  Topup: 1500,
-  Telco: 2500,
+  PDAM: 2500,
+  "HP Pascabayar": 2500,
+  Internet: 2500,
+  BPJS: 2500,
+  "by.U": 2500,
+  "TV Pascabayar": 3000,
+  Lainnya: 2500,
 };
 
 interface Sale {
@@ -80,7 +75,7 @@ function shownName(value: unknown) {
   return name;
 }
 
-function AreaPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function AreaPicker({ value, options, onChange }: { value: string; options: string[]; onChange: (value: string) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
@@ -105,7 +100,7 @@ function AreaPicker({ value, onChange }: { value: string; onChange: (value: stri
   }, [open]);
   const needle = query.trim().toLowerCase();
   const showAll = needle.length === 0 || query === value;
-  const matches = showAll ? PDAM_AREAS : PDAM_AREAS.filter((area) => area.toLowerCase().includes(needle));
+  const matches = showAll ? options : options.filter((area) => area.toLowerCase().includes(needle));
   return (
     <div ref={box} className="relative">
       <Input
@@ -114,12 +109,12 @@ function AreaPicker({ value, onChange }: { value: string; onChange: (value: stri
           const next = event.target.value;
           setQuery(next);
           setOpen(true);
-          const exact = PDAM_AREAS.find((area) => area.toLowerCase() === next.trim().toLowerCase());
+          const exact = options.find((area) => area.toLowerCase() === next.trim().toLowerCase());
           if (exact) onChange(exact);
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => {
-          const exact = PDAM_AREAS.find((area) => area.toLowerCase() === query.trim().toLowerCase());
+          const exact = options.find((area) => area.toLowerCase() === query.trim().toLowerCase());
           if (exact) onChange(exact);
           else setQuery(value);
           window.setTimeout(() => setOpen(false), 160);
@@ -150,7 +145,7 @@ export function LoketTransaksiPage() {
   const { tick, requestRefresh, loketCode } = useLoketRefresh();
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [mode, setMode] = useState<"bayar" | "cetak">("bayar");
-  const [product, setProduct] = useState(PRODUCTS.PLN[0]);
+  const [product, setProduct] = useState(productsFor(CATEGORIES[0])[0]);
   const [adminFee, setAdminFee] = useState(4800);
   const [months, setMonths] = useState("01");
   const [taxYear, setTaxYear] = useState(String(new Date().getFullYear()));
@@ -167,7 +162,8 @@ export function LoketTransaksiPage() {
   const draftRef = useRef(0);
   const loketName = profile?.full_name || profile?.username || "Loket";
   const productLabel = category === "PDAM" || category === "Pajak PBB" ? "Wilayah" : "Produk";
-  const idLabel = category === "BPJS" ? "Nomor VA" : category === "Pajak PBB" ? "NOP" : "Customer ID";
+  const idLabel = category === "BPJS" ? "Nomor VA" : category === "Pulsa" || category === "Paket Data" || category === "SMS & Telpon" || category === "Masa Aktif" || category === "by.U" ? "Nomor HP" : category === "Games" ? "User ID" : category === "E-Money" ? "Nomor Akun" : "Customer ID";
+  const choices = productsFor(category);
   const appliedAdmin = category === "PLN" ? adminFee : (BILLER_ADMIN[category] ?? 0);
   const showAdmin = category === "PLN";
   const columns = showAdmin
@@ -194,7 +190,7 @@ export function LoketTransaksiPage() {
     if (item === category) return;
     clearDraft();
     setCategory(item);
-    setProduct(item === "PDAM" ? "Kab. Sragen" : PRODUCTS[item][0]);
+    setProduct(productsFor(item)[0] ?? "");
     setMode("bayar");
   };
 
@@ -378,10 +374,10 @@ export function LoketTransaksiPage() {
           <div className="grid h-[78px] shrink-0 grid-cols-4 items-end gap-2 overflow-visible px-2 py-1.5">
             <Field label={productLabel}>
               {category === "PDAM" ? (
-                <AreaPicker value={product} onChange={changeProduct} />
+                <AreaPicker value={product} options={choices} onChange={changeProduct} />
               ) : (
                 <Select value={product} onChange={(event) => changeProduct(event.target.value)}>
-                  {PRODUCTS[category].map((item) => <option key={item}>{item}</option>)}
+                  {choices.map((item) => <option key={item}>{item}</option>)}
                 </Select>
               )}
             </Field>

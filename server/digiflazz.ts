@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { findCatalogItem, foldLabel } from "../src/lib/billerCatalog";
 
 export type DigiKind = "prepaid" | "postpaid";
 export type DigiOutcome = "pending" | "success" | "failed" | "not_found";
@@ -48,8 +49,10 @@ export function sameSecret(given: string, expected: string) {
 
 export function productKind(category: string, product: string, explicit = ""): DigiKind {
   if (explicit === "prepaid" || explicit === "postpaid") return explicit;
+  const listed = findCatalogItem(category, product);
+  if (listed) return listed.kind;
   if (category.trim().toLowerCase() === "topup") return "prepaid";
-  if (/prepaid|pulsa|token|e-money|e-wallet|data/i.test(product)) return "prepaid";
+  if (/prepaid|pulsa|token|e-money|e-wallet|voucher|masa aktif|\bdata\b/i.test(`${category} ${product}`)) return "prepaid";
   return "postpaid";
 }
 
@@ -181,42 +184,49 @@ async function priceRows(kind: DigiKind) {
 }
 
 function compact(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return foldLabel(value).replace(/[^a-z0-9]+/g, "");
 }
 
-function mappedSku(category: string, product: string) {
-  const cat = category.trim().toLowerCase();
-  const name = product.trim().toLowerCase();
-  if (cat === "pln") {
-    if (name === "postpaid" || name === "pascabayar") return "pln";
-    if (name === "nontaglis") return "plnnontaglis";
-    const prepaid = name.match(/prepaid\s+(\d+)/);
-    if (prepaid) return `pln${prepaid[1]}`;
+function priceScore(row: Record<string, unknown>, product: string, category: string) {
+  const sku = compact(text(row.buyer_sku_code));
+  const name = foldLabel(text(row.product_name));
+  const brand = foldLabel(text(row.brand));
+  const rowCategory = foldLabel(text(row.category));
+  const productKey = foldLabel(product);
+  const categoryKey = foldLabel(category);
+  const productCode = compact(product);
+  if (!productKey && !productCode) return 0;
+  if (productCode && sku === productCode) return 100;
+  if (productKey && (name === productKey || foldLabel(`${brand} ${name}`) === productKey)) return 90;
+  let score = 0;
+  if (productKey && name.includes(productKey)) score += 60;
+  if (productCode && sku && (sku.includes(productCode) || productCode.includes(sku))) score += 25;
+  if (brand && productKey.includes(brand)) score += 15;
+  if (categoryKey && (rowCategory.includes(categoryKey) || brand.includes(categoryKey) || name.includes(categoryKey))) score += 10;
+  return score;
+}
+
+function matchPriceRow(rows: Record<string, unknown>[], product: string, category: string) {
+  let best: { row: Record<string, unknown>; score: number } | null = null;
+  for (const row of rows) {
+    const score = priceScore(row, product, category);
+    if (score >= 60 && (!best || score > best.score)) best = { row, score };
   }
-  return "";
+  return best ? text(best.row.buyer_sku_code) : "";
 }
 
 export async function resolveBuyerSku(kind: DigiKind, category: string, product: string, explicit = "") {
   const given = explicit.trim();
   if (/^[A-Za-z0-9._-]{1,64}$/.test(given)) return given;
-  const mapped = mappedSku(category, product);
-  if (mapped) return mapped;
+  const mapped = findCatalogItem(category, product);
+  if (mapped) return mapped.sku;
   if (!digiflazzReady()) return "";
   try {
-    const rows = await priceRows(kind);
-    const productKey = compact(product);
-    const categoryKey = compact(category);
-    const hit = rows.find((row) => {
-      const sku = compact(text(row.buyer_sku_code));
-      const name = compact(text(row.product_name));
-      const brand = compact(text(row.brand));
-      const rowCategory = compact(text(row.category));
-      const sameProduct = Boolean(productKey) && (sku === productKey || name.includes(productKey) || brand.includes(productKey));
-      if (!sameProduct) return false;
-      if (!categoryKey) return true;
-      return rowCategory.includes(categoryKey) || brand.includes(categoryKey) || name.includes(categoryKey) || sku.includes(categoryKey);
-    });
-    return hit ? text(hit.buyer_sku_code) : "";
+    const primary = await priceRows(kind);
+    const direct = matchPriceRow(primary, product, category);
+    if (direct) return direct;
+    const alternate = await priceRows(kind === "prepaid" ? "postpaid" : "prepaid");
+    return matchPriceRow(alternate, product, category);
   } catch {
     return "";
   }
