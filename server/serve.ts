@@ -27,7 +27,7 @@ const host = process.env.API_HOST || "0.0.0.0";
 const origin = process.env.API_CORS_ORIGIN || "*";
 const env = apiEnvFrom(process.env);
 
-const server = createServer(async (req, res) => {
+const server = createServer({ maxHeaderSize: 131072 }, async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Headers", "authorization, content-type, x-callback-secret");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");

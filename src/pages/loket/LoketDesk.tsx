@@ -503,7 +503,7 @@ export function LoketKolektifPage() {
       const filter = manageOpenRef.current ? billerRef.current : productFilterRef.current;
       const pool = filter === "semua" ? ready : ready.filter((group) => sameCollectorCategory(group, filter));
       if (current && pool.some((group) => group.id === current)) return current;
-      return filter === "semua" ? (pool[0]?.id ?? "") : "";
+      return "";
     });
     setSessionOmit([]);
     setNotice("");
@@ -815,9 +815,7 @@ export function LoketKolektifPage() {
     removedIds.current = [...removedIds.current, id];
     const removed = groupsRef.current.find((group) => group.id === id);
     const next = groupsRef.current.filter((group) => group.id !== id);
-    const nextActive = activeIdRef.current === id
-      ? (next.find((group) => removed && sameCollectorCategory(group, removed.category))?.id ?? "")
-      : activeIdRef.current;
+    const nextActive = activeIdRef.current === id ? "" : activeIdRef.current;
     commitLocal(next, removed ? `Kolektor ${removed.collector || removed.name} pada ${removed.category} dihapus.` : "Kolektor dihapus.", nextActive);
   };
 
@@ -970,7 +968,7 @@ export function LoketKolektifPage() {
               </tr>
             </thead>
             <tbody>
-              {visible.length === 0 && <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">{!active ? (sidebarGroups.length === 0 && productFilter !== "semua" ? `Belum ada kolektor ${productFilter}.` : "Pilih kolektor di panel kiri.") : bills.length === 0 ? (productFilter === "semua" ? "Belum ada pelanggan pada kolektor ini." : `Belum ada data pelanggan ${productFilter} untuk kolektor ini.`) : "Tidak ada pelanggan pada filter ini."}</td></tr>}
+              {visible.length === 0 && active && <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500">{bills.length === 0 ? (productFilter === "semua" ? "Belum ada pelanggan pada kolektor ini." : `Belum ada data pelanggan ${productFilter} untuk kolektor ini.`) : "Tidak ada pelanggan pada filter ini."}</td></tr>}
               {visible.map((row, index) => (
                 <tr key={memberKey(row)} className="border-t border-slate-100 text-slate-700">
                   <td className="px-3 py-2"><input type="checkbox" checked={picked.includes(memberKey(row))} onChange={(event) => setPicked((rows) => event.target.checked ? [...rows, memberKey(row)] : rows.filter((item) => item !== memberKey(row)))} /></td>
@@ -1120,7 +1118,7 @@ export function LoketKolektifPage() {
                 </div>
               </div>
               <div className="mt-3 max-h-80 min-h-48 overflow-auto text-sm">
-                {!modalActive && <p className="py-6 text-center text-sm text-slate-400">{modalGroups.length === 0 ? `Belum ada kolektor ${biller}.` : "Pilih kolektor terlebih dahulu."}</p>}
+                {!modalActive && modalGroups.length === 0 && <p className="py-6 text-center text-sm text-slate-400">Belum ada kolektor {biller}.</p>}
                 {modalActive && modalMembers.length === 0 && <p className="py-6 text-center text-sm text-slate-400">Belum ada data pelanggan {biller} untuk kolektor ini.</p>}
                 {modalMembers.map((member) => (
                   <div key={memberKey(member)} className="flex items-center justify-between border-b border-slate-100 py-1.5">
