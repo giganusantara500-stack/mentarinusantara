@@ -58,7 +58,7 @@ interface Bill {
 }
 
 interface Member { number: string; name: string; product?: string }
-interface GroupBill { number: string; name: string; product?: string; period: string; total: number; status: "LUNAS" | "BL LNS" | "LAINNYA" }
+interface GroupBill { number: string; name: string; product?: string; period: string; total: number; status: "LUNAS" | "BL LNS" | "LAINNYA"; sku?: string; providerRef?: string; menuCategory?: string; menuProduct?: string }
 interface Group {
   id: string;
   name: string;
@@ -186,15 +186,28 @@ function cacheKey(userId: string) {
   return `mentari-kolektif:${userId}`;
 }
 
+function storedName(name: string) {
+  const value = name.trim();
+  return /^pelanggan(\s+\d+)?$/i.test(value) ? "" : value;
+}
+
+function shownCustomer(name: string) {
+  return storedName(name) || "—";
+}
+
 function normalizeBill(bill: Partial<GroupBill>): GroupBill {
   const status = bill.status === "LUNAS" || bill.status === "LAINNYA" || bill.status === "BL LNS" ? bill.status : "BL LNS";
   return {
     number: String(bill.number ?? "").trim(),
-    name: String(bill.name ?? "Pelanggan").trim() || "Pelanggan",
+    name: storedName(String(bill.name ?? "")),
     product: bill.product ? String(bill.product) : "",
     period: String(bill.period ?? ""),
     total: Number(bill.total) || 0,
     status,
+    sku: bill.sku ? String(bill.sku) : "",
+    providerRef: bill.providerRef ? String(bill.providerRef) : "",
+    menuCategory: bill.menuCategory ? String(bill.menuCategory) : "",
+    menuProduct: bill.menuProduct ? String(bill.menuProduct) : "",
   };
 }
 
@@ -202,7 +215,7 @@ function normalizeGroup(row: Partial<Group> & { members?: Member[]; bills?: Grou
   const members = Array.isArray(row.members)
     ? row.members.filter((member) => member?.number).map((member) => ({
       number: String(member.number).trim(),
-      name: String(member.name || "Pelanggan").trim() || "Pelanggan",
+      name: storedName(String(member.name || "")),
       product: member.product ? String(member.product) : "",
     }))
     : [];
@@ -346,14 +359,11 @@ function findBill(bills: GroupBill[], member: Member, peers: Member[]) {
 function buildBills(group: Group): GroupBill[] {
   return group.members.map((member) => {
     const existing = findBill(group.bills, member, group.members);
+    const name = storedName(existing?.name || member.name || "");
     if (existing && existing.period && existing.period !== "Memuat") {
-      return { ...existing, name: member.name || existing.name, product: member.product || existing.product };
+      return { ...existing, name, product: member.product || existing.product };
     }
-    const product = member.product || "CUSTID";
-    const bill = inquire(canonicalCategory(product), member.number, product, 0);
-    return bill
-      ? { number: member.number, name: member.name, product, period: bill.period, total: bill.total, status: "BL LNS" as const }
-      : { number: member.number, name: member.name, product, period: "-", total: 0, status: "LAINNYA" as const };
+    return { number: member.number, name, product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" as const };
   });
 }
 
@@ -425,7 +435,7 @@ function membersFromTable(rows: string[][], fallbackProduct: string): Member[] {
   const productCol = pick(headerAt >= 0 ? headerColumn(header, [/produk|product|biller|kategori/i]) : guessedId + 2, idCol + 2);
   return table.filter((_, index) => index !== headerAt).map((row) => ({
     number: normalizeId(row[idCol] ?? ""),
-    name: (row[nameCol] ?? "").trim() || "Pelanggan",
+    name: storedName(row[nameCol] ?? ""),
     product: (row[productCol] ?? "").trim() || fallbackProduct,
   })).filter((row) => isCustomerId(row.number));
 }
@@ -577,8 +587,8 @@ export function LoketKolektifPage() {
   const scopedMembers = (active?.members ?? []).filter((member) => productFilter === "semua" || sameCategory(member.product, productFilter));
   const tableRows: GroupBill[] = scopedMembers.filter((member) => !omitted.has(memberKey(member))).map((member) => {
     const bill = active ? findBill(active.bills, member, active.members) : undefined;
-    if (bill) return { ...bill, name: member.name || bill.name, product: member.product || bill.product };
-    return { number: member.number, name: member.name, product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" };
+    if (bill) return { ...bill, name: storedName(member.name) || storedName(bill.name), product: member.product || bill.product };
+    return { number: member.number, name: storedName(member.name), product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" };
   });
   const bills = tableRows;
   const counts = {
@@ -596,6 +606,68 @@ export function LoketKolektifPage() {
   const payable = (picked.length ? bills.filter((row) => picked.includes(memberKey(row))) : bills)
     .filter((row) => row.status !== "LUNAS" && row.total >= 1000);
   const listTotal = bills.filter((row) => row.status !== "LUNAS").reduce((sum, row) => sum + row.total, 0);
+  const pendingKey = bills.filter((row) => row.period === "Memuat").map((row) => memberKey(row)).join("|");
+  useEffect(() => {
+    if (!active || !pendingKey) return;
+    const groupId = active.id;
+    const slice = bills.filter((row) => row.period === "Memuat").slice(0, 40);
+    let cancel = false;
+    void (async () => {
+      let response: Response;
+      try {
+        response = await fetch("/api/biller/inquiry-batch", {
+          method: "POST",
+          headers: await authHeader(),
+          body: JSON.stringify({ items: slice.map((row) => ({ category: canonicalCategory(row.product), product: row.product || "", customerNumber: row.number })) }),
+        });
+      } catch {
+        if (!cancel) tell("Cek tagihan kolektif tidak terhubung ke server.");
+        return;
+      }
+      const body = await response.json().catch(() => ({} as { error?: string; results?: unknown[] }));
+      if (cancel) return;
+      if (!response.ok) {
+        tell(body.error || "Cek tagihan kolektif gagal.");
+        const failed = groupsRef.current.map((group) => group.id === groupId ? { ...group, bills: group.members.map((member) => slice.some((row) => row.number === member.number) ? { number: member.number, name: storedName(member.name), product: member.product || "", period: "-", total: 0, status: "LAINNYA" as const } : (findBill(group.bills, member, group.members) ?? { number: member.number, name: storedName(member.name), product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" as const })) } : group);
+        commitLocal(failed);
+        return;
+      }
+      const results = Array.isArray(body.results) ? body.results as Array<Record<string, unknown>> : [];
+      const byNumber = new Map(results.map((item) => [String(item.customerNumber || ""), item]));
+      const current = groupsRef.current.find((group) => group.id === groupId);
+      if (!current) return;
+      const checked = new Map(slice.map((row) => [memberKey(row), row]));
+      const billsNext = current.members.map((member) => {
+        const key = memberKey(member);
+        const previous = findBill(current.bills, member, current.members);
+        if (!checked.has(key)) return previous && previous.period !== "Memuat" ? previous : { number: member.number, name: storedName(member.name), product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" as const };
+        const hit = byNumber.get(member.number);
+        const quote = hit?.bill && typeof hit.bill === "object" ? hit.bill as Record<string, unknown> : {};
+        const inquired = storedName(String(quote.customerName || ""));
+        const statusText = String(hit?.statusText || "failed");
+        const status = statusText === "paid" ? "LUNAS" as const : statusText === "found" ? "BL LNS" as const : "LAINNYA" as const;
+        return {
+          number: member.number,
+          name: inquired || storedName(member.name),
+          product: member.product || "",
+          period: String(quote.period || (status === "LAINNYA" ? "-" : "")),
+          total: Number(quote.total) || 0,
+          status,
+          sku: String(hit?.buyerSkuCode || ""),
+          providerRef: String(hit?.providerRef || ""),
+          menuCategory: String(hit?.category || ""),
+          menuProduct: String(hit?.product || ""),
+        };
+      });
+      const members = current.members.map((member) => {
+        const bill = billsNext.find((item) => item.number === member.number && sameCategory(item.product, member.product || ""));
+        return bill?.name ? { ...member, name: bill.name } : member;
+      });
+      if (cancel) return;
+      commitLocal(groupsRef.current.map((group) => group.id === groupId ? { ...group, members, bills: billsNext } : group));
+    })();
+    return () => { cancel = true; };
+  }, [active?.id, pendingKey]);
   const nextBatch = payable.slice(0, 10);
   const nextBatchTotal = nextBatch.reduce((sum, row) => sum + row.total, 0);
   const remainder = payable.slice(10);
@@ -740,7 +812,7 @@ export function LoketKolektifPage() {
         const response = await fetch("/api/loket-sales", {
           method: "POST",
           headers: await authHeader(),
-          body: JSON.stringify({ channel: "simulation", clientRef: `kolektif:${active.id}:${canonicalCategory(row.product)}:${row.number}:${row.period}`, category: "Kolektif", product: `${canonicalCategory(row.product)} ${active.name}`, customerNumber: row.number, customerName: row.name, amount: row.total, period: row.period, loketName }),
+          body: JSON.stringify({ channel: "digiflazz", clientRef: row.providerRef || `kolektif:${active.id}:${row.number}:${row.period}`, providerRef: row.providerRef, buyerSkuCode: row.sku, category: row.menuCategory || canonicalCategory(row.product), product: row.menuProduct || row.product || canonicalCategory(row.product), customerNumber: row.number, customerName: storedName(row.name), amount: row.total, tagihan: row.total, period: row.period, loketName }),
         });
         const parsed = await readApi(response);
         if (!parsed.ok) { stopped = parsed.body.error || "Batch berhenti."; break; }
@@ -802,9 +874,7 @@ export function LoketKolektifPage() {
       custNoRef.current?.focus();
       return;
     }
-    const known = inquire(biller, number, biller, 0);
-    const name = known?.name || "Pelanggan";
-    const members = mergeMembers(group.members, [{ number, name, product: biller }]);
+    const members = mergeMembers(group.members, [{ number, name: "", product: biller }]);
     const next = groupsRef.current.map((item) => item.id === group.id ? { ...item, category: canonicalCategory(biller), members } : item);
     setCustNo("");
     setProductFilter(biller);
@@ -975,7 +1045,7 @@ export function LoketKolektifPage() {
                   <td className="px-3 py-2"><input type="checkbox" checked={picked.includes(memberKey(row))} onChange={(event) => setPicked((rows) => event.target.checked ? [...rows, memberKey(row)] : rows.filter((item) => item !== memberKey(row)))} /></td>
                   <td className="px-3 py-2">{index + 1}</td>
                   <td className="px-3 py-2 font-mono">{row.number}</td>
-                  <td className="px-2 py-2 break-words">{row.name}</td>
+                  <td className="px-2 py-2 break-words">{shownCustomer(row.name)}</td>
                   <td className="px-3 py-2">{canonicalCategory(row.product)}</td>
                   <td className="px-3 py-2">{row.period}</td>
                   <td className="px-3 py-2 font-semibold">{formatRupiah(row.total)}</td>

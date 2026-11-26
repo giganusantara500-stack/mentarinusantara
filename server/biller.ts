@@ -1,4 +1,5 @@
-import { callbackRef, digiflazzReady, inquireDigiflazz, payDigiflazz, productKind, resolveBuyerSku, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
+import { billIsPaid, callbackRef, digiflazzReady, inquireDigiflazz, newRefId, payDigiflazz, productKind, resolveBuyerSku, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
+import { findCatalogItem, foldLabel } from "../src/lib/billerCatalog";
 import { recordLoketSale, walletBalance, type LedgerEnv } from "./ledger";
 
 export type BillerMode = "simulation" | "h2h";
@@ -50,7 +51,7 @@ interface ProviderResult {
 }
 
 interface BillerProvider {
-  inquire(input: InquiryInput): Promise<{ status: "found" | "not_found" | "unavailable"; message?: string; bill?: BillQuote; providerRef?: string; buyerSkuCode?: string }>;
+  inquire(input: InquiryInput): Promise<{ status: "found" | "not_found" | "unavailable" | "paid"; message?: string; bill?: BillQuote; providerRef?: string; buyerSkuCode?: string }>;
   submit(input: InquiryInput & { clientRef: string; bill: BillQuote; providerRef?: string }): Promise<ProviderResult>;
 }
 
@@ -116,7 +117,7 @@ const h2hProvider: BillerProvider = {
     const sku = await resolveBuyerSku(kind, input.category, input.product, clean(input.buyerSkuCode));
     if (!/^[A-Za-z0-9._-]{1,64}$/.test(sku)) return { status: "unavailable", message: "Produk ini belum tersedia untuk pembayaran." };
     if (input.customerNumber.trim().length < 4) return { status: "not_found", message: "Nomor pelanggan terlalu pendek." };
-    const refId = clean(input.refId) || `MN${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    const refId = clean(input.refId) || newRefId();
     try {
       const quote = await inquireDigiflazz({
         kind,
@@ -126,6 +127,7 @@ const h2hProvider: BillerProvider = {
         category: input.category,
         product: input.product,
       });
+      if (billIsPaid(quote.message)) return { status: "paid", message: quote.message || "Tagihan sudah lunas.", providerRef: quote.refId, buyerSkuCode: quote.sku || sku, bill: billFromQuote(quote, input.adminFee) };
       if (quote.outcome === "not_found") return { status: "not_found", message: quote.message || "Tagihan tidak ditemukan di DigiFlazz." };
       if (quote.outcome === "failed") return { status: "unavailable", message: quote.message || "DigiFlazz menolak pengecekan." };
       if (quote.total < 1000 && quote.amount < 1000) return { status: "unavailable", message: "Harga DigiFlazz belum tersedia untuk kode produk ini." };
@@ -211,8 +213,12 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     outcome: "pending",
     clientRef: refId,
   });
-  if (pending.error || !pending.sale) return { ...pending, paymentStatus: "failed" as PaymentStatus, mode };
-  await rememberDigiflazz(env, pending.sale.id, { buyerSkuCode: sku, kind, customerNumber: input.customerNumber, refId }).catch(() => undefined);
+  if (pending.error || !pending.sale) return { ...pending, error: pending.error || "Transaksi tidak dapat dimulai.", paymentStatus: "failed" as PaymentStatus, mode };
+  const claimed = await claimDigiflazz(env, pending.sale.id, { buyerSkuCode: sku, kind, customerNumber: input.customerNumber, refId });
+  if (!claimed) {
+    const balance = pending.balance ?? await walletBalance(env, actorId);
+    return { error: "Transaksi ini sedang diproses. Cek status sebelum mengulang.", status: 409, balance, sale: pending.sale, paymentStatus: "pending" as PaymentStatus, mode, providerRef: refId };
+  }
   const submitted = await h2hProvider.submit({ ...input, buyerSkuCode: sku, kind, bill: inquiry.bill, providerRef: refId, clientRef: refId });
   const charged = submitted.bill && submitted.bill.total >= 1000 ? submitted.bill : inquiry.bill;
   const settled = await recordLoketSale(env, actorId, {
@@ -246,8 +252,31 @@ export async function handleBillerRequest(method: string, pathname: string, body
       kind: clean(body.kind),
       refId: clean(body.refId),
     });
+    if (result.status === "paid") return { status: 200, body: { mode, statusText: "paid", message: result.message, bill: result.bill, providerRef: result.providerRef, buyerSkuCode: result.buyerSkuCode } };
     if (result.status !== "found") return { status: result.status === "not_found" ? 404 : 409, body: { error: result.message, mode, statusText: result.status } };
     return { status: 200, body: { mode, statusText: "found", bill: result.bill, providerRef: result.providerRef, buyerSkuCode: result.buyerSkuCode } };
+  }
+  if (pathname === "/api/biller/inquiry-batch" && method === "POST") {
+    const items = Array.isArray(body.items) ? body.items.slice(0, 40) : [];
+    if (items.length === 0) return { status: 400, body: { error: "Daftar nomor pelanggan kosong." } };
+    const results = await mapPool(items, 4, async (item) => {
+      const record = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      const menu = menuForCollective(clean(record.category), clean(record.product));
+      const customerNumber = clean(record.customerNumber);
+      if (!menu) return { customerNumber, statusText: "failed", message: "Produk kolektif belum terpetakan ke DigiFlazz." };
+      const result = await inquireBill("h2h", { category: menu.category, product: menu.product, customerNumber, adminFee: Number(record.adminFee) || 0 });
+      return {
+        customerNumber,
+        category: menu.category,
+        product: menu.product,
+        statusText: result.status,
+        message: result.message || "",
+        bill: result.bill,
+        providerRef: result.providerRef,
+        buyerSkuCode: result.buyerSkuCode,
+      };
+    });
+    return { status: 200, body: { results } };
   }
   if (pathname === "/api/biller/pay" && method === "POST") {
     const mode = requestedMode(body.mode ?? body.channel);
@@ -298,6 +327,51 @@ interface StoredDigiSale {
   category_slug_snapshot: string;
   customer_name: string | null;
   provider_response: { buyerSkuCode?: string; kind?: DigiKind; customerNumber?: string; refId?: string; sn?: string } | null;
+}
+
+function menuForCollective(category: string, product: string) {
+  const direct = findCatalogItem(category, product) || findCatalogItem(product, category);
+  if (direct) return { category: direct.category, product: direct.label };
+  const key = foldLabel(`${category} ${product}`);
+  if (key.includes("pln")) return { category: "PLN", product: "Pascabayar" };
+  if (key.includes("bpjs")) return { category: "BPJS", product: "BPJS Kesehatan" };
+  if (key.includes("telkom") || key.includes("pstn")) return { category: "Internet", product: "Telkom" };
+  if (key.includes("gas") || key.includes("pertagas") || key.includes("pgn")) return { category: "Gas", product: "Pertagas 20.000" };
+  if (key.includes("pdam")) {
+    const area = findCatalogItem("PDAM", product) || findCatalogItem("PDAM", category);
+    return area ? { category: "PDAM", product: area.label } : null;
+  }
+  return null;
+}
+
+async function mapPool<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>) {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const run = async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => run()));
+  return results;
+}
+
+async function claimDigiflazz(env: LedgerEnv, id: string, meta: { buyerSkuCode: string; kind: DigiKind; customerNumber: string; refId: string }) {
+  if (!env.supabaseUrl || !env.serviceRoleKey || !id) return false;
+  const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?id=eq.${encodeURIComponent(id)}&provider_response=is.null`, {
+    method: "PATCH",
+    headers: {
+      apikey: env.serviceRoleKey,
+      Authorization: `Bearer ${env.serviceRoleKey}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({ provider_reference: meta.refId, provider_response: meta }),
+  });
+  const rows = await response.json().catch(() => null);
+  return response.ok && Array.isArray(rows) && rows.length > 0;
 }
 
 async function rememberDigiflazz(env: LedgerEnv, id: string, meta: { buyerSkuCode: string; kind: DigiKind; customerNumber: string; refId: string; sn?: string }) {

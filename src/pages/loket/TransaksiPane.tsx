@@ -253,6 +253,7 @@ export function LoketTransaksiPage() {
     if (draftRef.current !== generation) return;
     const body = await response.json().catch(() => ({}));
     const bill = body.bill as { customerName?: string; period?: string; amount?: number; denda?: number; adminFee?: number; collfee?: number; total?: number } | undefined;
+    if (body.statusText === "paid") { setError(body.message || "Tagihan sudah lunas."); return; }
     if (!response.ok || !bill) { setError(body.error || "Tagihan tidak ditemukan."); return; }
     const found = { name: shownName(bill.customerName), period: bill.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || 0, admin: Number(bill.adminFee) || 0, collfee: Number(bill.collfee) || 0, total: Number(bill.total) || 0 };
     if (draftRef.current !== generation) return;

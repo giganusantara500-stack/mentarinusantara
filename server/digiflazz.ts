@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { findCatalogItem, foldLabel } from "../src/lib/billerCatalog";
 
 export type DigiKind = "prepaid" | "postpaid";
@@ -38,6 +38,14 @@ export function digiflazzReady() {
 
 export function digiflazzSign(username: string, apiKey: string, refId: string) {
   return createHash("md5").update(`${username}${apiKey}${refId}`).digest("hex");
+}
+
+export function newRefId() {
+  return `MN${randomBytes(12).toString("hex")}`;
+}
+
+export function billIsPaid(message: string) {
+  return /sudah\s+(di)?bayar|sudah\s+lunas|telah\s+lunas|tagihan\s+lunas/.test(message.toLowerCase());
 }
 
 export function sameSecret(given: string, expected: string) {
@@ -160,27 +168,94 @@ function signedTransaction(refId: string, sku: string, customerNumber: string, c
   };
 }
 
-const priceCache: { at: number; prepaid: Record<string, unknown>[]; postpaid: Record<string, unknown>[] } = { at: 0, prepaid: [], postpaid: [] };
+const priceCache: { at: number; prepaid: Record<string, unknown>[]; postpaid: Record<string, unknown>[]; prepaidMessage: string; postpaidMessage: string } = { at: 0, prepaid: [], postpaid: [], prepaidMessage: "", postpaidMessage: "" };
 
-function asRows(data: Record<string, unknown>) {
-  if (Array.isArray(data)) return data as Record<string, unknown>[];
-  return Array.isArray(data.data) ? data.data as Record<string, unknown>[] : [];
+function rowSku(row: Record<string, unknown>) {
+  return text(row.buyer_sku_code) || text(row.buyerSkuCode);
+}
+
+function rowActive(row: Record<string, unknown>) {
+  const closed = (value: unknown) => value === false || value === 0 || value === "0" || String(value).trim().toLowerCase() === "false";
+  return !closed(row.buyer_product_status) && !closed(row.seller_product_status);
+}
+
+function extractRows(body: unknown): Record<string, unknown>[] {
+  if (Array.isArray(body)) return body.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row) && Boolean(rowSku(row as Record<string, unknown>) || text((row as Record<string, unknown>).product_name)));
+  if (!body || typeof body !== "object") return [];
+  const record = body as Record<string, unknown>;
+  for (const key of ["data", "pricelist", "price_list", "list"]) {
+    const nested = extractRows(record[key]);
+    if (nested.length > 0) return nested;
+  }
+  return [];
+}
+
+function listMessage(body: unknown) {
+  if (!body || typeof body !== "object") return "";
+  const record = body as Record<string, unknown>;
+  const inner = record.data && typeof record.data === "object" && !Array.isArray(record.data) ? record.data as Record<string, unknown> : {};
+  return text(record.message) || text(inner.message);
+}
+
+async function loadPriceList(kind: DigiKind) {
+  const config = digiflazzConfig();
+  const sign = digiflazzSign(config.username, config.apiKey, "pricelist");
+  const payload = await postDigi("/price-list", { cmd: kind === "prepaid" ? "prepaid" : "pasca", username: config.username, sign });
+  return { rows: extractRows(payload), message: listMessage(payload) };
 }
 
 async function priceRows(kind: DigiKind) {
   if (Date.now() - priceCache.at < 10 * 60 * 1000 && (kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid).length > 0) {
-    return kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid;
+    return { rows: kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid, message: kind === "prepaid" ? priceCache.prepaidMessage : priceCache.postpaidMessage };
   }
-  const config = digiflazzConfig();
-  const sign = digiflazzSign(config.username, config.apiKey, "pricelist");
-  const [prepaid, postpaid] = await Promise.all([
-    postDigi("/price-list", { cmd: "prepaid", username: config.username, sign }),
-    postDigi("/price-list", { cmd: "pasca", username: config.username, sign }),
-  ]);
+  const [prepaid, postpaid] = await Promise.allSettled([loadPriceList("prepaid"), loadPriceList("postpaid")]);
   priceCache.at = Date.now();
-  priceCache.prepaid = asRows(prepaid);
-  priceCache.postpaid = asRows(postpaid);
-  return kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid;
+  priceCache.prepaid = prepaid.status === "fulfilled" ? prepaid.value.rows : [];
+  priceCache.postpaid = postpaid.status === "fulfilled" ? postpaid.value.rows : [];
+  priceCache.prepaidMessage = prepaid.status === "fulfilled" ? prepaid.value.message : "Daftar harga prabayar DigiFlazz tidak dapat dibaca.";
+  priceCache.postpaidMessage = postpaid.status === "fulfilled" ? postpaid.value.message : "Daftar harga pascabayar DigiFlazz tidak dapat dibaca.";
+  return { rows: kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid, message: kind === "prepaid" ? priceCache.prepaidMessage : priceCache.postpaidMessage };
+}
+
+function plnAmount(sku: string) {
+  const match = sku.toLowerCase().match(/^pln(\d+)(b)?$/);
+  return match ? Number(match[1]) * 1000 : 0;
+}
+
+function mentionsAmount(row: Record<string, unknown>, amount: number) {
+  const raw = `${text(row.product_name)} ${text(row.desc)} ${rowSku(row)}`.toLowerCase();
+  const full = String(amount);
+  const grouped = full.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  if (raw.includes(full) || raw.includes(grouped) || foldLabel(raw).includes(foldLabel(grouped))) return true;
+  const price = money(row.price);
+  return price > 0 && Math.abs(price - amount) <= Math.max(2500, Math.round(amount * 0.08));
+}
+
+export function selectPriceRow(rows: Record<string, unknown>[], sku: string, category: string, product: string) {
+  const wanted = sku.trim().toLowerCase();
+  const active = rows.filter(rowActive);
+  const pool = active.length > 0 ? active : [];
+  const exact = pool.find((row) => rowSku(row).toLowerCase() === wanted);
+  if (exact) return exact;
+  const amount = plnAmount(wanted);
+  if (amount > 0) {
+    const variantB = wanted.endsWith("b");
+    const candidates = pool.filter((row) => {
+      const code = rowSku(row).toLowerCase();
+      const parsed = code.match(/^pln(\d+)(b)?$/);
+      if (parsed && Number(parsed[1]) * 1000 === amount) return true;
+      const brand = foldLabel(`${text(row.brand)} ${text(row.category)} ${text(row.product_name)}`);
+      return brand.includes("pln") && mentionsAmount(row, amount);
+    });
+    const sameVariant = candidates.find((row) => rowSku(row).toLowerCase().endsWith("b") === variantB);
+    return sameVariant ?? candidates[0] ?? null;
+  }
+  let best: { row: Record<string, unknown>; score: number } | null = null;
+  for (const row of pool) {
+    const score = priceScore(row, product || sku, category);
+    if (score >= 60 && (!best || score > best.score)) best = { row, score };
+  }
+  return best?.row ?? null;
 }
 
 function compact(value: string) {
@@ -206,29 +281,20 @@ function priceScore(row: Record<string, unknown>, product: string, category: str
   return score;
 }
 
-function matchPriceRow(rows: Record<string, unknown>[], product: string, category: string) {
-  let best: { row: Record<string, unknown>; score: number } | null = null;
-  for (const row of rows) {
-    const score = priceScore(row, product, category);
-    if (score >= 60 && (!best || score > best.score)) best = { row, score };
-  }
-  return best ? text(best.row.buyer_sku_code) : "";
-}
-
 export async function resolveBuyerSku(kind: DigiKind, category: string, product: string, explicit = "") {
   const given = explicit.trim();
-  if (/^[A-Za-z0-9._-]{1,64}$/.test(given)) return given;
   const mapped = findCatalogItem(category, product);
-  if (mapped) return mapped.sku;
-  if (!digiflazzReady()) return "";
+  const preferred = /^[A-Za-z0-9._-]{1,64}$/.test(given) ? given : mapped?.sku || "";
+  if (!digiflazzReady()) return preferred;
   try {
     const primary = await priceRows(kind);
-    const direct = matchPriceRow(primary, product, category);
-    if (direct) return direct;
+    const live = selectPriceRow(primary.rows, preferred, category, product);
+    if (live) return rowSku(live);
     const alternate = await priceRows(kind === "prepaid" ? "postpaid" : "prepaid");
-    return matchPriceRow(alternate, product, category);
+    const other = selectPriceRow(alternate.rows, preferred, category, product);
+    return other ? rowSku(other) : preferred;
   } catch {
-    return "";
+    return preferred;
   }
 }
 
@@ -265,20 +331,15 @@ async function plnSubscriber(customerNumber: string) {
 
 export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; customerNumber: string; refId: string; category?: string; product?: string }): Promise<DigiQuote> {
   if (input.kind === "prepaid") {
-    const config = digiflazzConfig();
-    const data = await postDigi("/price-list", {
-      cmd: "prepaid",
-      username: config.username,
-      sign: digiflazzSign(config.username, config.apiKey, "pricelist"),
-    });
-    const rows = Array.isArray(data) ? data : Array.isArray((data as { data?: unknown }).data) ? (data as { data: unknown[] }).data : [];
-    const match = rows.find((row) => text((row as Record<string, unknown>)?.buyer_sku_code).toLowerCase() === input.sku.toLowerCase()) as Record<string, unknown> | undefined;
+    const listed = await priceRows("prepaid");
+    const match = selectPriceRow(listed.rows, input.sku, input.category || "", input.product || "");
     if (!match) {
-      return { outcome: "not_found", message: "Kode produk DigiFlazz tidak ada di daftar harga.", refId: input.refId, sku: input.sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, sn: "" };
+      const message = listed.rows.length === 0
+        ? (listed.message || "Daftar harga DigiFlazz tidak dapat dibaca. Coba lagi beberapa saat.")
+        : `Produk ${input.sku || input.product || "ini"} belum aktif di daftar harga DigiFlazz.`;
+      return { outcome: "failed", message, refId: input.refId, sku: input.sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, sn: "" };
     }
-    if (match.buyer_product_status === false || match.seller_product_status === false) {
-      return { outcome: "failed", message: "Produk DigiFlazz sedang tidak aktif.", refId: input.refId, sku: input.sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, sn: "" };
-    }
+    const sku = rowSku(match) || input.sku;
     const price = money(match.price);
     let customerName = "";
     let period = "";
@@ -288,7 +349,7 @@ export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; cus
         customerName = subscriber.name;
         period = subscriber.period;
         if (!customerName && subscriber.rc !== "86" && subscriber.outcome !== "success" && subscriber.outcome !== "pending") {
-          return { outcome: subscriber.outcome === "not_found" ? "not_found" : "failed", message: subscriber.message || "Nomor meter PLN tidak ditemukan.", refId: input.refId, sku: input.sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, sn: "" };
+          return { outcome: subscriber.outcome === "not_found" ? "not_found" : "failed", message: subscriber.message || "Nomor meter PLN tidak ditemukan.", refId: input.refId, sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, sn: "" };
         }
       } catch {
         customerName = "";
@@ -298,7 +359,7 @@ export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; cus
       outcome: "success",
       message: text(match.product_name) || "Produk siap dibayar.",
       refId: input.refId,
-      sku: input.sku,
+      sku,
       customerName,
       customerNumber: input.customerNumber,
       period,

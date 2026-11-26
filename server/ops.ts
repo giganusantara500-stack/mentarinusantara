@@ -6,7 +6,7 @@ import { listAccounts, networkLoketIds, setManagedActive } from "./accountAdmin"
 import { ensureLoketCode, listAuthUsers } from "./loketCode";
 
 interface Member { number: string; name: string; product?: string; createdAt?: string }
-interface Bill { number: string; name: string; product?: string; period: string; total: number; status: "LUNAS" | "BL LNS" | "LAINNYA" }
+interface Bill { number: string; name: string; product?: string; period: string; total: number; status: "LUNAS" | "BL LNS" | "LAINNYA"; sku?: string; providerRef?: string; menuCategory?: string; menuProduct?: string }
 interface Collective {
   id: string;
   ownerId: string;
@@ -45,7 +45,7 @@ const filePath = path.join(process.cwd(), "server", "data", "ops.json");
 function normalizeCollective(row: Partial<Collective> & { numbers?: string[] }): Collective {
   const members = Array.isArray(row.members) && row.members.length > 0
     ? row.members
-    : (row.numbers ?? []).map((number) => ({ number, name: "Pelanggan" }));
+    : (row.numbers ?? []).map((number) => ({ number, name: "" }));
   return {
     id: row.id || crypto.randomUUID(),
     ownerId: row.ownerId || "",
@@ -201,7 +201,7 @@ function noticeVisible(item: RunNotice, callerRole: string, mitraId: string | nu
 function mapMembers(body: Record<string, unknown>, previous: Member[] = []) {
   const source = Array.isArray(body.members)
     ? body.members
-    : (Array.isArray(body.numbers) ? body.numbers.map((item) => ({ number: item, name: "Pelanggan", product: "" })) : null);
+    : (Array.isArray(body.numbers) ? body.numbers.map((item) => ({ number: item, name: "", product: "" })) : null);
   if (!source) return null;
   return source.map((item) => {
     const number = String((item as Member)?.number ?? "").trim();
@@ -210,7 +210,7 @@ function mapMembers(body: Record<string, unknown>, previous: Member[] = []) {
       ?? previous.find((member) => member.number === number && !String(member.product ?? "").trim());
     return {
       number,
-      name: String((item as Member)?.name ?? "").trim() || "Pelanggan",
+      name: String((item as Member)?.name ?? "").trim().replace(/^pelanggan(\s+\d+)?$/i, ""),
       product,
       createdAt: current?.createdAt || new Date().toISOString(),
     };
@@ -310,11 +310,15 @@ export async function handleOpsRequest(
       const bills = Array.isArray(body.bills) ? body.bills as Bill[] : [];
       row.bills = bills.map((bill) => ({
         number: String(bill.number ?? ""),
-        name: String(bill.name ?? "Pelanggan"),
+        name: String(bill.name ?? "").replace(/^pelanggan(\s+\d+)?$/i, ""),
         product: String(bill.product ?? ""),
         period: String(bill.period ?? ""),
         total: Number(bill.total) || 0,
         status: bill.status === "LUNAS" || bill.status === "LAINNYA" ? bill.status : "BL LNS",
+        sku: String(bill.sku ?? ""),
+        providerRef: String(bill.providerRef ?? ""),
+        menuCategory: String(bill.menuCategory ?? ""),
+        menuProduct: String(bill.menuProduct ?? ""),
       }));
       if (body.paid === true) {
         const paid = row.bills.filter((bill) => bill.status === "LUNAS");
