@@ -1,4 +1,4 @@
-import { callbackRef, digiflazzReady, inquireDigiflazz, payDigiflazz, productKind, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
+import { callbackRef, digiflazzReady, inquireDigiflazz, payDigiflazz, productKind, resolveBuyerSku, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
 import { recordLoketSale, walletBalance, type LedgerEnv } from "./ledger";
 
 export type BillerMode = "simulation" | "h2h";
@@ -50,7 +50,7 @@ interface ProviderResult {
 }
 
 interface BillerProvider {
-  inquire(input: InquiryInput): Promise<{ status: "found" | "not_found" | "unavailable"; message?: string; bill?: BillQuote; providerRef?: string }>;
+  inquire(input: InquiryInput): Promise<{ status: "found" | "not_found" | "unavailable"; message?: string; bill?: BillQuote; providerRef?: string; buyerSkuCode?: string }>;
   submit(input: InquiryInput & { clientRef: string; bill: BillQuote; providerRef?: string }): Promise<ProviderResult>;
 }
 
@@ -99,7 +99,7 @@ const simulationProvider: BillerProvider = {
 function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
   const fee = quote.adminFee || adminFee;
   return {
-    customerName: quote.customerName || "Pelanggan",
+    customerName: quote.customerName,
     period: quote.period,
     amount: quote.amount,
     denda: quote.denda,
@@ -112,13 +112,14 @@ function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
 const h2hProvider: BillerProvider = {
   async inquire(input) {
     if (!digiflazzReady()) return { status: "unavailable", message: "Username atau API key DigiFlazz belum diisi di server VPS. Saldo tidak berubah." };
-    const sku = clean(input.buyerSkuCode);
-    if (!/^[A-Za-z0-9._-]{1,64}$/.test(sku)) return { status: "unavailable", message: "Isi kode produk DigiFlazz (buyer_sku_code)." };
+    const kind = productKind(input.category, input.product, clean(input.kind));
+    const sku = await resolveBuyerSku(kind, input.category, input.product, clean(input.buyerSkuCode));
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(sku)) return { status: "unavailable", message: "Produk ini belum tersedia untuk pembayaran." };
     if (input.customerNumber.trim().length < 4) return { status: "not_found", message: "Nomor pelanggan terlalu pendek." };
     const refId = clean(input.refId) || `MN${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     try {
       const quote = await inquireDigiflazz({
-        kind: productKind(input.category, input.product, clean(input.kind)),
+        kind,
         sku,
         customerNumber: input.customerNumber,
         refId,
@@ -126,7 +127,7 @@ const h2hProvider: BillerProvider = {
       if (quote.outcome === "not_found") return { status: "not_found", message: quote.message || "Tagihan tidak ditemukan di DigiFlazz." };
       if (quote.outcome === "failed") return { status: "unavailable", message: quote.message || "DigiFlazz menolak pengecekan." };
       if (quote.total < 1000 && quote.amount < 1000) return { status: "unavailable", message: "Harga DigiFlazz belum tersedia untuk kode produk ini." };
-      return { status: "found", providerRef: quote.refId, bill: billFromQuote(quote, input.adminFee) };
+      return { status: "found", providerRef: quote.refId, buyerSkuCode: quote.sku || sku, bill: billFromQuote(quote, input.adminFee) };
     } catch {
       return { status: "unavailable", message: "DigiFlazz tidak dapat dihubungi dari VPS. Saldo tidak berubah." };
     }
@@ -185,11 +186,11 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     return { error: "Pengembalian saldo hanya dicatat setelah penyedia menyatakan transaksi berhasil.", status: 409, balance: await walletBalance(env, actorId), paymentStatus: "failed" as PaymentStatus, mode };
   }
 
-  const sku = clean(input.buyerSkuCode);
   const kind = productKind(input.category, input.product, clean(input.kind));
+  const sku = await resolveBuyerSku(kind, input.category, input.product, clean(input.buyerSkuCode));
   const refId = clean(input.providerRef) || input.clientRef;
   const inquiry = input.providerRef
-    ? { status: "found" as const, message: "", providerRef: refId, bill: { customerName: input.customerName || "Pelanggan", period: input.period || "", amount: Number(input.tagihan) || Number(input.amount) || 0, denda: Number(input.denda) || 0, adminFee: input.adminFee, collfee: Number(input.collfee) || 0, total: Number(input.amount) || 0 } }
+    ? { status: "found" as const, message: "", providerRef: refId, bill: { customerName: input.customerName || "", period: input.period || "", amount: Number(input.tagihan) || Number(input.amount) || 0, denda: Number(input.denda) || 0, adminFee: input.adminFee, collfee: Number(input.collfee) || 0, total: Number(input.amount) || 0 } }
     : await h2hProvider.inquire({ ...input, refId });
   if (inquiry.status !== "found" || !inquiry.bill || inquiry.bill.total < 1000) {
     const balance = await walletBalance(env, actorId);
@@ -244,7 +245,7 @@ export async function handleBillerRequest(method: string, pathname: string, body
       refId: clean(body.refId),
     });
     if (result.status !== "found") return { status: result.status === "not_found" ? 404 : 409, body: { error: result.message, mode, statusText: result.status } };
-    return { status: 200, body: { mode, statusText: "found", bill: result.bill, providerRef: result.providerRef } };
+    return { status: 200, body: { mode, statusText: "found", bill: result.bill, providerRef: result.providerRef, buyerSkuCode: result.buyerSkuCode } };
   }
   if (pathname === "/api/biller/pay" && method === "POST") {
     const mode = requestedMode(body.mode ?? body.channel);
@@ -337,7 +338,7 @@ async function applyDigiflazzStatus(env: LedgerEnv, row: StoredDigiSale) {
     category: row.category_slug_snapshot,
     product: row.product_name_snapshot,
     customerNumber,
-    customerName: quote.customerName || row.customer_name || "Pelanggan",
+    customerName: quote.customerName || row.customer_name || "",
     amount,
     channel: "production",
     outcome: quote.outcome,

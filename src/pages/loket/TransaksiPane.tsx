@@ -74,17 +74,10 @@ async function authHeader() {
   return { Authorization: `Bearer ${session.data.session?.access_token ?? ""}`, "Content-Type": "application/json" };
 }
 
-function inquire(number: string, product: string, adminFee: number): Omit<CartRow, "key" | "category" | "product" | "customerId"> | null {
-  const digits = number.replace(/\D/g, "");
-  if (digits.length < 5) return null;
-  const prepaid = product.match(/Prepaid\s+(\d+)/i);
-  const fixed = prepaid ? Number(prepaid[1]) * 1000 : product === "Prepaid" ? 0 : null;
-  if (product === "Prepaid" && fixed === 0) return null;
-  const tail = Number(digits.slice(-5)) || 10000;
-  const amount = fixed ?? (15000 + (tail % 250000));
-  const denda = fixed ? 0 : (tail % 9 === 0 ? 2000 : 0);
-  const period = new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" });
-  return { name: `Pelanggan ${digits.slice(-4)}`, period, amount, denda, admin: adminFee, collfee: 0, total: amount + denda + adminFee };
+function shownName(value: unknown) {
+  const name = String(value ?? "").trim();
+  if (!name || /^pelanggan(\s+\d+)?$/i.test(name)) return "—";
+  return name;
 }
 
 function AreaPicker({ value, onChange }: { value: string; onChange: (value: string) => void }) {
@@ -161,8 +154,6 @@ export function LoketTransaksiPage() {
   const [adminFee, setAdminFee] = useState(4800);
   const [months, setMonths] = useState("01");
   const [taxYear, setTaxYear] = useState(String(new Date().getFullYear()));
-  const [channel, setChannel] = useState<"simulation" | "digiflazz">("simulation");
-  const [sku, setSku] = useState("");
   const [number, setNumber] = useState("");
   const [cart, setCart] = useState<CartRow[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -187,7 +178,6 @@ export function LoketTransaksiPage() {
     draftRef.current += 1;
     setCart([]);
     setNumber("");
-    setSku("");
     setMessage("");
     setError("");
     setReprintId("");
@@ -252,13 +242,12 @@ export function LoketTransaksiPage() {
     const generation = draftRef.current;
     const activeCategory = category;
     const activeProduct = product;
-    if (channel === "digiflazz" && !sku.trim()) { setError("Isi kode produk DigiFlazz (buyer_sku_code)."); return; }
     let response: Response;
     try {
       response = await fetch(apiUrl("/api/biller/inquiry"), {
       method: "POST",
       headers: await authHeader(),
-      body: JSON.stringify({ mode: channel, category, product, customerNumber: number, adminFee: appliedAdmin, months, taxYear, buyerSkuCode: sku.trim() }),
+      body: JSON.stringify({ mode: "digiflazz", category, product, customerNumber: number, adminFee: appliedAdmin, months, taxYear }),
     });
     } catch {
       if (draftRef.current !== generation) return;
@@ -268,22 +257,12 @@ export function LoketTransaksiPage() {
     if (draftRef.current !== generation) return;
     const body = await response.json().catch(() => ({}));
     const bill = body.bill as { customerName?: string; period?: string; amount?: number; denda?: number; adminFee?: number; collfee?: number; total?: number } | undefined;
-    const found = response.ok && bill
-      ? { name: bill.customerName || "Pelanggan", period: bill.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || 0, admin: Number(bill.adminFee) || 0, collfee: Number(bill.collfee) || 0, total: Number(bill.total) || 0 }
-      : channel === "simulation" ? inquire(number, product, appliedAdmin) : null;
-    if (draftRef.current !== generation) return;
-    if (!found) { setError(body.error || "Nomor minimal 5 digit."); return; }
-    if (!response.ok && activeCategory === "BPJS") {
-      const count = Number(months);
-      found.amount *= count;
-      found.denda *= count;
-      found.total = found.amount + found.denda + found.admin + found.collfee;
-      found.period = `${months} Bulan`;
-    }
-    if (!response.ok && activeCategory === "Pajak PBB") found.period = taxYear;
+    if (!response.ok || !bill) { setError(body.error || "Tagihan tidak ditemukan."); return; }
+    const found = { name: shownName(bill.customerName), period: bill.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || 0, admin: Number(bill.adminFee) || 0, collfee: Number(bill.collfee) || 0, total: Number(bill.total) || 0 };
     if (draftRef.current !== generation) return;
     const refId = typeof body.providerRef === "string" && body.providerRef ? body.providerRef : crypto.randomUUID();
-    setCart((rows) => [...rows, { ...found, key: refId, providerRef: channel === "digiflazz" ? refId : undefined, sku: sku.trim(), category: activeCategory, product: activeProduct, customerId: number.trim() }]);
+    const sku = typeof body.buyerSkuCode === "string" ? body.buyerSkuCode : "";
+    setCart((rows) => [...rows, { ...found, key: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: number.trim() }]);
     setError("");
     setMessage("");
     setNumber("");
@@ -303,14 +282,14 @@ export function LoketTransaksiPage() {
         method: "POST",
         headers: await authHeader(),
         body: JSON.stringify({
-          channel,
+          channel: "digiflazz",
           clientRef: row.providerRef || row.key,
           providerRef: row.providerRef,
           buyerSkuCode: row.sku,
           category: row.category,
           product: `${row.category} ${row.product}`,
           customerNumber: row.customerId,
-          customerName: row.name,
+          customerName: row.name === "—" ? "" : row.name,
           amount: row.total,
           tagihan: row.amount,
           denda: row.denda,
@@ -342,9 +321,11 @@ export function LoketTransaksiPage() {
     if (draftRef.current !== generation) return;
     setBusy(false);
     setCart([]);
-    setMessage(channel === "digiflazz"
-      ? `DigiFlazz menjawab ${lastStatus || "pending"}. Saldo produksi ${formatRupiah(balance)}.${lastStatus === "success" ? "" : " Status pending belum memotong saldo."}`
-      : `Simulasi ${rows.length} tagihan tercatat. Status: Simulasi. Saldo produksi ${formatRupiah(balance)} tidak berubah.`);
+    setMessage(lastStatus === "success"
+      ? `Pembayaran berhasil. Saldo ${formatRupiah(balance)}.`
+      : lastStatus === "failed"
+        ? `Pembayaran gagal. Saldo ${formatRupiah(balance)}.`
+        : `Pembayaran diproses. Saldo ${formatRupiah(balance)}.`);
     requestRefresh();
   };
 
@@ -368,9 +349,9 @@ export function LoketTransaksiPage() {
     if (draftRef.current !== generation) return;
     const body = await response.json().catch(() => ({}));
     setBusy(false);
-    if (!response.ok) { setError(body.error || "Status DigiFlazz belum terbaca."); return; }
+    if (!response.ok) { setError(body.error || "Status pembayaran belum terbaca."); return; }
     setError("");
-    setMessage(`Status DigiFlazz: ${body.statusText || "pending"}. ${body.message || ""} Saldo ${formatRupiah(Number(body.balance) || 0)}.`);
+    setMessage(`Status pembayaran: ${body.statusText || "pending"}. ${body.message || ""} Saldo ${formatRupiah(Number(body.balance) || 0)}.`);
     if (body.statusText === "success" || body.statusText === "failed") setPendingRef("");
     requestRefresh();
   };
@@ -387,11 +368,6 @@ export function LoketTransaksiPage() {
             {item}
           </button>
         ))}
-      </div>
-      <div className="flex flex-wrap items-center gap-2 px-1">
-        <button type="button" onClick={() => setChannel("simulation")} className={`rounded px-2.5 py-1 text-xs font-black ${channel === "simulation" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600"}`}>Simulasi</button>
-        <button type="button" onClick={() => setChannel("digiflazz")} className={`rounded px-2.5 py-1 text-xs font-black ${channel === "digiflazz" ? "bg-sky-700 text-white" : "bg-slate-100 text-slate-600"}`}>DigiFlazz</button>
-        {channel === "digiflazz" && <Input className="h-8 max-w-xs font-mono text-xs" value={sku} onChange={(event) => setSku(event.target.value)} placeholder="buyer_sku_code" />}
       </div>
       <div className="flex gap-2 border-b border-slate-200">
         <button onClick={() => openMode("bayar")} className={`px-3 py-1.5 text-sm font-black ${mode === "bayar" ? "border-b-2 border-amber-500 text-amber-700" : "text-slate-500"}`}>TRANSAKSI</button>

@@ -47,7 +47,7 @@ function managementNav(role: Role): NavSection[] {
   ];
   const monitoring: NavItem[] = [
     ...(role === "mitra" || role === "submitra" || role === "superadmin" ? [{ path: "/deposit", label: "Tiket Deposit", icon: Landmark }] : []),
-    { path: "/setoran", label: role === "mitra" ? "Distribusi Saldo" : role === "superadmin" ? "Persetujuan Deposit" : "Pantauan Setoran", icon: role === "mitra" ? Share2 : Landmark },
+    { path: "/setoran", label: role === "superadmin" ? "Persetujuan Deposit" : "Pantauan Setoran", icon: Landmark },
     { path: "/saldo", label: "Saldo Mitra/Loket", icon: Wallet },
     { path: "/outstanding", label: "Monitoring OS", icon: BadgeAlert },
   ];

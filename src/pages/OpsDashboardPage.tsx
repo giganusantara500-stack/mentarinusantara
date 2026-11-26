@@ -201,10 +201,8 @@ export function OpsDashboardPage() {
         )}
         <div className="ml-auto hidden max-w-[46%] text-right text-[11px] leading-snug text-white/70 sm:block">
           {role === "superadmin"
-            ? "Menyetujui tiket memindahkan Saldo Utama ke pemohon, satu kali."
-            : role === "mitra"
-              ? "Sisa saldo mandiri untuk dibagikan ke loket jaringan Anda."
-              : "Saldo akun untuk operasional jaringan Anda."}
+            ? "Menyetujui tiket memindahkan Saldo Utama ke Mitra, Sub Mitra, atau Loket, satu kali."
+            : "Pengajuan deposit menunggu persetujuan Super Admin sebelum saldo bertambah."}
         </div>
       </div>
       <div className={`grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2 ${networkView ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>

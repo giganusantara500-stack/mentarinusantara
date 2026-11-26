@@ -260,10 +260,6 @@ export function ManageSetoranPage() {
     return match?.full_name || match?.username || id.slice(0, 8);
   };
 
-  if (role === "mitra") {
-    return <DistributeBalance ownerId={profile?.id ?? ""} profiles={profiles} balance={pool} mutations={mutations.filter((row) => row.accountId === profile?.id)} onRefresh={load} />;
-  }
-
   return (
     <Shell
       title="Persetujuan Deposit"

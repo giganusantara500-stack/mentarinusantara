@@ -120,7 +120,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       category,
       product,
       customerNumber,
-      customerName: clean(body.customerName) || "Pelanggan",
+      customerName: clean(body.customerName),
       amount,
       tagihan: Number(body.tagihan) || 0,
       denda: Number(body.denda) || 0,
@@ -206,7 +206,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
   }
 
   if (pathname === "/api/distribute" && method === "POST") {
-    if (caller.role !== "mitra") return { status: 403, body: { error: "Hanya Mitra yang dapat mendistribusikan saldo ke loketnya." } };
+    if (caller.role !== "super_admin") return { status: 403, body: { error: "Hanya Super Admin yang dapat mendistribusikan saldo ke Mitra, Sub Mitra, dan Loket." } };
     const loketId = clean(body.loketId);
     const amount = Number(body.amount);
     const scope = await networkLoketIds(authorization, env);

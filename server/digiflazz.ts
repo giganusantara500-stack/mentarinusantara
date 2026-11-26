@@ -81,6 +81,30 @@ export function mapDigiOutcome(status: string, rc: string, message: string): Dig
   return "failed";
 }
 
+function named(value: unknown) {
+  const raw = text(value);
+  if (!raw || /^pelanggan(\s+\d+)?$/i.test(raw)) return "";
+  return raw;
+}
+
+function customerNameFrom(data: Record<string, unknown>) {
+  const desc = data.desc && typeof data.desc === "object" && !Array.isArray(data.desc) ? data.desc as Record<string, unknown> : {};
+  const detail = Array.isArray(desc.detail) ? desc.detail : [];
+  const fromDetail = detail
+    .map((row) => (row && typeof row === "object" ? named((row as Record<string, unknown>).nama) || named((row as Record<string, unknown>).customer_name) || named((row as Record<string, unknown>).name) : ""))
+    .find(Boolean);
+  return named(data.customer_name)
+    || named(data.nama)
+    || named(data.nama_pelanggan)
+    || named(data.name)
+    || named(desc.customer_name)
+    || named(desc.nama)
+    || named(desc.nama_pelanggan)
+    || named(desc.name)
+    || fromDetail
+    || "";
+}
+
 function quoteFrom(data: Record<string, unknown>, fallback: { refId: string; sku: string; customerNumber: string }): DigiQuote {
   const details = data.desc && typeof data.desc === "object" ? (data.desc as Record<string, unknown>).detail : undefined;
   const rows = Array.isArray(details) ? details : [];
@@ -97,7 +121,7 @@ function quoteFrom(data: Record<string, unknown>, fallback: { refId: string; sku
     message: message || "DigiFlazz tidak mengirim keterangan.",
     refId: text(data.ref_id) || fallback.refId,
     sku: text(data.buyer_sku_code) || fallback.sku,
-    customerName: text(data.customer_name) || "Pelanggan",
+    customerName: customerNameFrom(data),
     customerNumber: text(data.customer_no) || fallback.customerNumber,
     period: text(data.period) || text(data.desc && typeof data.desc === "object" ? (data.desc as Record<string, unknown>).lembar_tagihan : ""),
     amount,
@@ -133,6 +157,71 @@ function signedTransaction(refId: string, sku: string, customerNumber: string, c
   };
 }
 
+const priceCache: { at: number; prepaid: Record<string, unknown>[]; postpaid: Record<string, unknown>[] } = { at: 0, prepaid: [], postpaid: [] };
+
+function asRows(data: Record<string, unknown>) {
+  if (Array.isArray(data)) return data as Record<string, unknown>[];
+  return Array.isArray(data.data) ? data.data as Record<string, unknown>[] : [];
+}
+
+async function priceRows(kind: DigiKind) {
+  if (Date.now() - priceCache.at < 10 * 60 * 1000 && (kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid).length > 0) {
+    return kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid;
+  }
+  const config = digiflazzConfig();
+  const sign = digiflazzSign(config.username, config.apiKey, "pricelist");
+  const [prepaid, postpaid] = await Promise.all([
+    postDigi("/price-list", { cmd: "prepaid", username: config.username, sign }),
+    postDigi("/price-list", { cmd: "pasca", username: config.username, sign }),
+  ]);
+  priceCache.at = Date.now();
+  priceCache.prepaid = asRows(prepaid);
+  priceCache.postpaid = asRows(postpaid);
+  return kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid;
+}
+
+function compact(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function mappedSku(category: string, product: string) {
+  const cat = category.trim().toLowerCase();
+  const name = product.trim().toLowerCase();
+  if (cat === "pln") {
+    if (name === "postpaid" || name === "pascabayar") return "pln";
+    if (name === "nontaglis") return "plnnontaglis";
+    const prepaid = name.match(/prepaid\s+(\d+)/);
+    if (prepaid) return `pln${prepaid[1]}`;
+  }
+  return "";
+}
+
+export async function resolveBuyerSku(kind: DigiKind, category: string, product: string, explicit = "") {
+  const given = explicit.trim();
+  if (/^[A-Za-z0-9._-]{1,64}$/.test(given)) return given;
+  const mapped = mappedSku(category, product);
+  if (mapped) return mapped;
+  if (!digiflazzReady()) return "";
+  try {
+    const rows = await priceRows(kind);
+    const productKey = compact(product);
+    const categoryKey = compact(category);
+    const hit = rows.find((row) => {
+      const sku = compact(text(row.buyer_sku_code));
+      const name = compact(text(row.product_name));
+      const brand = compact(text(row.brand));
+      const rowCategory = compact(text(row.category));
+      const sameProduct = Boolean(productKey) && (sku === productKey || name.includes(productKey) || brand.includes(productKey));
+      if (!sameProduct) return false;
+      if (!categoryKey) return true;
+      return rowCategory.includes(categoryKey) || brand.includes(categoryKey) || name.includes(categoryKey) || sku.includes(categoryKey);
+    });
+    return hit ? text(hit.buyer_sku_code) : "";
+  } catch {
+    return "";
+  }
+}
+
 export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; customerNumber: string; refId: string }): Promise<DigiQuote> {
   if (input.kind === "prepaid") {
     const config = digiflazzConfig();
@@ -155,7 +244,7 @@ export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; cus
       message: text(match.product_name) || "Produk siap dibayar.",
       refId: input.refId,
       sku: input.sku,
-      customerName: "Pelanggan",
+      customerName: "",
       customerNumber: input.customerNumber,
       period: "",
       amount: price,
