@@ -123,6 +123,8 @@ const h2hProvider: BillerProvider = {
         sku,
         customerNumber: input.customerNumber,
         refId,
+        category: input.category,
+        product: input.product,
       });
       if (quote.outcome === "not_found") return { status: "not_found", message: quote.message || "Tagihan tidak ditemukan di DigiFlazz." };
       if (quote.outcome === "failed") return { status: "unavailable", message: quote.message || "DigiFlazz menolak pengecekan." };

@@ -222,7 +222,38 @@ export async function resolveBuyerSku(kind: DigiKind, category: string, product:
   }
 }
 
-export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; customerNumber: string; refId: string }): Promise<DigiQuote> {
+function isPlnPrepaid(input: { kind: DigiKind; sku: string; category?: string; product?: string }) {
+  if (input.kind !== "prepaid") return false;
+  if ((input.category || "").trim().toLowerCase() === "pln") return true;
+  return /^pln\d/i.test(input.sku.trim());
+}
+
+function plnPower(value: string) {
+  const match = value.match(/^([A-Za-z0-9]+)\s*\/\s*0*(\d+)$/);
+  return match ? `${match[1]} / ${match[2]} VA` : value;
+}
+
+async function plnSubscriber(customerNumber: string) {
+  const config = digiflazzConfig();
+  const customerNo = customerNumber.replace(/\D/g, "") || customerNumber.trim();
+  const data = await postDigi("/inquiry-pln", {
+    username: config.username,
+    customer_no: customerNo,
+    sign: digiflazzSign(config.username, config.apiKey, customerNo),
+  });
+  const message = text(data.message);
+  const status = text(data.status);
+  const rc = text(data.rc);
+  return {
+    name: customerNameFrom(data),
+    period: plnPower(text(data.segment_power)),
+    outcome: status || rc || message ? mapDigiOutcome(status, rc, message) : "failed" as DigiOutcome,
+    message,
+    rc,
+  };
+}
+
+export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; customerNumber: string; refId: string; category?: string; product?: string }): Promise<DigiQuote> {
   if (input.kind === "prepaid") {
     const config = digiflazzConfig();
     const data = await postDigi("/price-list", {
@@ -239,14 +270,28 @@ export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; cus
       return { outcome: "failed", message: "Produk DigiFlazz sedang tidak aktif.", refId: input.refId, sku: input.sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, sn: "" };
     }
     const price = money(match.price);
+    let customerName = "";
+    let period = "";
+    if (isPlnPrepaid(input)) {
+      try {
+        const subscriber = await plnSubscriber(input.customerNumber);
+        customerName = subscriber.name;
+        period = subscriber.period;
+        if (!customerName && subscriber.rc !== "86" && subscriber.outcome !== "success" && subscriber.outcome !== "pending") {
+          return { outcome: subscriber.outcome === "not_found" ? "not_found" : "failed", message: subscriber.message || "Nomor meter PLN tidak ditemukan.", refId: input.refId, sku: input.sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, sn: "" };
+        }
+      } catch {
+        customerName = "";
+      }
+    }
     return {
       outcome: "success",
       message: text(match.product_name) || "Produk siap dibayar.",
       refId: input.refId,
       sku: input.sku,
-      customerName: "",
+      customerName,
       customerNumber: input.customerNumber,
-      period: "",
+      period,
       amount: price,
       denda: 0,
       adminFee: 0,
