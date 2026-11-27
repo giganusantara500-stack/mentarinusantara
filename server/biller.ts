@@ -506,11 +506,23 @@ interface StoredDigiSale {
   status: string;
   amount: number;
   idempotency_key: string;
+  client_ref?: string;
   customer_number: string;
   product_name_snapshot: string;
   category_slug_snapshot: string;
   customer_name: string | null;
   provider_response: DigiMeta | null;
+}
+
+function saleRef(row: { idempotency_key?: string; client_ref?: string }) {
+  return clean(row.idempotency_key) || clean(row.client_ref);
+}
+
+function missingColumn(body: unknown, column: string) {
+  if (!body || typeof body !== "object") return false;
+  const record = body as { message?: string; code?: string; details?: string };
+  const text = `${record.message || ""} ${record.details || ""} ${record.code || ""}`;
+  return (record.code === "42703" || /does not exist/i.test(text)) && text.includes(column);
 }
 
 function menuForCollective(category: string, product: string) {
@@ -558,7 +570,7 @@ function saleFromRow(row: StoredDigiSale) {
     period: meta.period || "",
     providerCost: Number(meta.providerCost) || 0,
     sn: meta.sn || "",
-    clientRef: row.idempotency_key,
+    clientRef: saleRef(row),
     status: row.status,
   };
 }
@@ -596,17 +608,33 @@ async function rememberDigiflazz(env: LedgerEnv, id: string, meta: DigiMeta) {
 async function findDigiflazzSale(env: LedgerEnv, key: string, actorId = "") {
   if (!env.supabaseUrl || !env.serviceRoleKey || !/^[A-Za-z0-9._:-]{8,64}$/.test(key)) return null;
   const actor = actorId ? `&user_id=eq.${encodeURIComponent(actorId)}` : "";
-  const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?or=(id.eq.${encodeURIComponent(key)},idempotency_key.eq.${encodeURIComponent(key)})${actor}&select=id,user_id,status,amount,idempotency_key,customer_number,product_name_snapshot,category_slug_snapshot,customer_name,provider_response&limit=1`, {
-    headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
-  });
-  const rows = await response.json().catch(() => null);
-  return Array.isArray(rows) ? rows[0] as StoredDigiSale : null;
+  const encoded = encodeURIComponent(key);
+  const base = "id,user_id,status,amount,customer_number,product_name_snapshot,category_slug_snapshot,customer_name,provider_response";
+  const attempts = [
+    { filter: `or=(id.eq.${encoded},idempotency_key.eq.${encoded})`, select: `${base},idempotency_key` },
+    { filter: `or=(id.eq.${encoded},client_ref.eq.${encoded})`, select: `${base},client_ref` },
+    { filter: `id=eq.${encoded}`, select: base },
+  ];
+  for (const attempt of attempts) {
+    const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?${attempt.filter}${actor}&select=${attempt.select}&limit=1`, {
+      headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
+    });
+    const rows = await response.json().catch(() => null);
+    if (!response.ok) {
+      if (missingColumn(rows, "idempotency_key") || missingColumn(rows, "client_ref")) continue;
+      return null;
+    }
+    const row = Array.isArray(rows) ? rows[0] as StoredDigiSale | undefined : undefined;
+    if (!row) return null;
+    return { ...row, idempotency_key: saleRef(row) };
+  }
+  return null;
 }
 
 async function applyDigiflazzStatus(env: LedgerEnv, row: StoredDigiSale) {
   const meta = row.provider_response ?? {};
   const sku = clean(meta.buyerSkuCode);
-  const refId = clean(row.idempotency_key);
+  const refId = saleRef(row);
   const customerNumber = clean(meta.customerNumber) || clean(row.customer_number);
   const kind: DigiKind = meta.kind === "prepaid" ? "prepaid" : "postpaid";
   const balanceNow = await walletBalance(env, row.user_id);
@@ -656,14 +684,27 @@ export async function attachSaleReceipts(env: LedgerEnv, sales: LoketSale[]) {
   if (!env.supabaseUrl || !env.serviceRoleKey || sales.length === 0) return sales;
   const ids = sales.map((sale) => sale.id).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
   if (ids.length === 0) return sales;
-  const details = new Map<string, { profit?: number; cost_price?: number; sell_price?: number; provider_reference?: string; provider_response?: DigiMeta | null; idempotency_key?: string }>();
+  const details = new Map<string, { profit?: number; cost_price?: number; sell_price?: number; provider_reference?: string; provider_response?: DigiMeta | null; idempotency_key?: string; client_ref?: string }>();
+  const selects = [
+    "id,profit,cost_price,sell_price,provider_reference,provider_response,idempotency_key",
+    "id,profit,cost_price,sell_price,provider_reference,provider_response,client_ref",
+    "id,profit,cost_price,sell_price,provider_reference,provider_response",
+  ];
   for (let index = 0; index < ids.length; index += 80) {
     const slice = ids.slice(index, index + 80);
-    const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?id=in.(${slice.join(",")})&select=id,profit,cost_price,sell_price,provider_reference,provider_response,idempotency_key`, {
-      headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
-    });
-    const rows = await response.json().catch(() => null);
-    if (!Array.isArray(rows)) continue;
+    let rows: { id?: string; profit?: number; cost_price?: number; sell_price?: number; provider_reference?: string; provider_response?: DigiMeta | null; idempotency_key?: string; client_ref?: string }[] | null = null;
+    for (const select of selects) {
+      const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?id=in.(${slice.join(",")})&select=${select}`, {
+        headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
+      });
+      const body = await response.json().catch(() => null);
+      if (response.ok && Array.isArray(body)) {
+        rows = body;
+        break;
+      }
+      if (!(missingColumn(body, "idempotency_key") || missingColumn(body, "client_ref"))) break;
+    }
+    if (!rows) continue;
     for (const row of rows) {
       if (row && typeof row === "object" && typeof row.id === "string") details.set(row.id, row);
     }
@@ -683,7 +724,7 @@ export async function attachSaleReceipts(env: LedgerEnv, sales: LoketSale[]) {
       collfee: Number(sale.collfee) || Number(meta.collfee) || 0,
       period: sale.period || meta.period || "",
       sn: meta.sn || "",
-      clientRef: row.idempotency_key || meta.refId || "",
+      clientRef: saleRef(row) || meta.refId || "",
       providerReference: row.provider_reference || meta.sn || meta.refId || "",
       profit,
       providerCost,

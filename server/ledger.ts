@@ -113,10 +113,18 @@ async function ledgerApi(env: LedgerEnv, action: string, actorId: string, payloa
   }
   const body = await response.json().catch(() => null) as (LedgerResult & { message?: string; details?: string; hint?: string; code?: string }) | null;
   if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)) {
+    const message = String(body?.message || "");
+    const code = String(body?.code || "");
+    const missingColumn = code === "42703" || /does not exist/i.test(message);
     const detail = [body?.message, body?.details, body?.hint, body?.code].filter(Boolean).join(" — ");
-    const missing = String(body?.message ?? "").includes("ledger_api");
+    const missingFunction = message.includes("ledger_api");
+    const missingClientRef = missingColumn && /client_ref/i.test(`${message} ${body?.details || ""}`);
     return {
-      error: missing ? "Fungsi saldo di database belum terpasang. Jalankan migrasi terbaru, lalu muat ulang." : (detail || "Database saldo menolak permintaan."),
+      error: missingFunction
+        ? "Fungsi saldo di database belum terpasang. Jalankan migrasi terbaru, lalu muat ulang."
+        : missingClientRef
+          ? "Pembayaran gagal. Kolom client_ref belum ada di database. Jalankan migrasi terbaru, lalu ulangi."
+          : (detail || "Database saldo menolak permintaan."),
       status: response.status || 500,
     };
   }
