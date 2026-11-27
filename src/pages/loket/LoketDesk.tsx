@@ -193,11 +193,7 @@ function storedName(name: string) {
 }
 
 function preferShownName(incoming: string, stored: string) {
-  const plain = (value: string) => {
-    const name = storedName(value);
-    return name && !name.includes("*") ? name : "";
-  };
-  return plain(incoming) || plain(stored) || storedName(incoming) || storedName(stored);
+  return storedName(incoming) || storedName(stored);
 }
 
 function shownCustomer(name: string) {

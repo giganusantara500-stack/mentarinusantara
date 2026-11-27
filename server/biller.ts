@@ -108,8 +108,14 @@ function plainCustomerName(value: string) {
   return name;
 }
 
+function sentCustomerName(value: string) {
+  const name = value.trim();
+  if (!name || /^pelanggan(\s+\d+)?$/i.test(name)) return "";
+  return name;
+}
+
 export function resolvedCustomerName(providerName: string, remembered: string) {
-  return plainCustomerName(providerName) || plainCustomerName(remembered) || providerName.trim();
+  return sentCustomerName(providerName) || plainCustomerName(remembered) || sentCustomerName(remembered) || providerName.trim();
 }
 
 function customerIdKey(value: string) {
@@ -283,8 +289,8 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     const balance = await walletBalance(env, actorId);
     return { error: inquiry.message || "Tagihan tidak dapat dicek.", status: inquiry.status === "not_found" ? 404 : 409, balance, paymentStatus: "failed" as PaymentStatus, mode };
   }
-  let customerName = resolvedCustomerName(input.customerName || "", inquiry.bill.customerName);
-  if (!plainCustomerName(customerName)) {
+  let customerName = resolvedCustomerName(inquiry.bill.customerName, input.customerName || "");
+  if (!sentCustomerName(customerName)) {
     const directory = await nameDirectory(env, actorId);
     customerName = resolvedCustomerName(customerName, rememberedCustomerName(input.customerNumber, directory.sales, directory.groups));
   }
@@ -342,7 +348,7 @@ export async function handleBillerRequest(method: string, pathname: string, body
       kind: clean(body.kind),
       refId: clean(body.refId),
     });
-    const bill = result.bill && !plainCustomerName(result.bill.customerName)
+    const bill = result.bill && !sentCustomerName(result.bill.customerName)
       ? withRememberedName(result.bill, clean(body.customerNumber), await nameDirectory(env, actorId))
       : result.bill;
     if (result.status === "paid") return { status: 200, body: { mode, statusText: "paid", message: result.message, bill, providerRef: result.providerRef, buyerSkuCode: result.buyerSkuCode } };
@@ -361,7 +367,7 @@ export async function handleBillerRequest(method: string, pathname: string, body
       if (!menu) return { key, customerNumber, statusText: "failed", message: "Produk kolektif belum terpetakan ke DigiFlazz." };
       const result = await inquireBill("h2h", { category: menu.category, product: menu.product, customerNumber, adminFee: Number(record.adminFee) || 0 });
       const directory = await directoryPromise;
-      const bill = result.bill && !plainCustomerName(result.bill.customerName) ? withRememberedName(result.bill, customerNumber, directory) : result.bill;
+      const bill = result.bill && !sentCustomerName(result.bill.customerName) ? withRememberedName(result.bill, customerNumber, directory) : result.bill;
       return {
         key,
         customerNumber,

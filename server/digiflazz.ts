@@ -121,63 +121,144 @@ function named(value: unknown) {
   return raw;
 }
 
+function objectOf(value: unknown): Record<string, unknown> | null {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
+    try { return objectOf(JSON.parse(trimmed)); } catch { return null; }
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  return null;
+}
+
+function rowList(value: unknown): Record<string, unknown>[] {
+  if (typeof value === "string") {
+    try { return rowList(JSON.parse(value)); } catch { return []; }
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => (item && typeof item === "object" && !Array.isArray(item) ? [item as Record<string, unknown>] : []));
+  }
+  const record = objectOf(value);
+  if (!record) return [];
+  if ("detail" in record) return rowList(record.detail);
+  const values = Object.values(record);
+  if (values.length > 0 && values.every((item) => item && typeof item === "object" && !Array.isArray(item))) return rowList(values);
+  return [];
+}
+
 export function customerNameFrom(data: Record<string, unknown>) {
-  const desc = data.desc && typeof data.desc === "object" && !Array.isArray(data.desc) ? data.desc as Record<string, unknown> : {};
-  const detail = Array.isArray(desc.detail) ? desc.detail : Array.isArray(data.detail) ? data.detail : [];
-  const fromDetail = detail.flatMap((row) => {
-    if (!row || typeof row !== "object") return [];
-    const record = row as Record<string, unknown>;
-    return [named(record.nama), named(record.customer_name), named(record.nama_pelanggan), named(record.name)];
-  });
-  const names = [
-    named(data.customer_name),
-    named(desc.customer_name),
-    named(data.nama),
-    named(data.nama_pelanggan),
-    named(data.name),
-    named(desc.nama),
-    named(desc.nama_pelanggan),
-    named(desc.name),
-    ...fromDetail,
-  ].filter(Boolean);
-  return names.find((name) => !name.includes("*")) || names[0] || "";
+  const desc = objectOf(data.desc) ?? {};
+  const fields = [
+    data.customer_name,
+    desc.customer_name,
+    data.tr_name,
+    desc.tr_name,
+    data.nama,
+    data.nama_pelanggan,
+    data.name,
+    desc.nama,
+    desc.nama_pelanggan,
+    desc.name,
+  ];
+  for (const field of fields) {
+    const name = named(field);
+    if (name) return name;
+  }
+  for (const row of detailRows(data)) {
+    const name = named(row.nama) || named(row.customer_name) || named(row.nama_pelanggan) || named(row.name) || named(row.tr_name);
+    if (name) return name;
+  }
+  return "";
+}
+
+function summaryRow(record: Record<string, unknown>) {
+  const amount = record.nilai_tagihan ?? record.bill_amount ?? record.amount ?? (typeof record.tagihan === "object" ? undefined : record.tagihan);
+  const denda = record.denda ?? record.penalty;
+  const period = scalar(record.periode) || scalar(record.period) || scalar(record.blth);
+  if (!period && !present(amount) && !present(denda)) return null;
+  return { periode: period, nilai_tagihan: amount, denda };
+}
+
+function detailRows(data: Record<string, unknown>) {
+  const desc = objectOf(data.desc) ?? {};
+  const nested = objectOf(desc.tagihan) ?? objectOf(desc.bill) ?? objectOf(data.tagihan) ?? objectOf(data.bill);
+  for (const source of [desc.detail, nested?.detail, data.detail, desc.tagihan, data.tagihan, nested]) {
+    const rows = rowList(source);
+    if (rows.length > 0) return rows;
+  }
+  const summary = summaryRow(desc) || summaryRow(data);
+  return summary ? [summary] : [];
 }
 
 function billDetail(data: Record<string, unknown>) {
-  const desc = data.desc && typeof data.desc === "object" && !Array.isArray(data.desc) ? data.desc as Record<string, unknown> : {};
-  const nested = Array.isArray(desc.detail) ? desc.detail : Array.isArray(data.detail) ? data.detail : [];
-  const rows = nested.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row));
-  return { desc, rows };
+  return { desc: objectOf(data.desc) ?? {}, rows: detailRows(data) };
 }
 
 function present(value: unknown) {
   return value !== undefined && value !== null && String(value).trim() !== "";
 }
 
+function amountParts(value: unknown): number[] | null {
+  if (!present(value)) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return [Math.max(0, Math.round(value))];
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/[#|]/.test(raw)) return raw.split(/[#|]/).map((part) => money(part));
+  const commas = raw.split(",");
+  if (commas.length > 1 && commas.every((part) => /^\s*\d[\d.\s]*$/.test(part) && part.replace(/\D/g, "").length >= 4)) {
+    return commas.map((part) => money(part));
+  }
+  return [money(raw)];
+}
+
+function partSum(value: unknown) {
+  const parts = amountParts(value);
+  return parts ? parts.reduce((sum, item) => sum + item, 0) : 0;
+}
+
+function periodParts(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  if (/[#|,;/]/.test(trimmed)) {
+    const pieces = trimmed.split(/[#|,;/]+/).map((part) => part.trim()).filter(Boolean);
+    if (pieces.length > 1) return pieces;
+  }
+  const packed = trimmed.replace(/\D/g, "").match(/20\d{2}(?:0[1-9]|1[0-2])/g);
+  if (packed && packed.length > 1) return packed;
+  return [trimmed];
+}
+
 function monthLines(rows: Record<string, unknown>[]): BillMonth[] {
   return rows.flatMap((row) => {
-    const period = monthLabel(scalar(row.periode) || scalar(row.period));
-    const amountSource = row.nilai_tagihan ?? row.tagihan ?? row.amount;
-    const hasAmount = present(amountSource);
-    const hasDenda = present(row.denda);
-    if (!period && !hasAmount && !hasDenda) return [];
-    return [{ period, amount: hasAmount ? money(amountSource) : null, denda: hasDenda ? money(row.denda) : null }];
+    const periods = periodParts(scalar(row.periode) || scalar(row.period) || scalar(row.blth));
+    const amounts = amountParts(row.nilai_tagihan ?? row.tagihan ?? row.bill_amount ?? row.amount);
+    const dendas = amountParts(row.denda ?? row.penalty);
+    if (periods.length === 0 && !amounts && !dendas) return [];
+    if (periods.length > 1 && amounts && amounts.length === periods.length) {
+      return periods.map((period, index) => ({
+        period: monthLabel(period),
+        amount: amounts[index],
+        denda: dendas && dendas.length === periods.length ? dendas[index] : dendas && dendas.length === 1 ? (index === 0 ? dendas[0] : 0) : null,
+      }));
+    }
+    const period = periods.length > 1 ? periods.map((item) => monthLabel(item)).join(", ") : monthLabel(periods[0] || "");
+    return [{ period, amount: amounts ? amounts[0] : null, denda: dendas ? dendas[0] : null }];
   });
 }
 
-function quoteFrom(data: Record<string, unknown>, fallback: { refId: string; sku: string; customerNumber: string }): DigiQuote {
+export function quoteFrom(data: Record<string, unknown>, fallback: { refId: string; sku: string; customerNumber: string }): DigiQuote {
   const { desc, rows } = billDetail(data);
   const lines = monthLines(rows);
-  const denda = rows.reduce((sum, row) => sum + money(row.denda), 0);
-  const tagihan = rows.reduce((sum, row) => sum + money(row.nilai_tagihan ?? row.tagihan ?? row.amount), 0);
-  const adminFee = money(data.admin) || rows.reduce((sum, row) => sum + money(row.admin), 0);
+  const denda = rows.reduce((sum, row) => sum + partSum(row.denda ?? row.penalty), 0);
+  const tagihan = rows.reduce((sum, row) => sum + partSum(row.nilai_tagihan ?? row.tagihan ?? row.bill_amount ?? row.amount), 0);
+  const adminFee = money(data.admin) || rows.reduce((sum, row) => sum + partSum(row.admin), 0);
   const price = money(data.price);
   const selling = money(data.selling_price);
   const amount = tagihan || Math.max(0, (selling || price) - adminFee - denda) || price;
   const parts = amount + denda + adminFee;
   const total = parts > 0 ? parts : (selling || price || amount);
   const providerCost = price > 0 ? price : Math.max(0, amount + denda);
-  const periods = rows.map((row) => monthLabel(scalar(row.periode) || scalar(row.period))).filter(Boolean);
+  const periods = lines.map((line) => line.period).filter(Boolean);
   const topPeriod = monthLabel(scalar(data.period) || scalar(data.periode));
   const tarif = text(desc.tarif) || text(data.tarif);
   const daya = scalar(desc.daya) || scalar(data.daya);

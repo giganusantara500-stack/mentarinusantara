@@ -150,10 +150,10 @@ async function savedCustomerName(customerId: string) {
 }
 
 function customerLabel(customerId: string, digiName: string, history: Sale[], userId: string, saved = "") {
-  const direct = plainName(digiName);
-  if (direct) return direct;
+  const provider = shownName(digiName);
+  if (provider) return provider;
   const past = history.find((sale) => sameCustomer(sale.customerNumber, customerId) && plainName(sale.customerName));
-  return plainName(past?.customerName || "") || kolektifName(userId, customerId) || plainName(saved) || shownName(digiName) || "—";
+  return plainName(past?.customerName || "") || kolektifName(userId, customerId) || plainName(saved) || "—";
 }
 
 function prepaidAmount(category: string, product: string, quoted: number) {
@@ -173,6 +173,39 @@ function periodLine(meter: string, period: string) {
   const month = months.join(", ");
   if (meter && month) return `${meter} - ${month}`;
   return meter || month || period;
+}
+
+const MONTH_INDEX: Record<string, string> = {
+  januari: "01", februari: "02", maret: "03", april: "04", mei: "05", juni: "06",
+  juli: "07", agustus: "08", september: "09", oktober: "10", november: "11", desember: "12",
+};
+
+function canonicalPeriods(period: string): string[] {
+  const packed = period.replace(/\D/g, "").match(/20\d{2}(?:0[1-9]|1[0-2])/g);
+  if (packed && packed.length > 0) return packed;
+  const found: string[] = [];
+  const pattern = /(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\s+(20\d{2})/gi;
+  for (const match of period.matchAll(pattern)) {
+    const month = MONTH_INDEX[match[1].toLowerCase()];
+    if (month) found.push(`${match[2]}${month}`);
+  }
+  if (found.length > 0) return found;
+  const raw = period.trim().toLowerCase();
+  return raw ? [raw] : [];
+}
+
+function mergeInquiry(current: CartRow[], built: CartRow[], category: string, customer: string) {
+  const same = (row: CartRow) => row.category === category && sameCustomer(row.customerId, customer);
+  const existing = current.filter(same);
+  const incoming = [...new Set(built.flatMap((row) => canonicalPeriods(row.period)))];
+  const queued = [...new Set(existing.flatMap((row) => canonicalPeriods(row.period)))];
+  const missing = incoming.filter((token) => !queued.includes(token));
+  const combined = existing.some((row) => canonicalPeriods(row.period).length > 1);
+  const incomingSplit = built.length > 1;
+  if (built.length > 0 && missing.length === 0 && (!combined || !incomingSplit)) return { next: current, added: [] as CartRow[] };
+  const covered = new Set(incoming);
+  const kept = current.filter((row) => !same(row) || !canonicalPeriods(row.period).some((token) => covered.has(token)));
+  return { next: [...kept, ...built], added: built };
 }
 
 function billMonths(value: unknown): BillMonth[] {
@@ -396,11 +429,6 @@ export function LoketTransaksiPage() {
       setError("Nomor pelanggan terlalu pendek.");
       return;
     }
-    if (cart.some((row) => row.category === activeCategory && row.customerId === customer)) {
-      setMessage("");
-      setError(`ID ${customer} sudah ada di antrean ${activeCategory}. Tidak ditambahkan lagi.`);
-      return;
-    }
     inquiring.current = true;
     setChecking(true);
     setError("");
@@ -450,29 +478,30 @@ export function LoketTransaksiPage() {
     const refId = typeof body.providerRef === "string" && body.providerRef ? body.providerRef : crypto.randomUUID();
     const sku = typeof body.buyerSkuCode === "string" ? body.buyerSkuCode : "";
     const providerCost = Number((bill as { providerCost?: number }).providerCost) || 0;
-    const monthLines = billMonths(bill.lines).filter((line) => line.amount != null);
+    const monthLines = billMonths(bill.lines).filter((line) => line.period || line.amount != null);
+    const pricedLines = monthLines.filter((line) => line.amount != null);
     const meter = meterOf(bill.period || "");
     const baseAmount = prepaidAmount(activeCategory, activeProduct, Number(bill.amount) || 0);
-    const shared = { payKey: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: customer, name, meter, collfee: Number(bill.collfee) || 0, providerCost };
-    const built: CartRow[] = monthLines.length > 1
-      ? monthLines.map((line, index) => ({ ...shared, key: `${refId}:${index}`, period: line.period || `Lembar ${index + 1}`, amount: line.amount ?? 0, denda: line.denda ?? 0 }))
-      : [{ ...shared, key: refId, period: bill.period || monthLines[0]?.period || "", amount: baseAmount, denda: Number(bill.denda) || monthLines[0]?.denda || 0 }];
-    let added = false;
-    setCart((current) => {
-      if (current.some((row) => row.category === activeCategory && row.customerId === customer)) return current;
-      added = true;
-      return [...current, ...built];
-    });
+    const billCollfee = Number(bill.collfee) || 0;
+    const shared = { payKey: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: customer, name, meter, collfee: 0, providerCost: 0 };
+    const split = pricedLines.length > 1;
+    const built: CartRow[] = split
+      ? pricedLines.map((line, index) => ({ ...shared, key: `${refId}:${line.period || index}`, period: line.period || `Lembar ${index + 1}`, amount: line.amount ?? 0, denda: line.denda ?? 0, collfee: index === 0 ? billCollfee : 0, providerCost: index === 0 ? providerCost : 0 }))
+      : [{ ...shared, key: refId, period: bill.period || pricedLines[0]?.period || "", amount: baseAmount, denda: Number(bill.denda) || pricedLines[0]?.denda || 0, collfee: billCollfee, providerCost }];
+    const merged = mergeInquiry(cart, built, activeCategory, customer);
+    const added = merged.added;
+    if (added.length > 0) setCart(merged.next);
     if (draftRef.current !== generation) {
       inquiring.current = false;
       setChecking(false);
       return;
     }
-    if (!added) {
+    if (added.length === 0) {
+      const periodLabel = built.map((row) => row.period).filter(Boolean).join(", ") || "ini";
       setMessage("");
-      setError(`ID ${customer} sudah ada di antrean ${activeCategory}. Tidak ditambahkan lagi.`);
+      setError(`Tagihan ${customer} periode ${periodLabel} sudah ada di antrean ${activeCategory}.`);
     } else {
-      const priced = built.map((row) => priceRow(row, activeCategory === "PLN" ? adminFee : (BILLER_ADMIN[activeCategory] ?? 0)));
+      const priced = added.map((row) => priceRow(row, activeCategory === "PLN" ? adminFee : (BILLER_ADMIN[activeCategory] ?? 0)));
       const billTotal = priced.reduce((sum, row) => sum + row.total, 0);
       setError("");
       setMessage(priced.length > 1
