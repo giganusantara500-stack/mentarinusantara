@@ -107,9 +107,16 @@ async function ledgerApi(env: LedgerEnv, action: string, actorId: string, payloa
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ p_action: action, p_actor: actorId, p_payload: payload }),
+      signal: AbortSignal.timeout(12_000),
     });
-  } catch {
-    return { error: "Database saldo tidak dapat dihubungi.", status: 500 };
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    return {
+      error: timedOut
+        ? "Database saldo tidak menjawab tepat waktu. Cek status sebelum mengulang. Saldo hanya terpotong bila status Sukses."
+        : "Database saldo tidak dapat dihubungi.",
+      status: timedOut ? 504 : 500,
+    };
   }
   const body = await response.json().catch(() => null) as (LedgerResult & { message?: string; details?: string; hint?: string; code?: string }) | null;
   if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)) {
@@ -216,6 +223,7 @@ export async function syncProviderDeposit(env: LedgerEnv, actorId: string, depos
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ p_actor: actorId, p_deposit: Math.round(deposit) }),
+      signal: AbortSignal.timeout(12_000),
     });
   } catch {
     return { error: "Database saldo tidak dapat dihubungi.", status: 500 };

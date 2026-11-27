@@ -85,6 +85,21 @@ async function authHeader() {
   return { Authorization: `Bearer ${session.data.session?.access_token ?? ""}`, "Content-Type": "application/json" };
 }
 
+async function postJson(path: string, payload: unknown, ms: number) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(apiUrl(path), {
+      method: "POST",
+      headers: await authHeader(),
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 function shownName(value: unknown) {
   const name = String(value ?? "").trim();
   if (!name || /^pelanggan(\s+\d+)?$/i.test(name)) return "";
@@ -615,11 +630,7 @@ export function LoketTransaksiPage() {
   };
 
   const readStatus = async (clientRef: string) => {
-    const response = await fetch(apiUrl("/api/biller/status"), {
-      method: "POST",
-      headers: await authHeader(),
-      body: JSON.stringify({ clientRef }),
-    });
+    const response = await postJson("/api/biller/status", { clientRef }, 12_000);
     const body = await response.json().catch(() => ({})) as { error?: string; statusText?: string; sale?: Partial<Sale> };
     return { response, body };
   };
@@ -643,6 +654,7 @@ export function LoketTransaksiPage() {
       if (doneKeys.size === 0) return;
       setCart((current) => current.filter((row) => !doneKeys.has(row.payKey || row.providerRef || row.key)));
     };
+    try {
     for (const [payKey, group] of groups) {
       const first = group[0];
       const money = groupMoney(group);
@@ -661,57 +673,61 @@ export function LoketTransaksiPage() {
         collfee: money.collfee,
         payKey,
       };
-      let response: Response;
+      let response: Response | null = null;
+      let body: { error?: string; statusText?: string; sale?: Partial<Sale> } = {};
       try {
-        response = await fetch(apiUrl("/api/loket-sales"), {
-          method: "POST",
-          headers: await authHeader(),
-          body: JSON.stringify({
-            channel: "digiflazz",
-            clientRef: payKey,
-            providerRef: first.providerRef || payKey,
-            buyerSkuCode: first.sku,
-            kind: findCatalogItem(first.category, first.product)?.kind || "",
-            category: first.category,
-            product: `${first.category} ${first.product}`,
-            customerNumber: first.customerId,
-            customerName: shown === "—" ? "" : shown,
-            amount: money.amount,
-            tagihan: money.tagihan,
-            denda: money.denda,
-            adminFee: money.admin,
-            collfee: money.collfee,
-            providerCost: Math.max(...group.map((row) => finiteNumber(row.providerCost))),
-            period,
-            loketName,
-          }),
-        });
+        response = await postJson("/api/loket-sales", {
+          channel: "digiflazz",
+          clientRef: payKey,
+          providerRef: first.providerRef || payKey,
+          buyerSkuCode: first.sku,
+          kind: findCatalogItem(first.category, first.product)?.kind || "",
+          category: first.category,
+          product: `${first.category} ${first.product}`,
+          customerNumber: first.customerId,
+          customerName: shown === "—" ? "" : shown,
+          amount: money.amount,
+          tagihan: money.tagihan,
+          denda: money.denda,
+          adminFee: money.admin,
+          collfee: money.collfee,
+          providerCost: Math.max(...group.map((row) => finiteNumber(row.providerCost))),
+          period,
+          loketName,
+        }, 50_000);
+        body = await response.json().catch(() => ({}));
       } catch {
-        stopped = "Backend VPS tidak dapat dihubungi. Ulangi cek status sebelum membayar lagi.";
+        response = null;
+      }
+      if (!response) {
+        try {
+          const checked = await readStatus(payKey);
+          if (checked.response.ok || checked.body.sale) {
+            response = checked.response;
+            body = checked.body;
+          }
+        } catch {
+          response = null;
+        }
+      }
+      if (draftRef.current !== generation) return;
+      if (!response) {
+        stopped = "Pembayaran belum mendapat jawaban tepat waktu. Cek status sebelum mengulang. Saldo hanya terpotong bila status Sukses.";
+        pendingKey = payKey;
         break;
       }
-      if (draftRef.current !== generation) {
-        paying.current = false;
-        return;
-      }
-      const body = await response.json().catch(() => ({})) as { error?: string; statusText?: string; sale?: Partial<Sale> };
       let statusText = String(body.statusText || body.sale?.status || (response.ok ? "pending" : "failed"));
       if (!response.ok && !body.sale) {
         stopped = body.error || "Pembayaran berhenti karena saldo atau data tidak cukup.";
+        if (response.status === 504 || statusText === "pending") pendingKey = payKey;
         break;
       }
       if (statusText === "pending") {
         const deadline = Date.now() + PENDING_HOLD_MS;
         while (Date.now() < deadline && statusText === "pending") {
-          if (draftRef.current !== generation) {
-            paying.current = false;
-            return;
-          }
+          if (draftRef.current !== generation) return;
           await new Promise((resolve) => window.setTimeout(resolve, 3000));
-          if (draftRef.current !== generation) {
-            paying.current = false;
-            return;
-          }
+          if (draftRef.current !== generation) return;
           try {
             const checked = await readStatus(payKey);
             if (checked.body.sale) body.sale = { ...body.sale, ...checked.body.sale, sn: checked.body.sale.sn || body.sale?.sn || "" };
@@ -738,14 +754,16 @@ export function LoketTransaksiPage() {
       doneKeys.add(payKey);
       if (sale) rememberSale({ ...sale, status: "pending" });
     }
-    paying.current = false;
     if (draftRef.current !== generation) return;
     dropDone();
     const printed = paid.length === 0 || printPaid(paid);
-    setBusy(false);
     setError(stopped || (printed ? "" : "Struk belum terbuka. Gunakan Cetak Ulang."));
     if (pendingKey) setPendingRef(pendingKey);
     requestRefresh();
+    } finally {
+      paying.current = false;
+      setBusy(false);
+    }
   };
 
   const checkStatus = async () => {
@@ -804,11 +822,7 @@ export function LoketTransaksiPage() {
     const probe = async () => {
       if (stopped || paying.current) return;
       try {
-        const response = await fetch(apiUrl("/api/biller/status"), {
-          method: "POST",
-          headers: await authHeader(),
-          body: JSON.stringify({ clientRef: pendingRef }),
-        });
+        const response = await postJson("/api/biller/status", { clientRef: pendingRef }, 12_000);
         const body = await response.json().catch(() => ({})) as { statusText?: string; sale?: Partial<Sale> };
         if (stopped || (!response.ok && !body.sale)) return;
         const statusText = String(body.statusText || body.sale?.status || "pending");

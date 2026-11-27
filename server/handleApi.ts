@@ -41,6 +41,12 @@ export async function handleApi(input: {
   env: ApiEnv;
 }) {
   const { env } = input;
+  if (input.method === "POST" && input.pathname === "/api/loket-sales") {
+    const product = typeof input.body.product === "string" ? input.body.product.trim() : "";
+    const ref = typeof input.body.clientRef === "string" ? input.body.clientRef : "";
+    const tail = ref.replace(/[^a-z0-9]/gi, "").slice(-6) || "------";
+    console.log(`[bayar] diterima ${product || "transaksi"} ref···${tail}`);
+  }
   if (!env.supabaseUrl || !env.anonKey || !env.serviceRoleKey) {
     return { status: 500, body: { error: "Konfigurasi Supabase di hosting belum lengkap." } };
   }

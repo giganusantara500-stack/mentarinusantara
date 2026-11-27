@@ -356,11 +356,14 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     };
   }
   const claimed = await claimDigiflazz(env, pending.sale.id, receipt);
+  const refTail = refId.replace(/[^a-z0-9]/gi, "").slice(-6) || "------";
   if (!claimed) {
     const balance = pending.balance ?? await walletBalance(env, actorId);
     return { error: "Transaksi ini sedang diproses. Cek status sebelum mengulang.", status: 409, balance, sale: pending.sale, paymentStatus: "pending" as PaymentStatus, mode, providerRef: refId };
   }
+  console.log(`[bayar] kirim ${kind} ${sku} ref···${refTail}`);
   const submitted = await h2hProvider.submit({ ...input, buyerSkuCode: sku, kind, bill: inquiry.bill, providerRef: refId, clientRef: refId });
+  console.log(`[bayar] provider ${submitted.outcome} ref···${refTail}`);
   const charged = submitted.bill && submitted.bill.total >= 1000 ? submitted.bill : inquiry.bill;
   const providerCost = settledProviderCost(charged.providerCost, inquiry.bill.providerCost, inquiry.bill.total);
   const outcome = submitted.outcome === "pending" ? "pending" : submitted.outcome;
@@ -577,6 +580,7 @@ function saleFromRow(row: StoredDigiSale) {
 
 async function claimDigiflazz(env: LedgerEnv, id: string, meta: DigiMeta) {
   if (!env.supabaseUrl || !env.serviceRoleKey || !id) return false;
+  try {
   const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?id=eq.${encodeURIComponent(id)}&provider_response=is.null`, {
     method: "PATCH",
     headers: {
@@ -586,9 +590,13 @@ async function claimDigiflazz(env: LedgerEnv, id: string, meta: DigiMeta) {
       Prefer: "return=representation",
     },
     body: JSON.stringify({ provider_reference: meta.refId, provider_response: meta }),
+    signal: AbortSignal.timeout(12_000),
   });
   const rows = await response.json().catch(() => null);
   return response.ok && Array.isArray(rows) && rows.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function rememberDigiflazz(env: LedgerEnv, id: string, meta: DigiMeta) {
@@ -602,6 +610,7 @@ async function rememberDigiflazz(env: LedgerEnv, id: string, meta: DigiMeta) {
       Prefer: "return=minimal",
     },
     body: JSON.stringify({ provider_reference: meta.sn || meta.refId, provider_response: meta }),
+    signal: AbortSignal.timeout(12_000),
   });
 }
 
@@ -616,9 +625,17 @@ async function findDigiflazzSale(env: LedgerEnv, key: string, actorId = "") {
     { filter: `id=eq.${encoded}`, select: base },
   ];
   for (const attempt of attempts) {
-    const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?${attempt.filter}${actor}&select=${attempt.select}&limit=1`, {
-      headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?${attempt.filter}${actor}&select=${attempt.select}&limit=1`, {
+        headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
+        signal: AbortSignal.timeout(12_000),
+      });
+    } catch (error) {
+      const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+      if (timedOut) throw new Error("Status pembayaran belum terbaca. Coba lagi. Saldo hanya terpotong bila status Sukses.");
+      return null;
+    }
     const rows = await response.json().catch(() => null);
     if (!response.ok) {
       if (missingColumn(rows, "idempotency_key") || missingColumn(rows, "client_ref")) continue;
@@ -696,6 +713,7 @@ export async function attachSaleReceipts(env: LedgerEnv, sales: LoketSale[]) {
     for (const select of selects) {
       const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?id=in.(${slice.join(",")})&select=${select}`, {
         headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
+        signal: AbortSignal.timeout(12_000),
       });
       const body = await response.json().catch(() => null);
       if (response.ok && Array.isArray(body)) {

@@ -176,10 +176,23 @@ async function proxyApi(request: Request): Promise<Response> {
     const pending = readHttpMessage(socket.readable);
     const writer = socket.writable.getWriter();
     await writer.write(encodeRequest(method, path, request, body));
-    const raw = await pending;
+    const waitMs = method === "POST" && incoming.pathname === "/api/loket-sales" ? 55_000 : 180_000;
+    const raw = await Promise.race([
+      pending,
+      new Promise<Uint8Array>((_resolve, reject) => {
+        setTimeout(() => reject(new Error("timeout")), waitMs);
+      }),
+    ]);
     await writer.close();
     return parseHttpResponse(raw);
-  } catch {
+  } catch (error) {
+    const timedOut = error instanceof Error && error.message === "timeout";
+    if (timedOut) {
+      return Response.json({
+        error: "Pembayaran belum mendapat jawaban tepat waktu. Cek status sebelum mengulang. Saldo hanya terpotong bila status Sukses.",
+        statusText: "pending",
+      }, { status: 504 });
+    }
     return Response.json({ error: "Backend VPS tidak terjangkau." }, { status: 502 });
   }
 }

@@ -3,7 +3,7 @@ import { networkLoketIds, touchActivity } from "./accountAdmin";
 import { attachSaleReceipts, requestedMode, runBillerPayment } from "./biller";
 import { digiflazzDeposit } from "./digiflazz";
 import { cancelOwnTicket, claimTicket, createTicket, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, PUSAT_ACCOUNT, syncProviderDeposit, walletBalance, type DepositTicket } from "./ledger";
-import { ensureLoketCode, listAuthUsers, loketCodeFor, makeTransferCode } from "./loketCode";
+import { listAuthUsers, loketCodeFor, makeTransferCode } from "./loketCode";
 
 interface Env {
   supabaseUrl: string;
@@ -45,13 +45,14 @@ export async function loadCaller(authorization: string, env: Env): Promise<Calle
   if (!token) return null;
   const callerResponse = await fetch(`${env.supabaseUrl}/auth/v1/user`, {
     headers: { apikey: env.anonKey, Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(12_000),
   });
   const callerAuth = await readJson(callerResponse);
   const callerId = callerAuth?.id as string | undefined;
   if (!callerResponse.ok || !callerId) return null;
   const profileResponse = await fetch(
     `${env.supabaseUrl}/rest/v1/profiles?id=eq.${callerId}&select=*`,
-    { headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` } },
+    { headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` }, signal: AbortSignal.timeout(12_000) },
   );
   const rows = await readJson(profileResponse);
   const profile = Array.isArray(rows) ? rows[0] : null;
@@ -71,6 +72,7 @@ async function profileRow(env: Env, id: string) {
   if (!id) return null;
   const response = await fetch(`${env.supabaseUrl}/rest/v1/profiles?id=eq.${id}&select=id,role,parent_id,mitra_id,created_by`, {
     headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
+    signal: AbortSignal.timeout(12_000),
   });
   const rows = await readJson(response);
   return Array.isArray(rows) ? rows[0] as { role?: string; parent_id?: string | null; mitra_id?: string | null; created_by?: string | null } : null;
@@ -120,10 +122,10 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     if (!category || !product || !customerNumber) return { status: 400, body: { error: "Kategori, produk, dan nomor pelanggan wajib diisi." } };
     if (!Number.isFinite(amount) || amount < 1000) return { status: 400, body: { error: "Nominal pembayaran minimal Rp1.000." } };
     const mode = requestedMode(body.channel);
-    const loketCode = await ensureLoketCode(env, caller.id);
-    const users = await listAuthUsers(env);
-    const self = users.find((user) => user.id === caller.id);
-    const parentId = typeof self?.user_metadata?.parent_id === "string" ? self.user_metadata.parent_id : "";
+    const tail = clientRef.replace(/[^a-z0-9]/gi, "").slice(-6) || "------";
+    const loketCode = await loketCodeFor(env, caller.id).catch(() => "");
+    const selfProfile = await profileRow(env, caller.id);
+    const parentId = selfProfile?.parent_id || "";
     const result = await runBillerPayment(env, caller.id, mode, {
       loketCode,
       loketName: clean(body.loketName) || caller.username || "Loket",
@@ -150,13 +152,14 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     const providerSn = "sn" in result && typeof result.sn === "string" ? result.sn : "";
     const recordedStatus = "sale" in result && result.sale ? result.sale.status : "";
     const statusText = ("paymentStatus" in result && result.paymentStatus) || recordedStatus || "failed";
+    const failed = statusText === "failed" || statusText === "refunded";
+    console.log(`[bayar] ${result.sale ? (failed ? "gagal" : statusText) : "berhenti"} ref···${tail}${result.error ? ` ${String(result.error).replace(/\s+/g, " ").slice(0, 160)}` : ""}`);
     if (!result.sale) {
-      return { status: result.status || 409, body: { error: result.error || "Pembayaran gagal.", balance, statusText } };
+      return { status: result.status || 409, body: { error: result.error || "Pembayaran gagal. Saldo tidak dipotong.", balance, statusText } };
     }
     const enriched = (await attachSaleReceipts(env, [result.sale]).catch(() => [result.sale]))[0] ?? result.sale;
     const sale = { ...enriched, sn: enriched.sn || providerSn };
     await touchActivity(caller.id, env).catch(() => undefined);
-    const failed = statusText === "failed" || statusText === "refunded";
     const inFlight = Boolean(result.error) && !failed && statusText !== "success" && statusText !== "simulated";
     if (inFlight) {
       return { status: result.status || 409, body: { error: result.error, sale, balance, statusText, channel: sale.channel } };

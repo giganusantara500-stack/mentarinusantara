@@ -50,7 +50,7 @@ export function makeTransferCode(used: Set<string>) {
 export async function listAuthUsers(env: Env): Promise<AuthUser[]> {
   const users: AuthUser[] = [];
   for (let page = 1; page <= 10; page += 1) {
-    const response = await fetch(`${env.supabaseUrl}/auth/v1/admin/users?page=${page}&per_page=200`, { headers: headers(env) });
+    const response = await fetch(`${env.supabaseUrl}/auth/v1/admin/users?page=${page}&per_page=200`, { headers: headers(env), signal: AbortSignal.timeout(12_000) });
     const body = await response.json().catch(() => null);
     const batch = Array.isArray(body?.users) ? body.users as AuthUser[] : [];
     users.push(...batch);
@@ -64,6 +64,7 @@ async function saveCode(env: Env, user: AuthUser, code: string) {
     method: "PUT",
     headers: headers(env),
     body: JSON.stringify({ user_metadata: { ...(user.user_metadata ?? {}), loket_code: code } }),
+    signal: AbortSignal.timeout(12_000),
   });
 }
 
@@ -85,7 +86,7 @@ export async function assignMissingLoketCodes(env: Env, users: AuthUser[], loket
 }
 
 export async function loketCodeFor(env: Env, userId: string) {
-  const response = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, { headers: headers(env) });
+  const response = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${userId}`, { headers: headers(env), signal: AbortSignal.timeout(12_000) });
   const payload = await response.json().catch(() => null) as { user?: AuthUser } & AuthUser | null;
   const user = payload?.user?.id ? payload.user : payload;
   const existing = codeFromMetadata(user?.user_metadata);
