@@ -170,9 +170,14 @@ function billMonths(value: unknown): BillMonth[] {
 }
 
 function columnWidth(head: string) {
-  if (head === "No") return "2.75rem";
-  if (head === "Nama") return "26%";
-  if (head === "Tot. Tagihan" || head === "Tagihan" || head === "Denda" || head === "Admin Bank" || head === "Collfee") return "11%";
+  if (head === "No") return "2.5rem";
+  if (head === "Produk") return "13.5rem";
+  if (head === "Cust.ID") return "9.75rem";
+  if (head === "Nama") return "20%";
+  if (head === "Tagihan" || head === "Tot. Tagihan") return "8.5rem";
+  if (head === "Denda") return "5.25rem";
+  if (head === "Admin Bank") return "6rem";
+  if (head === "Collfee") return "5rem";
   return undefined;
 }
 
@@ -627,8 +632,8 @@ export function LoketTransaksiPage() {
                 {rows.map((row, index) => (
                   <tr key={row.key} className="border-t border-slate-100 text-slate-700">
                     <td className="px-1 py-2 text-center tabular-nums">{index + 1}</td>
-                    <td className="px-2 py-2">{row.category} {row.product}</td>
-                    <td className="break-all px-2 py-2 font-mono">{row.customerId}</td>
+                    <td className="whitespace-nowrap px-2 py-2">{row.category} {row.product}</td>
+                    <td className="whitespace-nowrap px-2 py-2 font-mono tracking-tight">{row.customerId}</td>
                     <td className={`whitespace-normal break-words px-3 py-2 leading-5 ${row.name.includes("*") ? "text-sm font-semibold tracking-wide text-slate-900" : ""}`} title={row.name}>{row.name}</td>
                     <td className="whitespace-normal break-words px-2 py-2 leading-5">
                       {row.meter && <div className="font-medium text-slate-800">{row.meter}</div>}
@@ -636,9 +641,9 @@ export function LoketTransaksiPage() {
                     </td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatRupiah(row.total)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.amount)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.denda)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.admin)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.collfee)}</td>
+                    <td className="px-1.5 py-2 text-right tabular-nums">{formatRupiah(row.denda)}</td>
+                    <td className="px-1.5 py-2 text-right tabular-nums">{formatRupiah(row.admin)}</td>
+                    <td className="px-1.5 py-2 text-right tabular-nums">{formatRupiah(row.collfee)}</td>
                   </tr>
                 ))}
               </tbody>

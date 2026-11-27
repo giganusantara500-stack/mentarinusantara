@@ -123,6 +123,8 @@ function named(value: unknown) {
 
 function customerNameFrom(data: Record<string, unknown>) {
   const desc = data.desc && typeof data.desc === "object" && !Array.isArray(data.desc) ? data.desc as Record<string, unknown> : {};
+  const direct = named(data.customer_name) || named(desc.customer_name);
+  if (direct) return direct;
   const detail = Array.isArray(desc.detail) ? desc.detail : [];
   const fromDetail = detail.flatMap((row) => {
     if (!row || typeof row !== "object") return [];
@@ -130,11 +132,9 @@ function customerNameFrom(data: Record<string, unknown>) {
     return [named(record.nama), named(record.customer_name), named(record.nama_pelanggan), named(record.name)];
   });
   const names = [
-    named(data.customer_name),
     named(data.nama),
     named(data.nama_pelanggan),
     named(data.name),
-    named(desc.customer_name),
     named(desc.nama),
     named(desc.nama_pelanggan),
     named(desc.name),
@@ -348,24 +348,36 @@ function postpaidPlnRequest(sku: string, category: string, product: string) {
 
 function postpaidPlnRow(row: Record<string, unknown>, nontaglis: boolean) {
   const code = rowSku(row).toLowerCase();
-  const blob = foldLabel(`${text(row.brand)} ${text(row.category)} ${text(row.product_name)} ${code}`);
+  const blob = foldLabel(`${text(row.brand)} ${text(row.category)} ${text(row.product_name)} ${code} ${text(row.desc)}`);
   if (/token|prepaid/.test(blob) || /^pln\d/.test(code) || code.endsWith("b")) return false;
   if (!blob.includes("pln") && code !== "pln") return false;
   if (nontaglis) return blob.includes("nontaglis") || code.includes("nontaglis");
   return blob.includes("pasca") || blob.includes("postpaid") || blob.includes("tagihan") || code === "pln";
 }
 
+function sellerText(row: Record<string, unknown>) {
+  return foldLabel(`${text(row.seller_name)} ${text(row.seller)} ${text(row.desc)} ${rowSku(row)} ${text(row.product_name)}`).replace(/\s+/g, "");
+}
+
+function preferredPlnPostpaid(rows: Record<string, unknown>[]) {
+  return rows.find((row) => {
+    const seller = sellerText(row);
+    return seller.includes("arqivapos") || seller.includes("plnpasca2160");
+  });
+}
+
 export function selectPriceRow(rows: Record<string, unknown>[], sku: string, category: string, product: string) {
   const wanted = sku.trim().toLowerCase();
   const active = rows.filter(rowActive);
   const pool = active.length > 0 ? active : [];
-  const exact = pool.find((row) => rowSku(row).toLowerCase() === wanted);
-  if (exact && !(postpaidPlnRequest(wanted, category, product) && /^pln\d/.test(rowSku(exact).toLowerCase()))) return exact;
   if (postpaidPlnRequest(wanted, category, product)) {
     const nontaglis = foldLabel(`${category} ${product} ${wanted}`).includes("nontaglis");
-    const pasca = pool.find((row) => postpaidPlnRow(row, nontaglis));
-    if (pasca) return pasca;
+    const pascaRows = pool.filter((row) => postpaidPlnRow(row, nontaglis));
+    const preferred = preferredPlnPostpaid(pascaRows) || pascaRows.find((row) => rowSku(row).toLowerCase() === wanted) || pascaRows[0];
+    if (preferred) return preferred;
   }
+  const exact = pool.find((row) => rowSku(row).toLowerCase() === wanted);
+  if (exact) return exact;
   const amount = plnAmount(wanted);
   if (amount > 0) {
     const variantB = wanted.endsWith("b");
