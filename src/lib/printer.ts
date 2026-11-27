@@ -25,6 +25,8 @@ export interface ReceiptBill {
   tagihan: number;
   admin: number;
   total: number;
+  sn?: string;
+  at?: string;
 }
 
 const DEFAULTS: PrinterSettings = {
@@ -136,6 +138,11 @@ function receiptTitle(product: string) {
   return `STRUK PEMBAYARAN ${name}`.trim();
 }
 
+function isPlnSlip(product: string) {
+  const name = product.toUpperCase();
+  return name.includes("PLN") || name.includes("LISTRIK");
+}
+
 export function slipText(bill: ReceiptBill, width: number, _loket: string, copy: "STRUK" | "SEGI" = "STRUK") {
   const info = meter(bill.id, bill.period);
   const rule = "=".repeat(width);
@@ -153,6 +160,24 @@ export function slipText(bill: ReceiptBill, width: number, _loket: string, copy:
     ]).join("\n");
   }
   const left = Math.max(24, Math.floor(width * 0.5) - 1);
+  const proof = [bill.sn ? field("SN/TOKEN", bill.sn, width) : ""].filter(Boolean);
+  if (!isPlnSlip(bill.product)) {
+    return padLines([
+      rule,
+      center(receiptTitle(bill.product), width),
+      line,
+      field("ID PELANGGAN", bill.id, width),
+      field("NAMA", bill.name, width),
+      field("PERIODE", bill.period || "-", width),
+      ...(bill.at ? [field("WAKTU", bill.at, width)] : []),
+      ...proof,
+      line,
+      field("TAGIHAN", formatRupiah(bill.tagihan), width),
+      field("ADMIN", formatRupiah(bill.admin), width),
+      field("TOTAL BAYAR", formatRupiah(bill.total), width),
+      rule,
+    ]);
+  }
   return padLines([
     rule,
     center(receiptTitle(bill.product), width),
@@ -160,6 +185,7 @@ export function slipText(bill: ReceiptBill, width: number, _loket: string, copy:
     columns(field("ID PELANGGAN", bill.id, left), `BL/TH: ${info.blth}`, width),
     columns(field("NAMA", bill.name, left), `STAND METER: ${info.stand}`, width),
     columns(field("TARIF/DAYA", info.tarif, left), `SLS: ${info.sls}`, width),
+    ...proof,
     line,
     field("TAGIHAN", formatRupiah(bill.tagihan), width),
     field("ADMIN BANK", formatRupiah(bill.admin), width),

@@ -58,6 +58,11 @@ export interface LoketSale {
   collfee?: number;
   period?: string;
   parentId?: string;
+  sn?: string;
+  clientRef?: string;
+  profit?: number;
+  providerCost?: number;
+  sellPrice?: number;
   status: "pending" | "success" | "failed" | "refunded" | "simulated";
   channel?: "production" | "simulation";
   createdAt: string;

@@ -502,6 +502,9 @@ interface SaleWire {
   amount: number;
   createdAt: string;
   status?: string;
+  profit?: number;
+  providerCost?: number;
+  sellPrice?: number;
   channel?: string;
   submitraId?: string | null;
   mitraId?: string | null;
@@ -524,9 +527,9 @@ function mapSale(sale: SaleWire): TransactionRow {
     category_slug_snapshot: (sale.category || "kolektif").toLowerCase(),
     customer_number: sale.customerNumber,
     amount: Number(sale.amount),
-    cost_price: Number(sale.amount),
-    sell_price: Number(sale.amount),
-    profit: 0,
+    cost_price: Number(sale.providerCost ?? sale.amount),
+    sell_price: Number(sale.sellPrice ?? sale.amount),
+    profit: Number(sale.profit ?? 0),
     status: saleStatus(sale),
     provider_reference: sale.loketName ?? null,
     note: sale.customerName ?? null,

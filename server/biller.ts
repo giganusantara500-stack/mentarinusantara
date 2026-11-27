@@ -1,6 +1,6 @@
 import { billIsPaid, callbackRef, digiflazzReady, inquireDigiflazz, newRefId, payDigiflazz, productKind, resolveBuyerSku, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
 import { findCatalogItem, foldLabel } from "../src/lib/billerCatalog";
-import { listNetworkSales, listSimulations, recordLoketSale, walletBalance, type LedgerEnv } from "./ledger";
+import { listNetworkSales, listSimulations, recordLoketSale, walletBalance, type LedgerEnv, type LoketSale } from "./ledger";
 import { ownerCollectives } from "./ops";
 
 export type BillerMode = "simulation" | "h2h";
@@ -306,6 +306,19 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     const directory = await nameDirectory(env, actorId);
     customerName = resolvedCustomerName(customerName, rememberedCustomerName(input.customerNumber, directory.sales, directory.groups));
   }
+  const receipt: DigiMeta = {
+    buyerSkuCode: sku,
+    kind,
+    customerNumber: input.customerNumber,
+    refId,
+    adminFee: inquiry.bill.adminFee,
+    tagihan: inquiry.bill.amount,
+    denda: inquiry.bill.denda,
+    collfee: inquiry.bill.collfee,
+    period: inquiry.bill.period,
+    providerCost: inquiry.bill.providerCost,
+    customerName,
+  };
   const pending = await recordLoketSale(env, actorId, {
     ...input,
     amount: inquiry.bill.total,
@@ -321,7 +334,7 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     clientRef: refId,
   });
   if (pending.error || !pending.sale) return { ...pending, error: pending.error || "Transaksi tidak dapat dimulai.", paymentStatus: "failed" as PaymentStatus, mode };
-  const claimed = await claimDigiflazz(env, pending.sale.id, { buyerSkuCode: sku, kind, customerNumber: input.customerNumber, refId });
+  const claimed = await claimDigiflazz(env, pending.sale.id, receipt);
   if (!claimed) {
     const balance = pending.balance ?? await walletBalance(env, actorId);
     return { error: "Transaksi ini sedang diproses. Cek status sebelum mengulang.", status: 409, balance, sale: pending.sale, paymentStatus: "pending" as PaymentStatus, mode, providerRef: refId };
@@ -342,7 +355,7 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     outcome: submitted.outcome === "pending" ? "pending" : submitted.outcome,
     clientRef: refId,
   });
-  if (submitted.sn && settled.sale) await rememberDigiflazz(env, settled.sale.id, { buyerSkuCode: sku, kind, customerNumber: input.customerNumber, refId, sn: submitted.sn }).catch(() => undefined);
+  if (settled.sale) await rememberDigiflazz(env, settled.sale.id, { ...receipt, providerCost: charged.providerCost > 0 ? charged.providerCost : receipt.providerCost, customerName: resolvedCustomerName(charged.customerName, customerName), sn: submitted.sn || receipt.sn }).catch(() => undefined);
   return { ...settled, error: settled.error || (submitted.outcome === "failed" ? submitted.message : undefined), paymentStatus: submitted.outcome, mode, providerRef: refId };
 }
 
@@ -430,11 +443,26 @@ export async function handleBillerRequest(method: string, pathname: string, body
     const row = await findDigiflazzSale(env, key, actorId);
     if (!row) return { status: 404, body: { error: "Transaksi DigiFlazz tidak ditemukan." } };
     if (row.status === "success" || row.status === "failed" || row.status === "refunded") {
-      return { status: 200, body: { statusText: row.status, duplicate: true } };
+      return { status: 200, body: { statusText: row.status, balance: await walletBalance(env, actorId), duplicate: true, sale: saleFromRow(row) } };
     }
     return applyDigiflazzStatus(env, row);
   }
   return null;
+}
+
+interface DigiMeta {
+  buyerSkuCode?: string;
+  kind?: DigiKind;
+  customerNumber?: string;
+  refId?: string;
+  sn?: string;
+  adminFee?: number;
+  tagihan?: number;
+  denda?: number;
+  collfee?: number;
+  period?: string;
+  providerCost?: number;
+  customerName?: string;
 }
 
 interface StoredDigiSale {
@@ -447,7 +475,7 @@ interface StoredDigiSale {
   product_name_snapshot: string;
   category_slug_snapshot: string;
   customer_name: string | null;
-  provider_response: { buyerSkuCode?: string; kind?: DigiKind; customerNumber?: string; refId?: string; sn?: string } | null;
+  provider_response: DigiMeta | null;
 }
 
 function menuForCollective(category: string, product: string) {
@@ -479,7 +507,28 @@ async function mapPool<T, R>(items: T[], limit: number, worker: (item: T) => Pro
   return results;
 }
 
-async function claimDigiflazz(env: LedgerEnv, id: string, meta: { buyerSkuCode: string; kind: DigiKind; customerNumber: string; refId: string }) {
+function saleFromRow(row: StoredDigiSale) {
+  const meta = row.provider_response ?? {};
+  return {
+    id: row.id,
+    customerNumber: row.customer_number,
+    customerName: meta.customerName || row.customer_name || "",
+    product: row.product_name_snapshot,
+    category: row.category_slug_snapshot,
+    amount: Number(row.amount) || 0,
+    tagihan: Number(meta.tagihan) || 0,
+    denda: Number(meta.denda) || 0,
+    adminFee: Number(meta.adminFee) || 0,
+    collfee: Number(meta.collfee) || 0,
+    period: meta.period || "",
+    providerCost: Number(meta.providerCost) || 0,
+    sn: meta.sn || "",
+    clientRef: row.idempotency_key,
+    status: row.status,
+  };
+}
+
+async function claimDigiflazz(env: LedgerEnv, id: string, meta: DigiMeta) {
   if (!env.supabaseUrl || !env.serviceRoleKey || !id) return false;
   const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?id=eq.${encodeURIComponent(id)}&provider_response=is.null`, {
     method: "PATCH",
@@ -495,7 +544,7 @@ async function claimDigiflazz(env: LedgerEnv, id: string, meta: { buyerSkuCode: 
   return response.ok && Array.isArray(rows) && rows.length > 0;
 }
 
-async function rememberDigiflazz(env: LedgerEnv, id: string, meta: { buyerSkuCode: string; kind: DigiKind; customerNumber: string; refId: string; sn?: string }) {
+async function rememberDigiflazz(env: LedgerEnv, id: string, meta: DigiMeta) {
   if (!env.supabaseUrl || !env.serviceRoleKey || !id) return;
   await fetch(`${env.supabaseUrl}/rest/v1/transactions?id=eq.${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -525,25 +574,84 @@ async function applyDigiflazzStatus(env: LedgerEnv, row: StoredDigiSale) {
   const refId = clean(row.idempotency_key);
   const customerNumber = clean(meta.customerNumber) || clean(row.customer_number);
   const kind: DigiKind = meta.kind === "prepaid" ? "prepaid" : "postpaid";
-  if (!sku || !refId) return { status: 409, body: { error: "Data DigiFlazz transaksi ini belum lengkap." } };
+  const balanceNow = await walletBalance(env, row.user_id);
+  if (!sku || !refId) return { status: 409, body: { error: "Data DigiFlazz transaksi ini belum lengkap.", balance: balanceNow, statusText: row.status } };
   const quote = await statusDigiflazz({ kind, sku, customerNumber, refId });
-  if (quote.outcome === "pending" || quote.outcome === "not_found") {
-    return { status: 200, body: { statusText: "pending", message: quote.message } };
+  if (quote.outcome === "pending" || (quote.outcome === "not_found" && !/gagal|ditolak|invalid|salah/.test(quote.message.toLowerCase()))) {
+    return { status: 200, body: { statusText: "pending", message: quote.message || "Pembayaran masih diproses. Saldo belum dipotong.", balance: balanceNow } };
   }
-  const amount = quote.total >= 1000 ? quote.total : Number(row.amount);
+  const outcome = quote.outcome === "success" ? "success" : "failed";
+  const storedCost = Number(meta.providerCost) || 0;
+  const providerCost = quote.providerCost > 0 ? quote.providerCost : storedCost;
+  const amount = Number(row.amount) >= 1000 ? Number(row.amount) : (quote.total >= 1000 ? quote.total : Number(row.amount));
   const settled = await recordLoketSale(env, row.user_id, {
     category: row.category_slug_snapshot,
     product: row.product_name_snapshot,
     customerNumber,
-    customerName: resolvedCustomerName(quote.customerName, row.customer_name || ""),
+    customerName: resolvedCustomerName(quote.customerName, meta.customerName || row.customer_name || ""),
     amount,
+    tagihan: Number(meta.tagihan) || quote.amount || 0,
+    denda: Number(meta.denda) || quote.denda || 0,
+    adminFee: Number(meta.adminFee) || quote.adminFee || 0,
+    collfee: Number(meta.collfee) || 0,
+    period: meta.period || quote.period || "",
+    providerCost,
     channel: "production",
-    outcome: quote.outcome,
+    outcome,
     clientRef: refId,
   });
-  if (quote.sn) await rememberDigiflazz(env, row.id, { buyerSkuCode: sku, kind, customerNumber, refId, sn: quote.sn }).catch(() => undefined);
-  if (settled.error) return { status: settled.status, body: { error: settled.error, statusText: quote.outcome } };
-  return { status: 200, body: { sale: settled.sale, balance: settled.balance, statusText: quote.outcome, message: quote.message } };
+  await rememberDigiflazz(env, row.id, {
+    ...meta,
+    buyerSkuCode: sku,
+    kind,
+    customerNumber,
+    refId,
+    sn: quote.sn || meta.sn || "",
+    providerCost,
+    customerName: resolvedCustomerName(quote.customerName, meta.customerName || row.customer_name || ""),
+  }).catch(() => undefined);
+  if (settled.error) return { status: settled.status, body: { error: settled.error, statusText: outcome, balance: balanceNow } };
+  return { status: 200, body: { sale: settled.sale, balance: settled.balance, statusText: outcome, message: quote.message } };
+}
+
+export async function attachSaleReceipts(env: LedgerEnv, sales: LoketSale[]) {
+  if (!env.supabaseUrl || !env.serviceRoleKey || sales.length === 0) return sales;
+  const ids = sales.map((sale) => sale.id).filter((id) => /^[0-9a-f-]{36}$/i.test(id));
+  if (ids.length === 0) return sales;
+  const details = new Map<string, { profit?: number; cost_price?: number; sell_price?: number; provider_reference?: string; provider_response?: DigiMeta | null; idempotency_key?: string }>();
+  for (let index = 0; index < ids.length; index += 80) {
+    const slice = ids.slice(index, index + 80);
+    const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?id=in.(${slice.join(",")})&select=id,profit,cost_price,sell_price,provider_reference,provider_response,idempotency_key`, {
+      headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
+    });
+    const rows = await response.json().catch(() => null);
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (row && typeof row === "object" && typeof row.id === "string") details.set(row.id, row);
+    }
+  }
+  return sales.map((sale) => {
+    const row = details.get(sale.id);
+    if (!row) return sale;
+    const meta = row.provider_response ?? {};
+    const profit = Number(row.profit) || 0;
+    const providerCost = Number(meta.providerCost) || Number(row.cost_price) || 0;
+    return {
+      ...sale,
+      customerName: sale.customerName || meta.customerName || "",
+      tagihan: Number(sale.tagihan) || Number(meta.tagihan) || 0,
+      denda: Number(sale.denda) || Number(meta.denda) || 0,
+      adminFee: Number(sale.adminFee) || Number(meta.adminFee) || 0,
+      collfee: Number(sale.collfee) || Number(meta.collfee) || 0,
+      period: sale.period || meta.period || "",
+      sn: meta.sn || "",
+      clientRef: row.idempotency_key || meta.refId || "",
+      providerReference: row.provider_reference || meta.sn || meta.refId || "",
+      profit,
+      providerCost,
+      sellPrice: Number(row.sell_price) || sale.amount,
+    };
+  });
 }
 
 export async function handleDigiflazzCallback(method: string, pathname: string, body: Record<string, unknown>, headerSecret: string, env: LedgerEnv) {

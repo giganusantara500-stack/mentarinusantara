@@ -1,6 +1,6 @@
 import { DEPOSIT_ACCOUNTS } from "../src/lib/banks";
 import { networkLoketIds, touchActivity } from "./accountAdmin";
-import { requestedMode, runBillerPayment } from "./biller";
+import { attachSaleReceipts, requestedMode, runBillerPayment } from "./biller";
 import { digiflazzDeposit } from "./digiflazz";
 import { cancelOwnTicket, claimTicket, createTicket, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, PUSAT_ACCOUNT, syncProviderDeposit, walletBalance, type DepositTicket } from "./ledger";
 import { ensureLoketCode, listAuthUsers, loketCodeFor, makeTransferCode } from "./loketCode";
@@ -99,11 +99,12 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     if (!["loket", "super_admin", "mitra", "submitra"].includes(caller.role)) {
       return { status: 403, body: { error: "Anda tidak dapat melihat transaksi loket." } };
     }
-    const [sales, simulations, balance] = await Promise.all([
+    const [listed, simulations, balance] = await Promise.all([
       listNetworkSales(env, caller.id),
       listSimulations(env, caller.id),
       walletBalance(env, caller.id),
     ]);
+    const sales = await attachSaleReceipts(env, listed).catch(() => listed);
     const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
     return { status: 200, body: { sales, simulations, balance, loketCode } };
   }

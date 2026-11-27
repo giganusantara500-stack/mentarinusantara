@@ -109,9 +109,9 @@ export function mapDigiOutcome(status: string, rc: string, message: string): Dig
   const note = message.toLowerCase();
   if (billIsPaid(message)) return "not_found";
   if (note.includes("tidak ditemukan") || note.includes("tidak ada tagihan") || note.includes("tidak ada tunggakan") || rc === "54") return "not_found";
-  if (state.includes("gagal") || state === "failed") return "failed";
+  if (state.includes("gagal") || state === "failed" || note.includes("gagal") || note.includes("ditolak")) return "failed";
   if (state.includes("sukses") || state === "success" || rc === "00") return "success";
-  if (state.includes("pending") || note.includes("pending") || rc === "03" || rc === "39") return "pending";
+  if (state.includes("pending") || state.includes("proses") || state.includes("process") || note.includes("pending") || note.includes("diproses") || note.includes("sedang diproses") || rc === "03" || rc === "39") return "pending";
   return "failed";
 }
 
@@ -329,9 +329,10 @@ export function quoteFrom(data: Record<string, unknown>, fallback: { refId: stri
   const period = [meter, lembar > 1 ? `${lembar} lembar` : "", periodCore].filter(Boolean).join(" · ");
   const message = text(data.message);
   let outcome = mapDigiOutcome(text(data.status), scalar(data.rc), message);
-  if (outcome === "failed" && total >= 1000 && !/gagal|tidak ditemukan|tidak ada tagihan|invalid|salah|cutoff|gangguan/.test(message.toLowerCase())) {
+  if (outcome === "failed" && total >= 1000 && !/gagal|tidak ditemukan|tidak ada tagihan|invalid|salah|cutoff|gangguan|pending|proses|diproses/.test(message.toLowerCase())) {
     outcome = "success";
   }
+  if (text(data.sn) && (scalar(data.rc) === "00" || text(data.status).toLowerCase().includes("sukses"))) outcome = "success";
   return {
     outcome,
     message: message || (outcome === "success" ? "Tagihan ditemukan." : "DigiFlazz tidak mengirim keterangan."),

@@ -41,8 +41,15 @@ interface Sale {
   customerNumber: string;
   customerName: string;
   amount: number;
+  tagihan?: number;
+  denda?: number;
   adminFee?: number;
+  collfee?: number;
   period?: string;
+  sn?: string;
+  clientRef?: string;
+  profit?: number;
+  providerCost?: number;
   loketCode?: string;
   loketName?: string;
   status: string;
@@ -181,6 +188,17 @@ const MONTH_INDEX: Record<string, string> = {
   juli: "07", agustus: "08", september: "09", oktober: "10", november: "11", desember: "12",
 };
 
+function queueTokens(period: string): string[] {
+  const tokens = canonicalPeriods(period);
+  return tokens.length > 0 ? tokens : ["tanpa-periode"];
+}
+
+function paymentLabel(status: string) {
+  if (status === "success" || status === "simulated") return "Sukses";
+  if (status === "failed" || status === "refunded") return "Gagal";
+  return "Pending";
+}
+
 function canonicalPeriods(period: string): string[] {
   const packed = period.replace(/\D/g, "").match(/20\d{2}(?:0[1-9]|1[0-2])/g);
   if (packed && packed.length > 0) return packed;
@@ -198,14 +216,16 @@ function canonicalPeriods(period: string): string[] {
 function mergeInquiry(current: CartRow[], built: CartRow[], category: string, customer: string) {
   const same = (row: CartRow) => row.category === category && sameCustomer(row.customerId, customer);
   const existing = current.filter(same);
-  const incoming = [...new Set(built.flatMap((row) => canonicalPeriods(row.period)))];
-  const queued = [...new Set(existing.flatMap((row) => canonicalPeriods(row.period)))];
+  if (built.length === 0) return { next: current, added: [] as CartRow[] };
+  if (existing.length === 0) return { next: [...current, ...built], added: built };
+  const incoming = [...new Set(built.flatMap((row) => queueTokens(row.period)))];
+  const queued = [...new Set(existing.flatMap((row) => queueTokens(row.period)))];
   const missing = incoming.filter((token) => !queued.includes(token));
-  const combined = existing.some((row) => canonicalPeriods(row.period).length > 1);
+  const combined = existing.some((row) => queueTokens(row.period).length > 1);
   const incomingSplit = built.length > 1;
-  if (built.length > 0 && missing.length === 0 && (!combined || !incomingSplit)) return { next: current, added: [] as CartRow[] };
+  if (missing.length === 0 && (!combined || !incomingSplit)) return { next: current, added: [] as CartRow[] };
   const covered = new Set(incoming);
-  const kept = current.filter((row) => !same(row) || !canonicalPeriods(row.period).some((token) => covered.has(token)));
+  const kept = current.filter((row) => !same(row) || !queueTokens(row.period).some((token) => covered.has(token)));
   return { next: [...kept, ...built], added: built };
 }
 
@@ -387,7 +407,10 @@ export function LoketTransaksiPage() {
       const response = await fetch(apiUrl("/api/loket-sales"), { headers: await authHeader() });
       const body = response.ok ? await response.json() : { sales: [], simulations: [] };
       if (!active) return;
-      setSales([...(body.simulations ?? []), ...(body.sales ?? [])]);
+      const loaded = [...(body.simulations ?? []), ...(body.sales ?? [])] as Sale[];
+      setSales(loaded);
+      const open = loaded.find((sale) => sale.status === "pending" && sale.clientRef);
+      if (open?.clientRef) setPendingRef(open.clientRef);
     })();
     return () => { active = false; };
   }, [tick]);
@@ -411,7 +434,8 @@ export function LoketTransaksiPage() {
     }
     setError("");
     setReprintHits(sales.filter((sale) => {
-      if (sale.category !== category) return false;
+      if (sale.status !== "success" && sale.status !== "simulated") return false;
+      if (sale.category && sale.category.toLowerCase() !== category.toLowerCase()) return false;
       if (reprintId.trim() && !sale.customerNumber.includes(reprintId.trim())) return false;
       if (reprintDate && !sale.createdAt.slice(0, 10).startsWith(reprintDate)) return false;
       return true;
@@ -593,11 +617,11 @@ export function LoketTransaksiPage() {
     if (draftRef.current !== generation) return;
     setBusy(false);
     setCart([]);
-    setMessage(lastStatus === "success"
+    setMessage(lastStatus === "success" || lastStatus === "simulated"
       ? `Pembayaran berhasil. Saldo ${formatRupiah(balance)}.`
       : lastStatus === "failed"
-        ? `Pembayaran gagal. Saldo ${formatRupiah(balance)}.`
-        : `Pembayaran diproses. Saldo ${formatRupiah(balance)}.`);
+        ? `Pembayaran gagal. Saldo tidak dipotong. Saldo ${formatRupiah(balance)}.`
+        : `Pembayaran masih diproses. Saldo belum dipotong. Saldo ${formatRupiah(balance)}.`);
     requestRefresh();
   };
 
@@ -623,8 +647,12 @@ export function LoketTransaksiPage() {
     setBusy(false);
     if (!response.ok) { setError(body.error || "Status pembayaran belum terbaca."); return; }
     setError("");
-    setMessage(`Status pembayaran: ${body.statusText || "pending"}. ${body.message || ""} Saldo ${formatRupiah(Number(body.balance) || 0)}.`);
-    if (body.statusText === "success" || body.statusText === "failed") setPendingRef("");
+    const statusText = String(body.statusText || "pending");
+    const settled = statusText === "success" || statusText === "failed" || statusText === "refunded";
+    setMessage(settled
+      ? `Status pembayaran: ${paymentLabel(statusText)}. ${body.message || ""} Saldo ${formatRupiah(Number(body.balance) || 0)}.`
+      : `Status pembayaran: Pending. Saldo belum dipotong. Saldo ${formatRupiah(Number(body.balance) || 0)}.`);
+    if (settled) setPendingRef("");
     requestRefresh();
   };
 
@@ -723,10 +751,10 @@ export function LoketTransaksiPage() {
           ) : (
             <table className="w-full table-fixed text-left text-xs">
               <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
-                <tr>{["No", "Produk", "Cust.ID", "Nama", "Tanggal", "Total", "Status", "Aksi"].map((head) => <th key={head} className="px-3 py-2 font-semibold">{head}</th>)}</tr>
+                <tr>{["No", "Produk", "Cust.ID", "Nama", "Tanggal", "Total", "Status", "SN/Ref", "Aksi"].map((head) => <th key={head} className="px-3 py-2 font-semibold">{head}</th>)}</tr>
               </thead>
               <tbody>
-                {reprintHits.length === 0 && <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">Belum ada list. Isi Customer ID atau tanggal, lalu tekan CEK.</td></tr>}
+                {reprintHits.length === 0 && <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-400">Belum ada transaksi sukses. Isi Customer ID atau tanggal, lalu tekan CEK.</td></tr>}
                 {reprintHits.map((sale, index) => (
                   <tr key={sale.id} className="border-t border-slate-100 text-slate-700">
                     <td className="px-3 py-2">{index + 1}</td>
@@ -735,16 +763,19 @@ export function LoketTransaksiPage() {
                     <td className="whitespace-normal break-words px-3 py-2 leading-4">{customerLabel(sale.customerNumber, sale.customerName, sales, profile?.id || "", namesFromGroups(sale.customerNumber, storedGroups))}</td>
                     <td className="px-3 py-2">{formatWaktu(sale.createdAt)}</td>
                     <td className="px-3 py-2 font-semibold">{formatRupiah(sale.amount)}</td>
-                    <td className="px-3 py-2">{sale.status}</td>
+                    <td className="px-3 py-2">{paymentLabel(sale.status)}</td>
+                    <td className="break-all px-3 py-2 font-mono text-[11px]">{sale.sn || "—"}</td>
                     <td className="px-3 py-2">
                       <button type="button" onClick={() => printReceipts(loadPrinterSettings(loketCode), [{
                         id: sale.customerNumber,
                         name: customerLabel(sale.customerNumber, sale.customerName, sales, profile?.id || "", namesFromGroups(sale.customerNumber, storedGroups)),
                         product: sale.product,
                         period: sale.period || formatWaktu(sale.createdAt),
-                        tagihan: Math.max(0, Number(sale.amount) - Number(sale.adminFee ?? 0)),
+                        tagihan: Number(sale.tagihan) || Math.max(0, Number(sale.amount) - Number(sale.adminFee ?? 0) - Number(sale.denda ?? 0)),
                         admin: Number(sale.adminFee ?? 0),
                         total: Number(sale.amount),
+                        sn: sale.sn || "",
+                        at: formatWaktu(sale.createdAt),
                       }], `${loketCode} - ${loketName}`)} className="rounded-md bg-sky-700 px-2 py-1 text-[11px] font-bold text-white">Cetak Ulang</button>
                     </td>
                   </tr>

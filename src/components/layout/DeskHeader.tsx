@@ -23,19 +23,18 @@ export function useDeskStats(tick: number) {
     (async () => {
       const session = await supabase.auth.getSession();
       const headers = { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` };
-      const [walletRes, salesRes, txRes, runRes] = await Promise.all([
+      const [walletRes, salesRes, runRes] = await Promise.all([
         fetch(apiUrl("/api/wallet"), { headers }),
         fetch(apiUrl("/api/loket-sales"), { headers }),
-        supabase.from("transactions").select("amount,status,created_at").eq("user_id", profile.id),
         fetch("/api/runtext", { headers }),
       ]);
       const wallet = walletRes.ok ? await walletRes.json() : null;
       const salesBody = salesRes.ok ? await salesRes.json() : { sales: [] };
       const sales = (salesBody.sales ?? []) as { amount: number; createdAt: string; status: string }[];
-      const remote = (txRes.data ?? []) as { amount: number; status: string; created_at: string }[];
       const today = new Date().toDateString();
-      const todaySales = sales.filter((sale) => new Date(sale.createdAt).toDateString() === today);
-      const pending = remote.filter((row) => row.status === "pending").reduce((sum, row) => sum + Number(row.amount), 0);
+      const settled = (sale: { status: string }) => sale.status === "success" || sale.status === "simulated";
+      const todaySales = sales.filter((sale) => settled(sale) && new Date(sale.createdAt).toDateString() === today);
+      const pending = sales.filter((sale) => sale.status === "pending").reduce((sum, sale) => sum + Number(sale.amount), 0);
       if (!active) return;
       setBalance(Number(wallet?.balance ?? salesBody.balance ?? 0));
       setTodayCount(todaySales.length);
@@ -82,11 +81,13 @@ export function useDeskStats(tick: number) {
         }
         if (salesRes.ok) {
           const body = await salesRes.json();
-          const sales = (body.sales ?? []) as { amount: number; createdAt: string }[];
+          const sales = (body.sales ?? []) as { amount: number; createdAt: string; status?: string }[];
           const today = new Date().toDateString();
-          const todaySales = sales.filter((sale) => new Date(sale.createdAt).toDateString() === today);
+          const settled = (sale: { status?: string }) => sale.status === "success" || sale.status === "simulated";
+          const todaySales = sales.filter((sale) => settled(sale) && new Date(sale.createdAt).toDateString() === today);
           setTodayCount(todaySales.length);
           setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0));
+          setOutstanding(sales.filter((sale) => sale.status === "pending").reduce((sum, sale) => sum + Number(sale.amount), 0));
         }
       })();
     }, 5000);
