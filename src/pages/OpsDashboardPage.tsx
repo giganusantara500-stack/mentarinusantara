@@ -42,7 +42,7 @@ function cmsAmount(ticket: CmsTicket) {
 function DepositTasks({ tickets, onChanged }: { tickets: CmsTicket[]; onChanged: () => void }) {
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
-  const tasks = tickets.filter((ticket) => ticket.status === "pending" && ticketPhase(ticket).label !== "Kedaluwarsa");
+  const tasks = tickets.filter((ticket) => ticket.status === "pending" && ticketPhase(ticket, Date.now(), "admin").label !== "Kedaluwarsa");
   const decide = async (id: string, action: "approve" | "cancel") => {
     setBusy(id + action);
     setNote("");
@@ -69,7 +69,7 @@ function DepositTasks({ tickets, onChanged }: { tickets: CmsTicket[]; onChanged:
               <div className="text-xs text-slate-500">Kode unik {ticket.uniqueCode || "-"} · saldo yang pindah {formatRupiah(ticket.baseAmount ?? ticket.amount)}</div>
             </div>
             <div className="flex items-center gap-2">
-              <Badge tone={ticketPhase(ticket).tone}>{ticketPhase(ticket).label}</Badge>
+              <Badge tone={ticketPhase(ticket, Date.now(), "admin").tone}>{ticketPhase(ticket, Date.now(), "admin").label}</Badge>
               {ticket.route === "jaringan" ? (
                 <Badge tone="info">Jaringan</Badge>
               ) : (
@@ -206,11 +206,11 @@ export function OpsDashboardPage() {
             })()}
           </button>
         )}
-        <div className="ml-auto hidden max-w-[46%] text-right text-[11px] leading-snug text-white/70 sm:block">
-          {role === "superadmin"
-            ? "Tiket memindahkan Saldo Utama satu kali. Transfer ke loket memotong Saldo Utama yang sama."
-            : "Pengajuan deposit menunggu persetujuan Super Admin sebelum saldo bertambah."}
-        </div>
+        {role === "superadmin" && (
+          <div className="ml-auto hidden max-w-[46%] text-right text-[11px] leading-snug text-white/70 sm:block">
+            Tiket memindahkan Saldo Utama satu kali. Transfer ke loket memotong Saldo Utama yang sama.
+          </div>
+        )}
       </div>
       <div className={`grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2 ${networkView ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         {cards.map((card) => {

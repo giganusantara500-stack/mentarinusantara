@@ -55,7 +55,12 @@ function forLoketEyes(ticket: Ticket, viewer: string): Ticket {
 
 function publicNote(note: string, viewer: string) {
   if (viewer === "superadmin") return note;
-  return note.replace(/super\s*admin/gi, "pusat");
+  return note
+    .replace(/pengajuan deposit menunggu persetujuan super admin sebelum saldo bertambah\.?/gi, "")
+    .replace(/hanya super\s*admin[^.]*/gi, "Aksi ini tidak diizinkan")
+    .replace(/super\s*admin/gi, "pusat")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function DestinationAccount({ account, amount, ticket }: { account: { bank: string; accountNumber: string; holder: string }; amount: string; ticket: Ticket | null }) {
@@ -90,9 +95,7 @@ function DestinationAccount({ account, amount, ticket }: { account: { bank: stri
 
 function scopeText(role: string) {
   if (role === "superadmin") return "Seluruh pengajuan di sistem.";
-  if (role === "mitra") return "Milik Anda, plus Sub Mitra dan Loket di bawah Anda.";
-  if (role === "submitra") return "Milik Anda, plus Loket di bawah Anda.";
-  return "Hanya milik loket ini.";
+  return "Tiket deposit akun ini.";
 }
 
 function normalizeTicket(ticket: Ticket & { unique_code?: string }): Ticket {
@@ -212,10 +215,19 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
 
   const visibleTickets = tickets.map((ticket) => forLoketEyes(ticket, role));
   const ownTickets = visibleTickets.filter((ticket) => ticket.loketId === profile?.id);
+  const listedTickets = role === "superadmin" ? visibleTickets : ownTickets;
+  const phaseAudience = role === "superadmin" ? "admin" : "applicant";
   const openTicket = canCreate ? openDepositTicket(ownTickets, now) : null;
   const account = DEPOSIT_ACCOUNTS[0];
-  const waiting = visibleTickets.filter((ticket) => ticket.status === "pending" && ticketPhase(ticket, now).label !== "Kedaluwarsa");
-  const archive = visibleTickets.filter((ticket) => !waiting.some((item) => item.id === ticket.id));
+  const waiting = listedTickets.filter((ticket) => ticket.status === "pending" && ticketPhase(ticket, now, phaseAudience).label !== "Kedaluwarsa");
+  const archive = listedTickets.filter((ticket) => !waiting.some((item) => item.id === ticket.id));
+  const shownMutations = role === "superadmin" ? mutations : mutations.filter((row) => !row.accountId || row.accountId === profile?.id);
+  const tabs = [
+    ["request", "Request Tiket Deposit"],
+    ["history", "History"],
+    ["mutasi", "Mutasi Saldo"],
+    ...(role === "superadmin" ? [["pantauan", "Pantauan Setoran"] as const] : []),
+  ] as const;
 
   const refreshStatus = async () => {
     await load();
@@ -240,6 +252,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
   };
 
   const decide = async (id: string, action: "approve" | "cancel") => {
+    if (role !== "superadmin") return;
     const lock = id + action;
     if (decideLock.current) return;
     decideLock.current = lock;
@@ -266,7 +279,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
         <button onClick={onClose} className="rounded-full px-3 py-1 text-xs font-semibold text-slate-500">{page ? "Kembali" : "Tutup"}</button>
       </div>
       <div className="flex gap-1 overflow-x-auto border-b border-slate-100 px-4 py-2 sm:px-[1.5cm]">
-        {([["request", "Request Tiket Deposit"], ["history", "History"], ["mutasi", "Mutasi Saldo"], ["pantauan", "Pantauan Setoran"]] as const).map(([key, label]) => (
+        {tabs.map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${tab === key ? "bg-sky-700 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>
         ))}
       </div>
@@ -295,7 +308,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
           </Field>
           {error && <div className="sm:col-span-2 text-sm text-rose-600">{error}</div>}
           <div className="sm:col-span-2 space-y-2">
-            {openTicket && <p className="text-sm text-amber-800">Masih ada tiket yang berjalan ({ticketPhase(openTicket, now).label}). Selesaikan atau batalkan tiket itu dulu. Tombol buat tiket baru baru bisa dipakai setelah tiket ini berhasil, kedaluwarsa, atau dibatalkan.</p>}
+            {openTicket && <p className="text-sm text-amber-800">Masih ada tiket yang berjalan ({ticketPhase(openTicket, now, phaseAudience).label}). Selesaikan atau batalkan tiket itu dulu. Tombol buat tiket baru baru bisa dipakai setelah tiket ini berhasil, kedaluwarsa, atau dibatalkan.</p>}
             <Button onClick={create} disabled={busy || !!openTicket || Number(amount) < 10000}>{busy ? "Menyimpan..." : "Buat Tiket Deposit"}</Button>
           </div>
         </div>
@@ -305,21 +318,21 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
       {tab === "history" && <Card>
         <CardHeader title="Riwayat tiket yang sudah selesai" subtitle={`${archive.length} tiket selesai, dibatalkan, atau kedaluwarsa · ${scopeText(role)}`} />
         <div className="divide-y divide-slate-100">
-          {archive.length === 0 && <div className="p-6 text-sm text-center text-slate-500">Belum ada riwayat. Tiket yang masih berjalan ada di tab Request atau Pantauan.</div>}
+          {archive.length === 0 && <div className="p-6 text-sm text-center text-slate-500">{role === "superadmin" ? "Belum ada riwayat. Tiket yang masih berjalan ada di tab Request atau Pantauan." : "Belum ada riwayat. Tiket yang masih berjalan ada di tab Request."}</div>}
           {archive.map((ticket) => (
             <div key={ticket.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
               <div className="min-w-0">
                 <div className="break-words text-sm font-medium text-slate-800">{ticket.loketName || "Pemohon"} · {roleText(ticket.applicantRole)}</div>
                 <div className="text-xs text-slate-500">Kode {ticket.uniqueCode || "-"} · {formatRupiah(ticket.transferAmount ?? ticket.amount)} · {formatWaktu(ticket.transferAt)}</div>
               </div>
-              <Badge tone={ticketPhase(ticket, now).tone}>{ticketPhase(ticket, now).label}</Badge>
+              <Badge tone={ticketPhase(ticket, now, phaseAudience).tone}>{ticketPhase(ticket, now, phaseAudience).label}</Badge>
             </div>
           ))}
         </div>
       </Card>}
 
-      {tab === "pantauan" && <Card>
-        <CardHeader title="Antrean yang menunggu keputusan" subtitle={role === "superadmin" ? `${waiting.length} tiket menunggu. Setujui memindahkan saldo satu kali.` : `${waiting.length} tiket menunggu keputusan.`} />
+      {role === "superadmin" && tab === "pantauan" && <Card>
+        <CardHeader title="Antrean yang menunggu keputusan" subtitle={`${waiting.length} tiket menunggu. Setujui memindahkan saldo satu kali.`} />
         <div className="divide-y divide-slate-100">
           {waiting.length === 0 && <div className="p-6 text-center text-sm text-slate-500">Tidak ada tiket yang menunggu. Riwayat selesai ada di tab History.</div>}
           {waiting.map((ticket) => (
@@ -329,8 +342,8 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
                 <div className="text-xs text-slate-500">Kode {ticket.uniqueCode || "-"} · transfer {formatRupiah(ticket.transferAmount ?? ticket.amount)} · saldo {formatRupiah(ticket.baseAmount ?? ticket.amount)}</div>
               </div>
               <div className="flex items-center gap-2">
-                <Badge tone={ticketPhase(ticket, now).tone}>{ticketPhase(ticket, now).label}</Badge>
-                {role === "superadmin" && ticket.status === "pending" && ticketPhase(ticket, now).label !== "Kedaluwarsa" && (
+                <Badge tone={ticketPhase(ticket, now, "admin").tone}>{ticketPhase(ticket, now, "admin").label}</Badge>
+                {ticket.status === "pending" && ticketPhase(ticket, now, "admin").label !== "Kedaluwarsa" && (
                   <>
                     <Button size="sm" disabled={decideId === `${ticket.id}approve`} onClick={() => decide(ticket.id, "approve")}>Setujui</Button>
                     <Button size="sm" variant="outline" disabled={decideId === `${ticket.id}cancel`} onClick={() => decide(ticket.id, "cancel")}>Tolak</Button>
@@ -343,11 +356,11 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
       </Card>}
 
       {tab === "mutasi" && <Card>
-        <CardHeader title="Buku mutasi saldo" subtitle={scopeText(role)} />
+        <CardHeader title="Buku mutasi saldo" subtitle={role === "superadmin" ? "Seluruh perubahan saldo di sistem." : "Perubahan saldo akun ini."} />
         <div className="divide-y divide-slate-100">
           <div className="grid grid-cols-4 gap-2 bg-slate-50 px-5 py-2 text-[11px] font-semibold uppercase text-slate-500"><span>Keterangan</span><span>Awal</span><span>Perubahan</span><span>Akhir</span></div>
-          {mutations.length === 0 && <div className="px-5 py-6 text-center text-sm text-slate-500">Belum ada perubahan saldo pada jangkauan peran ini.</div>}
-          {mutations.map((row) => (
+          {shownMutations.length === 0 && <div className="px-5 py-6 text-center text-sm text-slate-500">Belum ada perubahan saldo pada akun ini.</div>}
+          {shownMutations.map((row) => (
             <div key={row.id} className="grid grid-cols-4 gap-2 px-5 py-3 text-sm">
               <div className="min-w-0 break-words font-medium text-slate-800">{row.direction === "credit" ? "Masuk" : "Keluar"} · {publicNote(row.note, role)}<div className="text-xs font-normal text-slate-500">{formatWaktu(row.at)}</div></div>
               <div>{formatRupiah(openingBalance(row))}</div>

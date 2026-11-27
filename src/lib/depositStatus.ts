@@ -4,13 +4,13 @@ export interface DepositTicketView {
   claimedAt?: string | null;
 }
 
-export function ticketPhase(ticket: DepositTicketView, now = Date.now()) {
+export function ticketPhase(ticket: DepositTicketView, now = Date.now(), audience: "admin" | "applicant" = "applicant") {
   const expires = ticket.expiresAt ? new Date(ticket.expiresAt).getTime() : 0;
   if (ticket.status === "pending" && expires > 0 && expires <= now) {
     return { label: "Kedaluwarsa", tone: "danger" as const };
   }
   if (ticket.status === "pending" && ticket.claimedAt) {
-    return { label: "Menunggu Persetujuan", tone: "warning" as const };
+    return { label: audience === "admin" ? "Menunggu Persetujuan" : "Sedang diproses", tone: "warning" as const };
   }
   if (ticket.status === "pending") {
     return { label: "Menunggu Pembayaran", tone: "warning" as const };

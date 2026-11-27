@@ -95,9 +95,19 @@ Deno.serve(async (req) => {
     ]);
     const failure = [tickets, mutations, balance].find((item) => item.status >= 400);
     if (failure) return respond(failure.body, failure.status);
+    const ticketRows = Array.isArray(tickets.body.tickets) ? tickets.body.tickets as Array<Record<string, unknown>> : [];
+    const mutationRows = Array.isArray(mutations.body.mutations) ? mutations.body.mutations as Array<Record<string, unknown>> : [];
+    const visibleTickets = role === "super_admin"
+      ? ticketRows
+      : ticketRows.filter((ticket) => ticket.loketId === user.id || ticket.status !== "pending");
+    const visibleMutations = role === "super_admin"
+      ? mutationRows
+      : mutationRows
+        .filter((row) => row.accountId === user.id)
+        .map((row) => ({ ...row, note: String(row.note ?? "").replace(/super\s*admin/gi, "pusat") }));
     return respond({
-      tickets: tickets.body.tickets ?? [],
-      mutations: mutations.body.mutations ?? [],
+      tickets: visibleTickets,
+      mutations: visibleMutations,
       balance: balance.body.balance ?? 0,
       accounts: [DEPOSIT_ACCOUNT],
     });
@@ -137,8 +147,11 @@ Deno.serve(async (req) => {
     const id = clean(body.id);
     if (!id) return respond({ error: "Tiket yang dipilih tidak ditemukan." }, 400);
     const decision = clean(body.decision);
-    if (action === "decide" && !["approve", "cancel", "pending", "void"].includes(decision)) {
-      return respond({ error: "Aksi keputusan tiket tidak valid." }, 400);
+    if (action === "decide") {
+      if (role !== "super_admin") return respond({ error: "Aksi ini tidak diizinkan." }, 403);
+      if (!["approve", "cancel", "pending", "void"].includes(decision)) {
+        return respond({ error: "Aksi keputusan tiket tidak valid." }, 400);
+      }
     }
     const ledgerAction = action === "cancel" ? "cancel_ticket" : action === "claim" ? "claim_ticket" : "decide_ticket";
     const result = await ledger(admin, ledgerAction, user.id, action === "decide" ? { id, action: decision } : { id });

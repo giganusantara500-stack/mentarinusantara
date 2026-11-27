@@ -84,7 +84,15 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       listMutations(env, caller.id),
       walletBalance(env, caller.id),
     ]);
-    return { status: 200, body: { tickets, mutations, accounts: DEPOSIT_ACCOUNTS, balance, loketCode } };
+    const visibleTickets = caller.role === "super_admin"
+      ? tickets
+      : tickets.filter((ticket) => ticket.loketId === caller.id || ticket.status !== "pending");
+    const visibleMutations = caller.role === "super_admin"
+      ? mutations
+      : mutations
+        .filter((row) => row.accountId === caller.id)
+        .map((row) => ({ ...row, note: String(row.note ?? "").replace(/super\s*admin/gi, "pusat") }));
+    return { status: 200, body: { tickets: visibleTickets, mutations: visibleMutations, accounts: DEPOSIT_ACCOUNTS, balance, loketCode } };
   }
 
   if (pathname === "/api/loket-sales" && method === "GET") {
@@ -259,7 +267,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
   }
 
   if (pathname === "/api/deposits/decide" && method === "POST") {
-    if (caller.role !== "super_admin") return { status: 403, body: { error: "Hanya Super Admin yang dapat menyetujui tiket deposit ke rekening pusat." } };
+    if (caller.role !== "super_admin") return { status: 403, body: { error: "Aksi ini tidak diizinkan." } };
     const action = body.action === "approve" || body.action === "cancel" || body.action === "pending" || body.action === "void"
       ? body.action
       : "";

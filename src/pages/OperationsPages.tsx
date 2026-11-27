@@ -291,9 +291,9 @@ export function ManageSetoranPage() {
 
   if (!isSuperAdmin) {
     return (
-      <Shell title="Persetujuan Deposit" description="Menu ini hanya untuk Super Admin.">
+      <Shell title="Deposit" description="Halaman ini tidak tersedia untuk akun ini.">
         <Card>
-          <div className="p-4 text-sm text-slate-600">Mitra dan Sub Mitra mengajukan tiket di menu Tiket Deposit. Super Admin yang menyetujui memindahkan Saldo Utama ke pemohon satu kali.</div>
+          <div className="p-4 text-sm text-slate-600">Akun ini tidak dapat membuka halaman tersebut.</div>
         </Card>
       </Shell>
     );
@@ -372,7 +372,7 @@ export function ManageSetoranPage() {
                     <td className="px-3 py-2">{!globalQueue && (ticket.uplineRole === "super_admin" || ticket.uplineRole === "superadmin") ? "Pusat" : (ticket.uplineName || "Pusat")}<div className="text-xs text-slate-500">{roleText(ticket.uplineRole)}</div></td>
                     <td className="px-3 py-2">{ticket.bank}<div className="text-xs text-slate-500">{ticket.accountNumber}</div></td>
                     <td className="px-3 py-2 font-semibold">{formatRupiah(ticket.transferAmount ?? ticket.amount)}<div className="font-mono text-xs text-slate-500">kode {ticket.uniqueCode || "—"} · masuk {formatRupiah(ticket.baseAmount ?? ticket.amount)}</div></td>
-                    <td className="px-3 py-2"><Badge tone={ticketPhase(ticket).tone}>{ticketPhase(ticket).label}</Badge></td>
+                    <td className="px-3 py-2"><Badge tone={ticketPhase(ticket, Date.now(), "admin").tone}>{ticketPhase(ticket, Date.now(), "admin").label}</Badge></td>
                     <td className="px-3 py-2">
                       {allowed ? (
                         <div className="flex flex-wrap gap-2">
