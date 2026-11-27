@@ -359,11 +359,28 @@ function sellerText(row: Record<string, unknown>) {
   return foldLabel(`${text(row.seller_name)} ${text(row.seller)} ${text(row.desc)} ${rowSku(row)} ${text(row.product_name)}`).replace(/\s+/g, "");
 }
 
+function plnPostpaidHints() {
+  const seller = foldLabel(process.env.DIGIFLAZZ_PLN_POSTPAID_SELLER || "arqiva pos").replace(/\s+/g, "");
+  const codes = (process.env.DIGIFLAZZ_PLN_POSTPAID_CODE || "PLNPASCA2300,PLNPASCA2160")
+    .split(/[,;\s]+/)
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  return { seller, codes };
+}
+
 function preferredPlnPostpaid(rows: Record<string, unknown>[]) {
-  return rows.find((row) => {
+  const hints = plnPostpaidHints();
+  const ranked = rows.flatMap((row) => {
     const seller = sellerText(row);
-    return seller.includes("arqivapos") || seller.includes("plnpasca2160");
-  });
+    const code = rowSku(row).toLowerCase();
+    const hinted = hints.codes.findIndex((item) => code === item || seller.includes(item));
+    let score = 0;
+    if (hints.seller && seller.includes(hints.seller)) score += 50;
+    if (hinted >= 0) score += 40 - hinted;
+    else if (/plnpasca\d+/.test(seller) || /plnpasca\d+/.test(code)) score += 10;
+    return score > 0 ? [{ row, score }] : [];
+  }).sort((left, right) => right.score - left.score);
+  return ranked[0]?.row;
 }
 
 export function selectPriceRow(rows: Record<string, unknown>[], sku: string, category: string, product: string) {

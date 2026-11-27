@@ -156,6 +156,13 @@ function meterOf(period: string) {
   return part;
 }
 
+function periodLine(meter: string, period: string) {
+  const months = period.split("·").map((item) => item.trim()).filter((item) => item && item !== meter && !/^\d+\s+lembar$/i.test(item));
+  const month = months.join(", ");
+  if (meter && month) return `${meter} - ${month}`;
+  return meter || month || period;
+}
+
 function billMonths(value: unknown): BillMonth[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((row) => {
@@ -173,7 +180,8 @@ function columnWidth(head: string) {
   if (head === "No") return "2.5rem";
   if (head === "Produk") return "13.5rem";
   if (head === "Cust.ID") return "9.75rem";
-  if (head === "Nama") return "20%";
+  if (head === "Nama") return "16%";
+  if (head === "Periode") return "15.5rem";
   if (head === "Tagihan" || head === "Tot. Tagihan") return "8.5rem";
   if (head === "Denda") return "5.25rem";
   if (head === "Admin Bank") return "6rem";
@@ -635,10 +643,7 @@ export function LoketTransaksiPage() {
                     <td className="whitespace-nowrap px-2 py-2">{row.category} {row.product}</td>
                     <td className="whitespace-nowrap px-2 py-2 font-mono tracking-tight">{row.customerId}</td>
                     <td className={`whitespace-normal break-words px-3 py-2 leading-5 ${row.name.includes("*") ? "text-sm font-semibold tracking-wide text-slate-900" : ""}`} title={row.name}>{row.name}</td>
-                    <td className="whitespace-normal break-words px-2 py-2 leading-5">
-                      {row.meter && <div className="font-medium text-slate-800">{row.meter}</div>}
-                      {row.period.split("·").map((part) => part.trim()).filter((part) => part && part !== row.meter).map((part) => <div key={part}>{part}</div>)}
-                    </td>
+                    <td className="whitespace-nowrap px-2 py-2" title={periodLine(row.meter, row.period)}>{periodLine(row.meter, row.period)}</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatRupiah(row.total)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.amount)}</td>
                     <td className="px-1.5 py-2 text-right tabular-nums">{formatRupiah(row.denda)}</td>
