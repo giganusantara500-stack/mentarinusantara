@@ -176,6 +176,18 @@ function withRememberedName<T extends { customerName: string }>(bill: T, custome
   return next === bill.customerName ? bill : { ...bill, customerName: next };
 }
 
+function noteInquiryName(customerNumber: string, providerName: string, kept: string) {
+  const tail = customerNumber.replace(/\D/g, "").slice(-4) || "----";
+  if (sentCustomerName(providerName)) {
+    const masked = providerName.includes("*") ? "bertanda bintang, dipertahankan apa adanya" : "utuh dari provider";
+    console.log(`[nama-inquiry] id···${tail} nama ${masked}: "${providerName}". Riwayat dan kolektif tidak menimpa. Tagihan per periode tidak diubah.`);
+    return;
+  }
+  console.log(kept
+    ? `[nama-inquiry] id···${tail} provider tidak mengirim nama. Dipakai nama tersimpan "${kept}".`
+    : `[nama-inquiry] id···${tail} provider tidak mengirim nama dan tidak ada nama tersimpan.`);
+}
+
 function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
   const chosen = adminFee > 0;
   const fee = chosen ? adminFee : quote.adminFee;
@@ -348,9 +360,12 @@ export async function handleBillerRequest(method: string, pathname: string, body
       kind: clean(body.kind),
       refId: clean(body.refId),
     });
-    const bill = result.bill && !sentCustomerName(result.bill.customerName)
-      ? withRememberedName(result.bill, clean(body.customerNumber), await nameDirectory(env, actorId))
+    const customerNumber = clean(body.customerNumber);
+    const providerName = result.bill?.customerName || "";
+    const bill = result.bill && !sentCustomerName(providerName)
+      ? withRememberedName(result.bill, customerNumber, await nameDirectory(env, actorId))
       : result.bill;
+    if (result.bill) noteInquiryName(customerNumber, providerName, bill?.customerName || "");
     if (result.status === "paid") return { status: 200, body: { mode, statusText: "paid", message: result.message, bill, providerRef: result.providerRef, buyerSkuCode: result.buyerSkuCode } };
     if (result.status !== "found") return { status: result.status === "not_found" ? 404 : 409, body: { error: result.message, mode, statusText: result.status } };
     return { status: 200, body: { mode, statusText: "found", bill, providerRef: result.providerRef, buyerSkuCode: result.buyerSkuCode } };
@@ -367,7 +382,9 @@ export async function handleBillerRequest(method: string, pathname: string, body
       if (!menu) return { key, customerNumber, statusText: "failed", message: "Produk kolektif belum terpetakan ke DigiFlazz." };
       const result = await inquireBill("h2h", { category: menu.category, product: menu.product, customerNumber, adminFee: Number(record.adminFee) || 0 });
       const directory = await directoryPromise;
-      const bill = result.bill && !sentCustomerName(result.bill.customerName) ? withRememberedName(result.bill, customerNumber, directory) : result.bill;
+      const providerName = result.bill?.customerName || "";
+      const bill = result.bill && !sentCustomerName(providerName) ? withRememberedName(result.bill, customerNumber, directory) : result.bill;
+      if (result.bill) noteInquiryName(customerNumber, providerName, bill?.customerName || "");
       return {
         key,
         customerNumber,

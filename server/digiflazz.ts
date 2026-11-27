@@ -146,29 +146,78 @@ function rowList(value: unknown): Record<string, unknown>[] {
   return [];
 }
 
+const NAME_KEYS = new Set(["customer_name", "tr_name", "nama", "nama_pelanggan", "name", "subscriber_name", "nama_subscriber"]);
+
+interface NameHit {
+  path: string;
+  value: string;
+  masked: boolean;
+}
+
+function rememberName(hits: NameHit[], seen: Set<string>, path: string, value: unknown) {
+  const name = named(value);
+  if (!name) return;
+  const key = `${path}=${name}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  hits.push({ path, value: name, masked: name.includes("*") });
+}
+
+function collectNameHits(value: unknown, path: string, hits: NameHit[], seen: Set<string>, depth: number) {
+  if (depth > 6) return;
+  if (typeof value === "string") {
+    const key = path.slice(path.lastIndexOf(".") + 1).replace(/\[\d+\]$/, "").toLowerCase();
+    if (NAME_KEYS.has(key)) rememberName(hits, seen, path || key, value);
+    if (key === "sn") {
+      const matched = value.match(/(?:^|[/\s])nama=([^/]+)/i);
+      if (matched) rememberName(hits, seen, `${path}.Nama`, matched[1]);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectNameHits(item, `${path}[${index}]`, hits, seen, depth + 1));
+    return;
+  }
+  const record = objectOf(value);
+  if (!record) return;
+  for (const [key, child] of Object.entries(record)) {
+    collectNameHits(child, path ? `${path}.${key}` : key, hits, seen, depth + 1);
+  }
+}
+
+function officialName(hit: NameHit) {
+  return /(?:^|\.)(?:customer_name|tr_name|name)$/.test(hit.path);
+}
+
 export function customerNameFrom(data: Record<string, unknown>) {
-  const desc = objectOf(data.desc) ?? {};
-  const fields = [
-    data.customer_name,
-    desc.customer_name,
-    data.tr_name,
-    desc.tr_name,
-    data.nama,
-    data.nama_pelanggan,
-    data.name,
-    desc.nama,
-    desc.nama_pelanggan,
-    desc.name,
-  ];
-  for (const field of fields) {
-    const name = named(field);
-    if (name) return name;
+  const hits: NameHit[] = [];
+  collectNameHits(data, "", hits, new Set<string>(), 0);
+  const official = hits.find((hit) => officialName(hit));
+  const plain = hits.find((hit) => !hit.masked);
+  let chosen = "";
+  let reason = "";
+  if (official && !official.masked) {
+    chosen = official.value;
+    reason = `Dipakai ${official.path} karena field resmi provider berisi nama tanpa bintang.`;
+  } else if (plain) {
+    chosen = plain.value;
+    reason = official
+      ? `${official.path} bertanda bintang. Dipakai ${plain.path} persis seperti dikirim provider, tanpa mengubah karakter.`
+      : `Dipakai ${plain.path} persis seperti dikirim provider.`;
+  } else if (official) {
+    chosen = official.value;
+    reason = `Nama di ${official.path} bertanda bintang dan tidak ada field nama lain tanpa bintang. Dipakai apa adanya, karakter * tidak diubah.`;
+  } else if (hits[0]) {
+    chosen = hits[0].value;
+    reason = `Dipakai ${hits[0].path} apa adanya, karakter * tidak diubah.`;
+  } else {
+    reason = "Response provider tidak mengirim field nama.";
   }
-  for (const row of detailRows(data)) {
-    const name = named(row.nama) || named(row.customer_name) || named(row.nama_pelanggan) || named(row.name) || named(row.tr_name);
-    if (name) return name;
-  }
-  return "";
+  const found = hits.length === 0
+    ? "tidak ada field nama"
+    : hits.map((hit) => `${hit.path}="${hit.value}" [${hit.masked ? "bertanda bintang dari provider" : "tanpa bintang"}]`).join("; ");
+  console.log(`[nama-inquiry] ${found}. ${reason}${chosen ? ` Hasil="${chosen}".` : ""} Pemecahan periode tidak diubah.`);
+  return chosen;
 }
 
 function summaryRow(record: Record<string, unknown>) {
