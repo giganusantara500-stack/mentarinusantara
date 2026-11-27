@@ -188,6 +188,16 @@ function noteInquiryName(customerNumber: string, providerName: string, kept: str
     : `[nama-inquiry] id···${tail} provider tidak mengirim nama dan tidak ada nama tersimpan.`);
 }
 
+function settledProviderCost(quoted: number, known: number, sell: number) {
+  const price = Number.isFinite(quoted) ? Math.round(quoted) : 0;
+  const listed = Number.isFinite(known) ? Math.round(known) : 0;
+  const amount = Number.isFinite(sell) ? Math.max(0, Math.round(sell)) : 0;
+  if (price > 0 && (amount <= 0 || price <= amount)) return price;
+  if (listed > 0 && (amount <= 0 || listed <= amount)) return listed;
+  if (amount > 0 && listed > 0) return Math.min(listed, amount);
+  return 0;
+}
+
 function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
   const chosen = adminFee > 0;
   const fee = chosen ? adminFee : quote.adminFee;
@@ -247,7 +257,7 @@ const h2hProvider: BillerProvider = {
         refId: clean(input.providerRef) || input.clientRef,
       });
       if (quote.outcome === "success" || quote.outcome === "pending" || quote.outcome === "failed") {
-        return { outcome: quote.outcome === "not_found" ? "failed" : quote.outcome, providerRef: quote.refId, message: quote.message, bill: billFromQuote(quote, input.adminFee), sn: quote.sn };
+        return { outcome: quote.outcome, providerRef: quote.refId, message: quote.message, bill: billFromQuote(quote, input.adminFee), sn: quote.sn };
       }
       return { outcome: "failed", message: quote.message || "Jawaban DigiFlazz tidak dikenali. Saldo tidak dipotong." };
     } catch {
@@ -334,6 +344,17 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     clientRef: refId,
   });
   if (pending.error || !pending.sale) return { ...pending, error: pending.error || "Transaksi tidak dapat dimulai.", paymentStatus: "failed" as PaymentStatus, mode };
+  const already = pending.sale.status;
+  if (already === "success" || already === "failed" || already === "refunded" || already === "simulated") {
+    return {
+      ...pending,
+      balance: pending.balance ?? await walletBalance(env, actorId),
+      paymentStatus: already,
+      mode,
+      providerRef: refId,
+      sn: pending.sale.sn || "",
+    };
+  }
   const claimed = await claimDigiflazz(env, pending.sale.id, receipt);
   if (!claimed) {
     const balance = pending.balance ?? await walletBalance(env, actorId);
@@ -341,6 +362,8 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
   }
   const submitted = await h2hProvider.submit({ ...input, buyerSkuCode: sku, kind, bill: inquiry.bill, providerRef: refId, clientRef: refId });
   const charged = submitted.bill && submitted.bill.total >= 1000 ? submitted.bill : inquiry.bill;
+  const providerCost = settledProviderCost(charged.providerCost, inquiry.bill.providerCost, inquiry.bill.total);
+  const outcome = submitted.outcome === "pending" ? "pending" : submitted.outcome;
   const settled = await recordLoketSale(env, actorId, {
     ...input,
     amount: inquiry.bill.total,
@@ -350,13 +373,25 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     collfee: inquiry.bill.collfee,
     period: inquiry.bill.period,
     customerName: resolvedCustomerName(charged.customerName, customerName),
-    providerCost: charged.providerCost > 0 ? charged.providerCost : inquiry.bill.providerCost,
+    providerCost,
     channel: "production",
-    outcome: submitted.outcome === "pending" ? "pending" : submitted.outcome,
+    outcome,
     clientRef: refId,
   });
-  if (settled.sale) await rememberDigiflazz(env, settled.sale.id, { ...receipt, providerCost: charged.providerCost > 0 ? charged.providerCost : receipt.providerCost, customerName: resolvedCustomerName(charged.customerName, customerName), sn: submitted.sn || receipt.sn }).catch(() => undefined);
-  return { ...settled, error: settled.error || (submitted.outcome === "failed" ? submitted.message : undefined), paymentStatus: submitted.outcome, mode, providerRef: refId };
+  const sn = submitted.sn || receipt.sn || "";
+  if (settled.sale) await rememberDigiflazz(env, settled.sale.id, { ...receipt, providerCost, customerName: resolvedCustomerName(charged.customerName, customerName), sn }).catch(() => undefined);
+  const paymentStatus = settled.sale?.status === "success" || settled.sale?.status === "failed" || settled.sale?.status === "refunded" || settled.sale?.status === "pending"
+    ? settled.sale.status
+    : (settled.error ? "failed" : outcome);
+  return {
+    ...settled,
+    sale: settled.sale ? { ...settled.sale, sn } : settled.sale,
+    error: settled.error || (outcome === "failed" ? submitted.message : undefined),
+    paymentStatus,
+    mode,
+    providerRef: refId,
+    sn,
+  };
 }
 
 export async function handleBillerRequest(method: string, pathname: string, body: Record<string, unknown>, actorId: string, env: LedgerEnv) {
@@ -582,8 +617,8 @@ async function applyDigiflazzStatus(env: LedgerEnv, row: StoredDigiSale) {
   }
   const outcome = quote.outcome === "success" ? "success" : "failed";
   const storedCost = Number(meta.providerCost) || 0;
-  const providerCost = quote.providerCost > 0 ? quote.providerCost : storedCost;
   const amount = Number(row.amount) >= 1000 ? Number(row.amount) : (quote.total >= 1000 ? quote.total : Number(row.amount));
+  const providerCost = settledProviderCost(quote.providerCost, storedCost, amount);
   const settled = await recordLoketSale(env, row.user_id, {
     category: row.category_slug_snapshot,
     product: row.product_name_snapshot,
@@ -610,8 +645,11 @@ async function applyDigiflazzStatus(env: LedgerEnv, row: StoredDigiSale) {
     providerCost,
     customerName: resolvedCustomerName(quote.customerName, meta.customerName || row.customer_name || ""),
   }).catch(() => undefined);
-  if (settled.error) return { status: settled.status, body: { error: settled.error, statusText: outcome, balance: balanceNow } };
-  return { status: 200, body: { sale: settled.sale, balance: settled.balance, statusText: outcome, message: quote.message } };
+  const sn = quote.sn || meta.sn || "";
+  const sale = settled.sale ? { ...settled.sale, sn } : undefined;
+  const balance = Number.isFinite(Number(settled.balance)) ? Number(settled.balance) : balanceNow;
+  if (settled.error) return { status: settled.status, body: { error: settled.error, statusText: outcome, balance, sale } };
+  return { status: 200, body: { sale, balance, statusText: outcome, message: quote.message } };
 }
 
 export async function attachSaleReceipts(env: LedgerEnv, sales: LoketSale[]) {

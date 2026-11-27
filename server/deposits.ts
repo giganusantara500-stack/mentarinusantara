@@ -144,9 +144,33 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       kind: clean(body.kind),
       providerRef: clean(body.providerRef),
     });
-    if (result.error || !result.sale) return { status: result.status, body: { error: result.error } };
+    let balance = Number(result.balance);
+    if (!Number.isFinite(balance)) balance = await walletBalance(env, caller.id);
+    if (!Number.isFinite(balance)) balance = 0;
+    const providerSn = "sn" in result && typeof result.sn === "string" ? result.sn : "";
+    const recordedStatus = "sale" in result && result.sale ? result.sale.status : "";
+    const statusText = ("paymentStatus" in result && result.paymentStatus) || recordedStatus || "failed";
+    if (!result.sale) {
+      return { status: result.status || 409, body: { error: result.error || "Pembayaran gagal.", balance, statusText } };
+    }
+    const enriched = (await attachSaleReceipts(env, [result.sale]).catch(() => [result.sale]))[0] ?? result.sale;
+    const sale = { ...enriched, sn: enriched.sn || providerSn };
     await touchActivity(caller.id, env).catch(() => undefined);
-    return { status: 200, body: { sale: result.sale, balance: result.balance, channel: result.sale.channel, statusText: result.sale.status } };
+    const failed = statusText === "failed" || statusText === "refunded";
+    const inFlight = Boolean(result.error) && !failed && statusText !== "success" && statusText !== "simulated";
+    if (inFlight) {
+      return { status: result.status || 409, body: { error: result.error, sale, balance, statusText, channel: sale.channel } };
+    }
+    return {
+      status: failed ? 409 : 200,
+      body: {
+        sale,
+        balance,
+        channel: sale.channel,
+        statusText,
+        ...(failed ? { error: result.error || "Pembayaran gagal. Saldo tidak dipotong." } : {}),
+      },
+    };
   }
 
   if (pathname === "/api/wallet" && method === "GET") {

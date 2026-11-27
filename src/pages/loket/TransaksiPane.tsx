@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useLoketRefresh } from "@/components/layout/LoketShell";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
-import { formatRupiah, formatWaktu } from "@/lib/format";
+import { finiteNumber, formatRupiah, formatWaktu } from "@/lib/format";
 import { BILLER_CATEGORIES, faceValue, findCatalogItem, productsFor } from "@/lib/billerCatalog";
 import { applyGroupAdmin, expandBillRows } from "@/lib/billQueue";
 import { loadPrinterSettings, printReceipts, type ReceiptBill } from "@/lib/printer";
@@ -200,6 +200,67 @@ function paymentLabel(status: string) {
   return "Pending";
 }
 
+function isSettled(status: string) {
+  return status === "success" || status === "simulated" || status === "failed" || status === "refunded";
+}
+
+function isPaid(status: string) {
+  return status === "success" || status === "simulated";
+}
+
+function groupMoney(group: { amount: number; denda: number; admin: number; collfee: number; total: number }[]) {
+  return {
+    amount: group.reduce((sum, row) => sum + finiteNumber(row.total), 0),
+    tagihan: group.reduce((sum, row) => sum + finiteNumber(row.amount), 0),
+    denda: group.reduce((sum, row) => sum + finiteNumber(row.denda), 0),
+    admin: group.reduce((sum, row) => sum + finiteNumber(row.admin), 0),
+    collfee: group.reduce((sum, row) => sum + finiteNumber(row.collfee), 0),
+  };
+}
+
+function asSale(value: unknown, fallback: { category: string; product: string; customerId: string; name: string; period: string; amount: number; tagihan: number; denda: number; admin: number; collfee: number; payKey: string }, status: string): Sale | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Partial<Sale>;
+  const id = String(row.id || row.clientRef || fallback.payKey || "");
+  if (!id) return null;
+  return {
+    id,
+    category: String(row.category || fallback.category),
+    product: String(row.product || `${fallback.category} ${fallback.product}`),
+    customerNumber: String(row.customerNumber || fallback.customerId),
+    customerName: String(row.customerName || fallback.name || ""),
+    amount: finiteNumber(row.amount, fallback.amount),
+    tagihan: finiteNumber(row.tagihan, fallback.tagihan),
+    denda: finiteNumber(row.denda, fallback.denda),
+    adminFee: finiteNumber(row.adminFee, fallback.admin),
+    collfee: finiteNumber(row.collfee, fallback.collfee),
+    period: String(row.period || fallback.period || ""),
+    sn: String(row.sn || ""),
+    clientRef: String(row.clientRef || fallback.payKey),
+    profit: finiteNumber(row.profit, 0),
+    providerCost: finiteNumber(row.providerCost, 0),
+    status: String(row.status || status),
+    createdAt: String(row.createdAt || new Date().toISOString()),
+  };
+}
+
+function receiptOf(sale: Sale, name: string): ReceiptBill {
+  const admin = finiteNumber(sale.adminFee, 0);
+  const denda = finiteNumber(sale.denda, 0);
+  const amount = finiteNumber(sale.amount, 0);
+  return {
+    id: sale.customerNumber,
+    name: name && name !== "—" ? name : (sale.customerName || "—"),
+    product: sale.product,
+    period: sale.period || "",
+    tagihan: finiteNumber(sale.tagihan, Math.max(0, amount - admin - denda)),
+    admin,
+    total: amount,
+    sn: sale.sn || "",
+    at: formatWaktu(sale.createdAt),
+  };
+}
+
 function canonicalPeriods(period: string): string[] {
   const packed = period.replace(/\D/g, "").match(/20\d{2}(?:0[1-9]|1[0-2])/g);
   if (packed && packed.length > 0) return packed;
@@ -347,7 +408,6 @@ export function LoketTransaksiPage() {
   const [reprintId, setReprintId] = useState("");
   const [reprintDate, setReprintDate] = useState("");
   const [reprintHits, setReprintHits] = useState<Sale[]>([]);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -371,7 +431,6 @@ export function LoketTransaksiPage() {
     draftRef.current += 1;
     setCart([]);
     setNumber("");
-    setMessage("");
     setError("");
     setReprintId("");
     setReprintDate("");
@@ -455,14 +514,12 @@ export function LoketTransaksiPage() {
     const activeProduct = product;
     const customer = number.trim();
     if (customer.length < 4) {
-      setMessage("");
       setError("Nomor pelanggan terlalu pendek.");
       return;
     }
     inquiring.current = true;
     setChecking(true);
     setError("");
-    setMessage("Mengecek tagihan...");
     let response: Response;
     try {
       response = await fetch(apiUrl("/api/biller/inquiry"), {
@@ -472,7 +529,6 @@ export function LoketTransaksiPage() {
     });
     } catch {
       if (draftRef.current === generation) setError("Backend VPS tidak dapat dihubungi.");
-      if (draftRef.current === generation) setMessage("");
       inquiring.current = false;
       setChecking(false);
       return;
@@ -485,14 +541,12 @@ export function LoketTransaksiPage() {
     const body = await response.json().catch(() => ({}));
     const bill = body.bill as { customerName?: string; period?: string; amount?: number; denda?: number; adminFee?: number; collfee?: number; total?: number; lines?: unknown } | undefined;
     if (body.statusText === "paid") {
-      setMessage("");
       setError(body.message || "Tagihan sudah lunas.");
       inquiring.current = false;
       setChecking(false);
       return;
     }
     if (!response.ok || !bill) {
-      setMessage("");
       setError(body.error || body.message || "Tagihan tidak ditemukan.");
       inquiring.current = false;
       setChecking(false);
@@ -538,19 +592,36 @@ export function LoketTransaksiPage() {
     }
     if (added.length === 0) {
       const periodLabel = built.map((row) => row.period).filter(Boolean).join(", ") || "ini";
-      setMessage("");
       setError(`Tagihan ${customer} periode ${periodLabel} sudah ada di antrean ${activeCategory}.`);
     } else {
-      const priced = priceRows(added, activeCategory === "PLN" ? adminFee : (BILLER_ADMIN[activeCategory] ?? 0));
-      const billTotal = priced.reduce((sum, row) => sum + row.total, 0);
       setError("");
-      setMessage(priced.length > 1
-        ? `${priced.length} lembar ${activeProduct} untuk ${priced[0].name}. ${priced.map((row) => row.period).join(", ")}. Total ${formatRupiah(billTotal)}.`
-        : `${activeCategory} ${activeProduct}: ${priced[0].name} · ${priced[0].period || "periode belum tersedia"} · tagihan ${formatRupiah(priced[0].amount)} · denda ${formatRupiah(priced[0].denda)} · admin ${formatRupiah(priced[0].admin)} · total ${formatRupiah(priced[0].total)}.`);
       setNumber("");
     }
     inquiring.current = false;
     setChecking(false);
+  };
+
+  salesRef.current = sales;
+
+  const rememberSale = (sale: Sale) => {
+    salesRef.current = [sale, ...salesRef.current.filter((row) => row.id !== sale.id && (!sale.clientRef || row.clientRef !== sale.clientRef))];
+    setSales(salesRef.current);
+  };
+
+  const printPaid = (items: Sale[]) => {
+    if (items.length === 0) return true;
+    const slips = items.map((sale) => receiptOf(sale, customerLabel(sale.customerNumber, sale.customerName, salesRef.current, profile?.id || "", namesFromGroups(sale.customerNumber, storedGroups))));
+    return printReceipts(loadPrinterSettings(loketCode), slips, `${loketCode} - ${loketName}`);
+  };
+
+  const readStatus = async (clientRef: string) => {
+    const response = await fetch(apiUrl("/api/biller/status"), {
+      method: "POST",
+      headers: await authHeader(),
+      body: JSON.stringify({ clientRef }),
+    });
+    const body = await response.json().catch(() => ({})) as { error?: string; statusText?: string; sale?: Partial<Sale> };
+    return { response, body };
   };
 
   const pay = async () => {
@@ -559,122 +630,175 @@ export function LoketTransaksiPage() {
     paying.current = true;
     setBusy(true);
     setError("");
-    let balance = 0;
-    let lastStatus = "";
     const groups = new Map<string, typeof rows>();
     for (const row of rows) {
       const key = row.payKey || row.providerRef || row.key;
       groups.set(key, [...(groups.get(key) ?? []), row]);
     }
+    const paid: Sale[] = [];
+    const doneKeys = new Set<string>();
+    let pendingKey = "";
+    let stopped = "";
+    const dropDone = () => {
+      if (doneKeys.size === 0) return;
+      setCart((current) => current.filter((row) => !doneKeys.has(row.payKey || row.providerRef || row.key)));
+    };
     for (const [payKey, group] of groups) {
       const first = group[0];
+      const money = groupMoney(group);
+      const period = group.map((row) => row.period).filter(Boolean).join(", ");
+      const shown = customerLabel(first.customerId, first.name, salesRef.current, profile?.id || "", namesFromGroups(first.customerId, storedGroups));
+      const fallback = {
+        category: first.category,
+        product: first.product,
+        customerId: first.customerId,
+        name: shown === "—" ? first.name : shown,
+        period,
+        amount: money.amount,
+        tagihan: money.tagihan,
+        denda: money.denda,
+        admin: money.admin,
+        collfee: money.collfee,
+        payKey,
+      };
       let response: Response;
       try {
-      response = await fetch(apiUrl("/api/loket-sales"), {
-        method: "POST",
-        headers: await authHeader(),
-        body: JSON.stringify({
-          channel: "digiflazz",
-          clientRef: payKey,
-          providerRef: first.providerRef || payKey,
-          buyerSkuCode: first.sku,
-          category: first.category,
-          product: `${first.category} ${first.product}`,
-          customerNumber: first.customerId,
-          customerName: (() => {
-            const shown = customerLabel(first.customerId, first.name, sales, profile?.id || "", namesFromGroups(first.customerId, storedGroups));
-            return shown === "—" ? "" : shown;
-          })(),
-          amount: group.reduce((sum, row) => sum + row.total, 0),
-          tagihan: group.reduce((sum, row) => sum + row.amount, 0),
-          denda: group.reduce((sum, row) => sum + row.denda, 0),
-          adminFee: group.reduce((sum, row) => sum + row.admin, 0),
-          collfee: group.reduce((sum, row) => sum + row.collfee, 0),
-          providerCost: Math.max(...group.map((row) => row.providerCost || 0)),
-          period: group.map((row) => row.period).filter(Boolean).join(", "),
-          loketName,
-        }),
-      });
+        response = await fetch(apiUrl("/api/loket-sales"), {
+          method: "POST",
+          headers: await authHeader(),
+          body: JSON.stringify({
+            channel: "digiflazz",
+            clientRef: payKey,
+            providerRef: first.providerRef || payKey,
+            buyerSkuCode: first.sku,
+            kind: findCatalogItem(first.category, first.product)?.kind || "",
+            category: first.category,
+            product: `${first.category} ${first.product}`,
+            customerNumber: first.customerId,
+            customerName: shown === "—" ? "" : shown,
+            amount: money.amount,
+            tagihan: money.tagihan,
+            denda: money.denda,
+            adminFee: money.admin,
+            collfee: money.collfee,
+            providerCost: Math.max(...group.map((row) => finiteNumber(row.providerCost))),
+            period,
+            loketName,
+          }),
+        });
       } catch {
-        paying.current = false;
-        if (draftRef.current !== generation) return;
-        setBusy(false);
-        setError("Backend VPS tidak dapat dihubungi. Ulangi cek status sebelum membayar lagi.");
-        requestRefresh();
-        return;
+        stopped = "Backend VPS tidak dapat dihubungi. Ulangi cek status sebelum membayar lagi.";
+        break;
       }
       if (draftRef.current !== generation) {
         paying.current = false;
         return;
       }
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        paying.current = false;
-        setBusy(false);
-        setError(body.error || "Pembayaran berhenti karena saldo atau data tidak cukup.");
-        requestRefresh();
-        return;
+      const body = await response.json().catch(() => ({})) as { error?: string; statusText?: string; sale?: Partial<Sale> };
+      let statusText = String(body.statusText || body.sale?.status || (response.ok ? "pending" : "failed"));
+      if (!response.ok && !body.sale) {
+        stopped = body.error || "Pembayaran berhenti karena saldo atau data tidak cukup.";
+        break;
       }
-      balance = Number(body.balance);
-      lastStatus = String(body.statusText || "");
-      if (lastStatus === "pending") setPendingRef(payKey);
+      if (statusText === "pending") {
+        const deadline = Date.now() + PENDING_HOLD_MS;
+        while (Date.now() < deadline && statusText === "pending") {
+          if (draftRef.current !== generation) {
+            paying.current = false;
+            return;
+          }
+          await new Promise((resolve) => window.setTimeout(resolve, 3000));
+          if (draftRef.current !== generation) {
+            paying.current = false;
+            return;
+          }
+          try {
+            const checked = await readStatus(payKey);
+            if (checked.body.sale) body.sale = { ...body.sale, ...checked.body.sale, sn: checked.body.sale.sn || body.sale?.sn || "" };
+            statusText = String(checked.body.statusText || checked.body.sale?.status || statusText);
+          } catch {
+            /* jawaban provider berikutnya tetap ditunggu sampai batas waktu */
+          }
+        }
+      }
+      const sale = asSale(body.sale, fallback, statusText);
+      if (isPaid(statusText) && sale) {
+        paid.push({ ...sale, status: statusText });
+        doneKeys.add(payKey);
+        rememberSale({ ...sale, status: statusText });
+        continue;
+      }
+      if (statusText === "failed" || statusText === "refunded") {
+        doneKeys.add(payKey);
+        if (sale) rememberSale({ ...sale, status: statusText });
+        stopped = "Pembayaran gagal. Saldo tidak dipotong.";
+        break;
+      }
+      pendingKey = payKey;
+      doneKeys.add(payKey);
+      if (sale) rememberSale({ ...sale, status: "pending" });
     }
     paying.current = false;
     if (draftRef.current !== generation) return;
+    dropDone();
+    const printed = paid.length === 0 || printPaid(paid);
     setBusy(false);
-    setCart([]);
-    setMessage(lastStatus === "success" || lastStatus === "simulated"
-      ? `Pembayaran berhasil. Saldo ${formatRupiah(balance)}.`
-      : lastStatus === "failed"
-        ? `Pembayaran gagal. Saldo tidak dipotong. Saldo ${formatRupiah(balance)}.`
-        : `Pembayaran masih diproses. Saldo belum dipotong. Saldo ${formatRupiah(balance)}.`);
+    setError(stopped || (printed ? "" : "Struk belum terbuka. Gunakan Cetak Ulang."));
+    if (pendingKey) setPendingRef(pendingKey);
     requestRefresh();
   };
 
   const checkStatus = async () => {
     const generation = draftRef.current;
-    if (!pendingRef || busy) return;
+    if (!pendingRef || busy || paying.current) return;
     setBusy(true);
-    let response: Response;
     try {
-    response = await fetch(apiUrl("/api/biller/status"), {
-      method: "POST",
-      headers: await authHeader(),
-      body: JSON.stringify({ clientRef: pendingRef }),
-    });
-    } catch {
+      const { response, body } = await readStatus(pendingRef);
       if (draftRef.current !== generation) return;
-      setBusy(false);
-      setError("Backend VPS tidak dapat dihubungi.");
-      return;
+      const statusText = String(body.statusText || body.sale?.status || "pending");
+      if (!response.ok && !body.sale) {
+        setError(body.error || "Status pembayaran belum terbaca.");
+        setBusy(false);
+        return;
+      }
+      const known = salesRef.current.find((sale) => sale.clientRef === pendingRef);
+      const sale = asSale(body.sale, {
+        category: known?.category || "",
+        product: known?.product || "",
+        customerId: known?.customerNumber || "",
+        name: known?.customerName || "",
+        period: known?.period || "",
+        amount: finiteNumber(known?.amount),
+        tagihan: finiteNumber(known?.tagihan),
+        denda: finiteNumber(known?.denda),
+        admin: finiteNumber(known?.adminFee),
+        collfee: finiteNumber(known?.collfee),
+        payKey: pendingRef,
+      }, statusText);
+      if (isPaid(statusText)) {
+        if (sale) rememberSale({ ...sale, status: statusText });
+        const printed = sale ? printPaid([{ ...sale, status: statusText }]) : true;
+        setPendingRef("");
+        setError(printed ? "" : "Struk belum terbuka. Gunakan Cetak Ulang.");
+      } else if (statusText === "failed" || statusText === "refunded") {
+        if (sale) rememberSale({ ...sale, status: statusText });
+        setPendingRef("");
+        setError("Pembayaran gagal. Saldo tidak dipotong.");
+      }
+      requestRefresh();
+    } catch {
+      if (draftRef.current === generation) setError("Backend VPS tidak dapat dihubungi.");
     }
-    if (draftRef.current !== generation) return;
-    const body = await response.json().catch(() => ({}));
-    setBusy(false);
-    if (!response.ok) { setError(body.error || "Status pembayaran belum terbaca."); return; }
-    setError("");
-    const statusText = String(body.statusText || "pending");
-    const settled = statusText === "success" || statusText === "failed" || statusText === "refunded";
-    setMessage(settled
-      ? `Status pembayaran: ${paymentLabel(statusText)}. ${body.message || ""} Saldo ${formatRupiah(Number(body.balance) || 0)}.`
-      : `Status pembayaran: Pending. Saldo belum dipotong. Saldo ${formatRupiah(Number(body.balance) || 0)}.`);
-    if (settled) setPendingRef("");
-    requestRefresh();
+    if (draftRef.current === generation) setBusy(false);
   };
-
-  salesRef.current = sales;
 
   useEffect(() => {
     if (!pendingRef) return;
     let stopped = false;
-    const known = salesRef.current.find((sale) => sale.clientRef === pendingRef);
-    const age = known ? Date.now() - new Date(known.createdAt).getTime() : 0;
-    const remain = Math.max(1000, PENDING_HOLD_MS - (Number.isFinite(age) && age > 0 ? age : 0));
     const release = () => {
       if (stopped) return;
       stopped = true;
       setPendingRef((current) => current === pendingRef ? "" : current);
-      setMessage("Pembayaran belum selesai dalam 1 menit. Saldo tidak dipotong dan tidak lagi dihitung di OS. Hasil provider yang datang kemudian tetap memperbarui status dan saldo.");
       requestRefresh();
     };
     const probe = async () => {
@@ -685,21 +809,36 @@ export function LoketTransaksiPage() {
           headers: await authHeader(),
           body: JSON.stringify({ clientRef: pendingRef }),
         });
-        const body = await response.json().catch(() => ({}));
-        if (stopped || !response.ok) return;
-        const statusText = String(body.statusText || "pending");
-        if (statusText !== "success" && statusText !== "failed" && statusText !== "refunded") return;
+        const body = await response.json().catch(() => ({})) as { statusText?: string; sale?: Partial<Sale> };
+        if (stopped || (!response.ok && !body.sale)) return;
+        const statusText = String(body.statusText || body.sale?.status || "pending");
+        if (!isSettled(statusText)) return;
         stopped = true;
         setPendingRef("");
-        setError("");
-        setMessage(`Status pembayaran: ${paymentLabel(statusText)}. ${body.message || ""} Saldo ${formatRupiah(Number(body.balance) || 0)}.`);
+        const current = salesRef.current.find((sale) => sale.clientRef === pendingRef);
+        const sale = asSale(body.sale, {
+          category: current?.category || "",
+          product: current?.product || "",
+          customerId: current?.customerNumber || "",
+          name: current?.customerName || "",
+          period: current?.period || "",
+          amount: finiteNumber(current?.amount),
+          tagihan: finiteNumber(current?.tagihan),
+          denda: finiteNumber(current?.denda),
+          admin: finiteNumber(current?.adminFee),
+          collfee: finiteNumber(current?.collfee),
+          payKey: pendingRef,
+        }, statusText);
+        if (sale) rememberSale({ ...sale, status: statusText });
+        if (isPaid(statusText) && sale && !printPaid([{ ...sale, status: statusText }])) setError("Struk belum terbuka. Gunakan Cetak Ulang.");
+        if (statusText === "failed" || statusText === "refunded") setError("Pembayaran gagal. Saldo tidak dipotong.");
         requestRefresh();
       } catch {
         /* cek berikutnya tetap berjalan sampai batas 1 menit */
       }
     };
-    const pulse = window.setInterval(() => { void probe(); }, 15000);
-    const end = window.setTimeout(release, remain);
+    const pulse = window.setInterval(() => { void probe(); }, 5000);
+    const end = window.setTimeout(release, 120_000);
     return () => {
       stopped = true;
       window.clearInterval(pulse);
@@ -768,7 +907,7 @@ export function LoketTransaksiPage() {
             <button type="button" onClick={checkReprint} className="h-10 rounded-lg bg-amber-500 px-4 text-sm font-bold text-white">CEK</button>
           </div>
         )}
-        <div className={`h-6 shrink-0 truncate px-4 text-sm ${error ? "text-rose-600" : "text-emerald-700"}`}>{error || message}</div>
+        <div className="h-6 shrink-0 truncate px-4 text-sm text-rose-600">{error}</div>
         <div className="min-h-0 flex-1 overflow-auto">
           {mode === "bayar" ? (
             <table className="w-full table-fixed text-left text-xs">
@@ -840,7 +979,7 @@ export function LoketTransaksiPage() {
           {mode === "bayar" ? (
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
               <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-3 font-black" disabled={rows.length === 0} onClick={() => printReceipts(loadPrinterSettings(loketCode), rows.map((row): ReceiptBill => ({ id: row.customerId, name: row.name, product: `${row.category} ${row.product}`, period: row.period, tagihan: row.amount + row.denda, admin: row.admin, total: row.total })), `${loketCode} - ${loketName}`)}>Cetak Info Tagihan</Button>
-              <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-4 font-black" onClick={() => { setCart([]); setNumber(""); setError(""); setMessage(""); }}>Hapus</Button>
+              <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-4 font-black" onClick={() => { setCart([]); setNumber(""); setError(""); }}>Hapus</Button>
               {pendingRef && <button type="button" onClick={checkStatus} disabled={busy} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/40 px-3 text-sm font-black text-white">Cek status</button>}
               <button onClick={() => void pay()} disabled={busy || checking || rows.length === 0} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-50">
                 {busy ? "Memproses..." : `BAYAR ${formatRupiah(total)}`}

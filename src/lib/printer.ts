@@ -143,11 +143,38 @@ function isPlnSlip(product: string) {
   return name.includes("PLN") || name.includes("LISTRIK");
 }
 
+function isPrepaidProduct(product: string) {
+  return /token|pulsa|paket data|voucher|e-money|e-wallet|\bgames\b|masa aktif|prepaid|gopay|dana|shopee|ovo/i.test(product);
+}
+
+function tokenLines(sn: string, width: number) {
+  const value = sn.trim();
+  const room = Math.max(8, width - 14);
+  if (!value) return [field("TOKEN/SN", "-", width)];
+  const lines = [field("TOKEN/SN", value.slice(0, room), width)];
+  const rest = value.slice(room);
+  if (rest) lines.push(rest.slice(0, width));
+  if (rest.length > width) lines.push(rest.slice(width, width * 2));
+  return lines;
+}
+
 export function slipText(bill: ReceiptBill, width: number, _loket: string, copy: "STRUK" | "SEGI" = "STRUK") {
   const info = meter(bill.id, bill.period);
   const rule = "=".repeat(width);
   const line = "-".repeat(width);
   if (copy === "SEGI") {
+    if (isPrepaidProduct(bill.product)) {
+      return balance([
+        center("SEGI TOKEN", width),
+        center(bill.product.toUpperCase(), width),
+        line,
+        field("IDPEL", bill.id, width),
+        field("NAMA", bill.name, width),
+        field("TOTAL", formatRupiah(bill.total), width),
+        ...(bill.sn ? [field("TOKEN", bill.sn, width)] : []),
+        line,
+      ]).join("\n");
+    }
     return balance([
       center("SEGI PELUNASAN", width),
       center(bill.product.toUpperCase(), width),
@@ -161,6 +188,25 @@ export function slipText(bill: ReceiptBill, width: number, _loket: string, copy:
   }
   const left = Math.max(24, Math.floor(width * 0.5) - 1);
   const proof = [bill.sn ? field("SN/TOKEN", bill.sn, width) : ""].filter(Boolean);
+  if (isPrepaidProduct(bill.product)) {
+    const title = /token/i.test(bill.product) ? "STRUK PEMBELIAN TOKEN LISTRIK" : `STRUK ${bill.product.toUpperCase()}`;
+    return padLines([
+      rule,
+      center(title, width),
+      line,
+      field("ID PELANGGAN", bill.id, width),
+      field("NAMA", bill.name, width),
+      field("KETERANGAN", bill.period || "-", width),
+      ...(bill.at ? [field("WAKTU", bill.at, width)] : []),
+      line,
+      field("NOMINAL", formatRupiah(bill.tagihan), width),
+      field("ADMIN", formatRupiah(bill.admin), width),
+      field("TOTAL BAYAR", formatRupiah(bill.total), width),
+      line,
+      ...tokenLines(bill.sn || "", width),
+      rule,
+    ]);
+  }
   if (!isPlnSlip(bill.product)) {
     return padLines([
       rule,

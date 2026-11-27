@@ -1,6 +1,12 @@
+export function finiteNumber(value: unknown, fallback = 0): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
 export function formatRupiah(amount: number): string {
-  const sign = amount < 0 ? "-" : "";
-  const value = Math.abs(Math.round(amount));
+  const safe = finiteNumber(amount, 0);
+  const sign = safe < 0 ? "-" : "";
+  const value = Math.abs(Math.round(safe));
   return `${sign}Rp${value.toLocaleString("id-ID")}`;
 }
 

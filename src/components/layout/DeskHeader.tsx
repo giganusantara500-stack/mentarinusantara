@@ -3,7 +3,7 @@ import { BadgeAlert, Landmark, LogOut, Receipt, RefreshCw, RotateCw, Store, SunM
 import { WindowCaptionButtons } from "@/components/layout/WindowCaption";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-import { formatRupiah } from "@/lib/format";
+import { finiteNumber, formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { apiUrl } from "@/lib/apiBase";
 import { pendingIsLive } from "@/lib/pendingWindow";
@@ -34,11 +34,11 @@ export function useDeskStats(tick: number) {
       const today = new Date().toDateString();
       const settled = (sale: { status: string }) => sale.status === "success" || sale.status === "simulated";
       const todaySales = sales.filter((sale) => settled(sale) && new Date(sale.createdAt).toDateString() === today);
-      const pending = sales.filter((sale) => sale.status === "pending" && pendingIsLive(sale.createdAt)).reduce((sum, sale) => sum + Number(sale.amount), 0);
+      const pending = sales.filter((sale) => sale.status === "pending" && pendingIsLive(sale.createdAt)).reduce((sum, sale) => sum + finiteNumber(sale.amount), 0);
       if (!active) return;
-      setBalance(Number(wallet?.balance ?? salesBody.balance ?? 0));
+      setBalance(finiteNumber(wallet?.balance ?? salesBody.balance));
       setTodayCount(todaySales.length);
-      setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0));
+      setTodayAmount(todaySales.reduce((sum, sale) => sum + finiteNumber(sale.amount), 0));
       setOutstanding(pending);
       setLoketCode(String(wallet?.loketCode || salesBody.loketCode || profile.loket_code || ""));
       const runBody = runRes.ok ? await runRes.json() : null;
@@ -60,7 +60,7 @@ export function useDeskStats(tick: number) {
         ]);
         if (walletRes.ok) {
           const wallet = await walletRes.json();
-          setBalance(Number(wallet.balance ?? 0));
+          setBalance(finiteNumber(wallet.balance));
           if (wallet.loketCode) setLoketCode(String(wallet.loketCode));
         }
         if (runRes.ok) {
@@ -74,8 +74,8 @@ export function useDeskStats(tick: number) {
           const settled = (sale: { status?: string }) => sale.status === "success" || sale.status === "simulated";
           const todaySales = sales.filter((sale) => settled(sale) && new Date(sale.createdAt).toDateString() === today);
           setTodayCount(todaySales.length);
-          setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0));
-          setOutstanding(sales.filter((sale) => sale.status === "pending" && pendingIsLive(sale.createdAt)).reduce((sum, sale) => sum + Number(sale.amount), 0));
+          setTodayAmount(todaySales.reduce((sum, sale) => sum + finiteNumber(sale.amount), 0));
+          setOutstanding(sales.filter((sale) => sale.status === "pending" && pendingIsLive(sale.createdAt)).reduce((sum, sale) => sum + finiteNumber(sale.amount), 0));
         }
       })();
     }, 5000);
