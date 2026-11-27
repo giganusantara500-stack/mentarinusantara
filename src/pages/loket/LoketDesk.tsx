@@ -9,6 +9,7 @@ import { formatRupiah, formatWaktu } from "@/lib/format";
 import { BILLER_CATEGORIES, BILLER_CATALOG, productsFor } from "@/lib/billerCatalog";
 import { PDAM_AREAS } from "@/lib/pdam";
 import { depositRequest } from "@/lib/depositApi";
+import { apiUrl } from "@/lib/apiBase";
 import { setoranDays, setoranLines } from "@/lib/setoranReport";
 import { PRINT_FORMATS, PRINT_KINDS, PRINTER_PRESETS, loadPrinterSettings, printReceipts, renderReceipts, sampleBill, savePrinterSettings, type PrinterSettings } from "@/lib/printer";
 export { LoketTransaksiPage } from "./TransaksiPane";
@@ -618,7 +619,7 @@ export function LoketKolektifPage() {
     void (async () => {
       let response: Response;
       try {
-        response = await fetch("/api/biller/inquiry-batch", {
+        response = await fetch(apiUrl("/api/biller/inquiry-batch"), {
           method: "POST",
           headers: await authHeader(),
           body: JSON.stringify({ items: slice.map((row) => ({ key: memberKey(row), category: canonicalCategory(row.product), product: row.product || "", customerNumber: row.number })) }),
@@ -649,7 +650,7 @@ export function LoketKolektifPage() {
         const inquired = storedName(String(quote.customerName || ""));
         const statusText = String(hit?.statusText || "failed");
         const status = statusText === "paid" ? "LUNAS" as const : statusText === "found" ? "BL LNS" as const : "LAINNYA" as const;
-        const note = String(hit?.message || (hit ? "" : "Jawaban untuk ID ini tidak kembali."));
+        const note = String(hit?.message || (statusText === "not_found" ? "Tidak ada tagihan." : "Jawaban untuk ID ini tidak kembali."));
         return {
           number: member.number,
           name: inquired || storedName(member.name),

@@ -133,11 +133,16 @@ const h2hProvider: BillerProvider = {
         category: input.category,
         product: input.product,
       });
-      if (billIsPaid(quote.message)) return { status: "paid", message: quote.message || "Tagihan sudah lunas.", providerRef: quote.refId, buyerSkuCode: quote.sku || sku, bill: billFromQuote(quote, input.adminFee) };
-      if (quote.outcome === "not_found") return { status: "not_found", message: quote.message || "Tagihan tidak ditemukan di DigiFlazz." };
-      if (quote.outcome === "failed") return { status: "unavailable", message: quote.message || "DigiFlazz menolak pengecekan." };
-      if (quote.total < 1000 && quote.amount < 1000) return { status: "unavailable", message: "Harga DigiFlazz belum tersedia untuk kode produk ini." };
-      return { status: "found", providerRef: quote.refId, buyerSkuCode: quote.sku || sku, bill: billFromQuote(quote, input.adminFee) };
+      const tail = input.customerNumber.replace(/\D/g, "").slice(-4) || "----";
+      const finish = (status: "found" | "not_found" | "unavailable" | "paid", message: string) => {
+        console.log(`[inquiry] ${kind} ${sku} id···${tail} ${status} ${message.replace(/\s+/g, " ").slice(0, 160)}`);
+        return { status, message } as { status: "found" | "not_found" | "unavailable" | "paid"; message: string };
+      };
+      if (billIsPaid(quote.message)) return { ...finish("paid", quote.message || "Tagihan sudah lunas."), providerRef: quote.refId, buyerSkuCode: quote.sku || sku, bill: billFromQuote(quote, input.adminFee) };
+      if (quote.outcome === "not_found") return { ...finish("not_found", quote.message || "Tidak ada tagihan."), providerRef: quote.refId, buyerSkuCode: quote.sku || sku };
+      if (quote.outcome === "failed") return finish("unavailable", quote.message || "DigiFlazz menolak pengecekan.");
+      if (quote.total < 1000 && quote.amount < 1000) return finish("unavailable", quote.message || "Harga DigiFlazz belum tersedia untuk kode produk ini.");
+      return { ...finish("found", quote.message || "Tagihan ditemukan."), providerRef: quote.refId, buyerSkuCode: quote.sku || sku, bill: billFromQuote(quote, input.adminFee) };
     } catch {
       return { status: "unavailable", message: "DigiFlazz tidak dapat dihubungi dari VPS. Saldo tidak berubah." };
     }

@@ -100,10 +100,11 @@ function payloadOf(body: unknown) {
 export function mapDigiOutcome(status: string, rc: string, message: string): DigiOutcome {
   const state = status.toLowerCase();
   const note = message.toLowerCase();
+  if (billIsPaid(message)) return "not_found";
+  if (note.includes("tidak ditemukan") || note.includes("tidak ada tagihan") || note.includes("tidak ada tunggakan") || rc === "54") return "not_found";
   if (state.includes("gagal") || state === "failed") return "failed";
   if (state.includes("sukses") || state === "success" || rc === "00") return "success";
   if (state.includes("pending") || note.includes("pending") || rc === "03" || rc === "39") return "pending";
-  if (note.includes("tidak ditemukan") || note.includes("tidak ada tagihan") || rc === "54") return "not_found";
   return "failed";
 }
 
@@ -224,16 +225,26 @@ export async function digiflazzDeposit(fresh = false) {
   }
 }
 
-function signedTransaction(refId: string, sku: string, customerNumber: string, commands?: string) {
+function transactionAuth(live: boolean) {
   const config = digiflazzConfig();
+  const devKey = (process.env.DIGIFLAZZ_DEV_KEY || "").trim();
+  // testing:true is checked against the Development Key. Prepaid price-list and
+  // inquiry-pln succeed with DIGIFLAZZ_API_KEY and never send testing, so that
+  // value is the Production Key. Pairing it with testing:true returns "Signature Anda salah".
+  if (!live && config.testing && devKey) return { username: config.username, apiKey: devKey, testing: true };
+  return { username: config.username, apiKey: config.apiKey, testing: false };
+}
+
+function signedTransaction(refId: string, sku: string, customerNumber: string, commands?: string, live = false) {
+  const auth = transactionAuth(live);
   return {
     ...(commands ? { commands } : {}),
-    username: config.username,
+    username: auth.username,
     buyer_sku_code: sku,
-    customer_no: customerNumber,
+    customer_no: customerNumber.trim(),
     ref_id: refId,
-    sign: digiflazzSign(config.username, config.apiKey, refId),
-    ...(config.testing ? { testing: true } : {}),
+    sign: digiflazzSign(auth.username, auth.apiKey, refId),
+    ...(auth.testing ? { testing: true } : {}),
   };
 }
 
@@ -464,7 +475,7 @@ export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; cus
       sn: "",
     };
   }
-  const data = await postDigi("/transaction", signedTransaction(input.refId, input.sku, input.customerNumber, "inq-pasca"));
+  const data = await postDigi("/transaction", signedTransaction(input.refId, input.sku, input.customerNumber, "inq-pasca", true));
   return quoteFrom(data, input);
 }
 
