@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
 import { BILLER_CATEGORIES, faceValue, findCatalogItem, productsFor } from "@/lib/billerCatalog";
+import { applyGroupAdmin, expandBillRows } from "@/lib/billQueue";
 import { loadPrinterSettings, printReceipts, type ReceiptBill } from "@/lib/printer";
 import { apiUrl } from "@/lib/apiBase";
 
@@ -240,9 +241,8 @@ function headClass(head: string) {
   return "px-2";
 }
 
-function priceRow(row: CartRow, admin: number) {
-  const total = row.amount + row.denda + admin;
-  return { ...row, admin, total };
+function priceRows(rows: CartRow[], admin: number) {
+  return applyGroupAdmin(rows, admin);
 }
 
 function AreaPicker({ value, options, onChange }: { value: string; options: string[]; onChange: (value: string) => void }) {
@@ -401,7 +401,7 @@ export function LoketTransaksiPage() {
     return () => { active = false; };
   }, [profile?.id, tick]);
 
-  const rows = cart.filter((row) => row.category === category).map((row) => priceRow(row, appliedAdmin));
+  const rows = priceRows(cart.filter((row) => row.category === category), appliedAdmin);
   const total = rows.reduce((sum, row) => sum + row.total, 0);
   const checkReprint = () => {
     if (!reprintId.trim() && !reprintDate) {
@@ -478,16 +478,26 @@ export function LoketTransaksiPage() {
     const refId = typeof body.providerRef === "string" && body.providerRef ? body.providerRef : crypto.randomUUID();
     const sku = typeof body.buyerSkuCode === "string" ? body.buyerSkuCode : "";
     const providerCost = Number((bill as { providerCost?: number }).providerCost) || 0;
-    const monthLines = billMonths(bill.lines).filter((line) => line.period || line.amount != null);
-    const pricedLines = monthLines.filter((line) => line.amount != null);
+    const monthLines = billMonths(bill.lines);
     const meter = meterOf(bill.period || "");
     const baseAmount = prepaidAmount(activeCategory, activeProduct, Number(bill.amount) || 0);
-    const billCollfee = Number(bill.collfee) || 0;
-    const shared = { payKey: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: customer, name, meter, collfee: 0, providerCost: 0 };
-    const split = pricedLines.length > 1;
-    const built: CartRow[] = split
-      ? pricedLines.map((line, index) => ({ ...shared, key: `${refId}:${line.period || index}`, period: line.period || `Lembar ${index + 1}`, amount: line.amount ?? 0, denda: line.denda ?? 0, collfee: index === 0 ? billCollfee : 0, providerCost: index === 0 ? providerCost : 0 }))
-      : [{ ...shared, key: refId, period: bill.period || pricedLines[0]?.period || "", amount: baseAmount, denda: Number(bill.denda) || pricedLines[0]?.denda || 0, collfee: billCollfee, providerCost }];
+    const slices = expandBillRows({
+      period: [bill.period || "", ...monthLines.map((line) => line.period)].filter(Boolean).join(" · "),
+      lines: monthLines,
+      amount: baseAmount,
+      denda: Number(bill.denda) || 0,
+      collfee: Number(bill.collfee) || 0,
+    });
+    const shared = { payKey: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: customer, name, meter, providerCost };
+    const built: CartRow[] = slices.map((slice, index) => ({
+      ...shared,
+      key: `${refId}:${canonicalPeriods(slice.period).join("-") || index}`,
+      period: slice.period,
+      amount: slice.amount,
+      denda: slice.denda,
+      collfee: slice.collfee,
+      providerCost: index === 0 ? providerCost : 0,
+    }));
     const merged = mergeInquiry(cart, built, activeCategory, customer);
     const added = merged.added;
     if (added.length > 0) setCart(merged.next);
@@ -501,11 +511,11 @@ export function LoketTransaksiPage() {
       setMessage("");
       setError(`Tagihan ${customer} periode ${periodLabel} sudah ada di antrean ${activeCategory}.`);
     } else {
-      const priced = added.map((row) => priceRow(row, activeCategory === "PLN" ? adminFee : (BILLER_ADMIN[activeCategory] ?? 0)));
+      const priced = priceRows(added, activeCategory === "PLN" ? adminFee : (BILLER_ADMIN[activeCategory] ?? 0));
       const billTotal = priced.reduce((sum, row) => sum + row.total, 0);
       setError("");
       setMessage(priced.length > 1
-        ? `${priced.length} lembar ${activeProduct} untuk ${priced[0].name}. Tiap lembar memakai admin ${formatRupiah(priced[0].admin)}. Total ${formatRupiah(billTotal)}.`
+        ? `${priced.length} lembar ${activeProduct} untuk ${priced[0].name}. ${priced.map((row) => row.period).join(", ")}. Total ${formatRupiah(billTotal)}.`
         : `${activeCategory} ${activeProduct}: ${priced[0].name} · ${priced[0].period || "periode belum tersedia"} · tagihan ${formatRupiah(priced[0].amount)} · denda ${formatRupiah(priced[0].denda)} · admin ${formatRupiah(priced[0].admin)} · total ${formatRupiah(priced[0].total)}.`);
       setNumber("");
     }

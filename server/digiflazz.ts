@@ -216,6 +216,14 @@ function partSum(value: unknown) {
   return parts ? parts.reduce((sum, item) => sum + item, 0) : 0;
 }
 
+function allocateExact(total: number, count: number): number[] {
+  const size = Math.max(1, count);
+  const safe = Math.max(0, Math.round(total));
+  const base = Math.floor(safe / size);
+  const rest = safe - base * size;
+  return Array.from({ length: size }, (_, index) => base + (index === size - 1 ? rest : 0));
+}
+
 function periodParts(raw: string): string[] {
   const trimmed = raw.trim();
   if (!trimmed) return [];
@@ -234,14 +242,18 @@ function monthLines(rows: Record<string, unknown>[]): BillMonth[] {
     const amounts = amountParts(row.nilai_tagihan ?? row.tagihan ?? row.bill_amount ?? row.amount);
     const dendas = amountParts(row.denda ?? row.penalty);
     if (periods.length === 0 && !amounts && !dendas) return [];
-    if (periods.length > 1 && amounts && amounts.length === periods.length) {
+    if (periods.length > 1) {
+      const amountTotal = amounts ? amounts.reduce((sum, item) => sum + item, 0) : 0;
+      const dendaTotal = dendas ? dendas.reduce((sum, item) => sum + item, 0) : 0;
+      const amountShares = amounts && amounts.length === periods.length ? amounts : allocateExact(amountTotal, periods.length);
+      const dendaShares = dendas && dendas.length === periods.length ? dendas : allocateExact(dendaTotal, periods.length);
       return periods.map((period, index) => ({
         period: monthLabel(period),
-        amount: amounts[index],
-        denda: dendas && dendas.length === periods.length ? dendas[index] : dendas && dendas.length === 1 ? (index === 0 ? dendas[0] : 0) : null,
+        amount: amountShares[index] ?? 0,
+        denda: dendaShares[index] ?? 0,
       }));
     }
-    const period = periods.length > 1 ? periods.map((item) => monthLabel(item)).join(", ") : monthLabel(periods[0] || "");
+    const period = monthLabel(periods[0] || "");
     return [{ period, amount: amounts ? amounts[0] : null, denda: dendas ? dendas[0] : null }];
   });
 }
