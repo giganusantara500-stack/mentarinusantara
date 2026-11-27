@@ -360,11 +360,11 @@ function sellerText(row: Record<string, unknown>) {
 }
 
 function plnPostpaidHints() {
-  const sellers = (process.env.DIGIFLAZZ_PLN_POSTPAID_SELLER || "aneka digital,arqiva pos")
+  const sellers = (process.env.DIGIFLAZZ_PLN_POSTPAID_SELLER || "cv ikon media indonesia,ikon media indonesia,aneka digital,arqiva pos")
     .split(/[,;]+/)
     .map((item) => foldLabel(item).replace(/\s+/g, ""))
     .filter(Boolean);
-  const codes = (process.env.DIGIFLAZZ_PLN_POSTPAID_CODE || "BPLNDY,PLNPASCA2300,PLNPASCA2160")
+  const codes = (process.env.DIGIFLAZZ_PLN_POSTPAID_CODE || "PLN,BPLNDY,PLNPASCA2300,PLNPASCA2160")
     .split(/[,;\s]+/)
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
@@ -377,7 +377,7 @@ function preferredPlnPostpaid(rows: Record<string, unknown>[]) {
     const seller = sellerText(row);
     const code = rowSku(row).toLowerCase();
     const sellerRank = hints.sellers.findIndex((item) => seller.includes(item));
-    const hinted = hints.codes.findIndex((item) => code === item || seller.includes(item));
+    const hinted = hints.codes.findIndex((item) => code === item || (item.length > 4 && seller.includes(item)));
     let score = 0;
     if (sellerRank >= 0) score += (hints.sellers.length - sellerRank) * 100;
     if (hinted >= 0) score += 40 - hinted;
