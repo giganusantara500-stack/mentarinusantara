@@ -159,6 +159,20 @@ export function isHiddenVariant(entry: CatalogItem) {
   return /\sB$/i.test(entry.label.trim()) || /^pln\d+b$/i.test(entry.sku);
 }
 
+export function faceValue(label: string) {
+  const dotted = label.match(/(\d{1,3}(?:\.\d{3})+)/);
+  if (dotted) {
+    const value = Number(dotted[1].replace(/\./g, ""));
+    if (value >= 1000) return value;
+  }
+  const pas = label.match(/\bpas\s+(\d{1,3})\b/i);
+  if (pas) {
+    const value = Number(pas[1]) * 1000;
+    if (value >= 1000) return value;
+  }
+  return 0;
+}
+
 export function productsFor(category: string) {
   return BILLER_CATALOG.filter((entry) => entry.category === category && !isHiddenVariant(entry)).map((entry) => entry.label);
 }

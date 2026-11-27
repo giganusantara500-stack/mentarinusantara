@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { findCatalogItem, foldLabel } from "../src/lib/billerCatalog";
+import { faceValue, findCatalogItem, foldLabel } from "../src/lib/billerCatalog";
 
 export type DigiKind = "prepaid" | "postpaid";
 export type DigiOutcome = "pending" | "success" | "failed" | "not_found";
@@ -473,6 +473,8 @@ export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; cus
     }
     const sku = rowSku(match) || input.sku;
     const price = money(match.price);
+    const face = faceValue(input.product || "") || faceValue(text(match.product_name));
+    const amount = face > 0 ? face : price;
     let customerName = "";
     let period = "";
     if (isPlnPrepaid(input)) {
@@ -495,10 +497,10 @@ export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; cus
       customerName,
       customerNumber: input.customerNumber,
       period,
-      amount: price,
+      amount,
       denda: 0,
       adminFee: 0,
-      total: price,
+      total: amount,
       providerCost: price,
       sn: "",
     };

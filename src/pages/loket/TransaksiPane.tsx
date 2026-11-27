@@ -6,7 +6,7 @@ import { useLoketRefresh } from "@/components/layout/LoketShell";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
-import { BILLER_CATEGORIES, productsFor } from "@/lib/billerCatalog";
+import { BILLER_CATEGORIES, faceValue, findCatalogItem, productsFor } from "@/lib/billerCatalog";
 import { loadPrinterSettings, printReceipts, type ReceiptBill } from "@/lib/printer";
 import { apiUrl } from "@/lib/apiBase";
 
@@ -62,6 +62,7 @@ interface CartRow {
   customerId: string;
   name: string;
   period: string;
+  meter: string;
   amount: number;
   denda: number;
   collfee: number;
@@ -86,26 +87,73 @@ function plainName(value: string) {
   return name && !name.includes("*") ? name : "";
 }
 
+function idKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function sameCustomer(left: string, right: string) {
+  const a = idKey(left);
+  const b = idKey(right);
+  return a.length >= 4 && a === b;
+}
+
+function firstPlain(names: string[]) {
+  return names.map(plainName).find(Boolean) || "";
+}
+
+function namesFromGroups(customerId: string, groups: unknown) {
+  if (!Array.isArray(groups)) return "";
+  const found: string[] = [];
+  for (const group of groups) {
+    if (!group || typeof group !== "object") continue;
+    const record = group as { members?: { number?: string; name?: string }[]; bills?: { number?: string; name?: string }[] };
+    for (const member of record.members ?? []) if (sameCustomer(String(member.number || ""), customerId)) found.push(String(member.name || ""));
+    for (const bill of record.bills ?? []) if (sameCustomer(String(bill.number || ""), customerId)) found.push(String(bill.name || ""));
+  }
+  return firstPlain(found);
+}
+
 function kolektifName(userId: string, customerId: string) {
-  if (!userId || !customerId) return "";
+  if (!customerId) return "";
   try {
-    const parsed = JSON.parse(localStorage.getItem(`mentari-kolektif:${userId}`) || "") as { rows?: { members?: { number?: string; name?: string }[]; bills?: { number?: string; name?: string }[] }[] };
-    const found: string[] = [];
-    for (const group of parsed.rows ?? []) {
-      for (const member of group.members ?? []) if (String(member.number || "") === customerId) found.push(String(member.name || ""));
-      for (const bill of group.bills ?? []) if (String(bill.number || "") === customerId) found.push(String(bill.name || ""));
+    const keys = userId ? [`mentari-kolektif:${userId}`] : [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index) || "";
+      if (key.startsWith("mentari-kolektif:") && !keys.includes(key)) keys.push(key);
     }
-    return found.map(plainName).find(Boolean) || "";
+    for (const key of keys) {
+      const parsed = JSON.parse(localStorage.getItem(key) || "") as { rows?: unknown };
+      const name = namesFromGroups(customerId, parsed.rows);
+      if (name) return name;
+    }
   } catch {
     return "";
   }
+  return "";
 }
 
-function customerLabel(customerId: string, digiName: string, history: Sale[], userId: string) {
+async function savedCustomerName(customerId: string) {
+  const session = await supabase.auth.getSession();
+  return namesFromGroups(customerId, session.data.session?.user?.user_metadata?.collectives);
+}
+
+function customerLabel(customerId: string, digiName: string, history: Sale[], userId: string, saved = "") {
   const direct = plainName(digiName);
   if (direct) return direct;
-  const past = history.find((sale) => sale.customerNumber === customerId && plainName(sale.customerName));
-  return plainName(past?.customerName || "") || kolektifName(userId, customerId) || shownName(digiName) || "—";
+  const past = history.find((sale) => sameCustomer(sale.customerNumber, customerId) && plainName(sale.customerName));
+  return plainName(past?.customerName || "") || kolektifName(userId, customerId) || plainName(saved) || shownName(digiName) || "—";
+}
+
+function prepaidAmount(category: string, product: string, quoted: number) {
+  const listed = findCatalogItem(category, product);
+  if (listed?.kind !== "prepaid") return quoted;
+  const face = faceValue(listed.label) || faceValue(product);
+  return face > 0 ? face : quoted;
+}
+
+function meterOf(period: string) {
+  const part = period.split("·").map((item) => item.trim()).find((item) => /VA\b|\//.test(item)) || "";
+  return part;
 }
 
 function billMonths(value: unknown): BillMonth[] {
@@ -123,7 +171,7 @@ function billMonths(value: unknown): BillMonth[] {
 
 function columnWidth(head: string) {
   if (head === "No") return "2.75rem";
-  if (head === "Nama") return "22%";
+  if (head === "Nama") return "26%";
   if (head === "Tot. Tagihan" || head === "Tagihan" || head === "Denda" || head === "Admin Bank" || head === "Collfee") return "11%";
   return undefined;
 }
@@ -357,15 +405,23 @@ export function LoketTransaksiPage() {
       setChecking(false);
       return;
     }
-    const name = customerLabel(customer, String(bill.customerName || ""), sales, profile?.id || "");
+    const saved = await savedCustomerName(customer);
+    if (draftRef.current !== generation) {
+      inquiring.current = false;
+      setChecking(false);
+      return;
+    }
+    const name = customerLabel(customer, String(bill.customerName || ""), sales, profile?.id || "", saved);
     const refId = typeof body.providerRef === "string" && body.providerRef ? body.providerRef : crypto.randomUUID();
     const sku = typeof body.buyerSkuCode === "string" ? body.buyerSkuCode : "";
     const providerCost = Number((bill as { providerCost?: number }).providerCost) || 0;
     const monthLines = billMonths(bill.lines).filter((line) => line.amount != null);
-    const shared = { payKey: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: customer, name, collfee: Number(bill.collfee) || 0, providerCost };
+    const meter = meterOf(bill.period || "");
+    const baseAmount = prepaidAmount(activeCategory, activeProduct, Number(bill.amount) || 0);
+    const shared = { payKey: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: customer, name, meter, collfee: Number(bill.collfee) || 0, providerCost };
     const built: CartRow[] = monthLines.length > 1
       ? monthLines.map((line, index) => ({ ...shared, key: `${refId}:${index}`, period: line.period || `Lembar ${index + 1}`, amount: line.amount ?? 0, denda: line.denda ?? 0 }))
-      : [{ ...shared, key: refId, period: bill.period || monthLines[0]?.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || monthLines[0]?.denda || 0 }];
+      : [{ ...shared, key: refId, period: bill.period || monthLines[0]?.period || "", amount: baseAmount, denda: Number(bill.denda) || monthLines[0]?.denda || 0 }];
     let added = false;
     setCart((current) => {
       if (current.some((row) => row.category === activeCategory && row.customerId === customer)) return current;
@@ -573,8 +629,11 @@ export function LoketTransaksiPage() {
                     <td className="px-1 py-2 text-center tabular-nums">{index + 1}</td>
                     <td className="px-2 py-2">{row.category} {row.product}</td>
                     <td className="break-all px-2 py-2 font-mono">{row.customerId}</td>
-                    <td className="whitespace-normal break-words px-3 py-2 leading-4" title={row.name}>{row.name}</td>
-                    <td className="whitespace-normal break-words px-2 py-2 leading-4">{row.period}</td>
+                    <td className={`whitespace-normal break-words px-3 py-2 leading-5 ${row.name.includes("*") ? "text-sm font-semibold tracking-wide text-slate-900" : ""}`} title={row.name}>{row.name}</td>
+                    <td className="whitespace-normal break-words px-2 py-2 leading-5">
+                      {row.meter && <div className="font-medium text-slate-800">{row.meter}</div>}
+                      {row.period.split("·").map((part) => part.trim()).filter((part) => part && part !== row.meter).map((part) => <div key={part}>{part}</div>)}
+                    </td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatRupiah(row.total)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.amount)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.denda)}</td>
