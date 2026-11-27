@@ -125,19 +125,21 @@ function namesFromGroups(customerId: string, groups: unknown) {
 
 function kolektifName(userId: string, customerId: string) {
   if (!customerId) return "";
-  try {
-    const keys = userId ? [`mentari-kolektif:${userId}`] : [];
-    for (let index = 0; index < localStorage.length; index += 1) {
-      const key = localStorage.key(index) || "";
-      if (key.startsWith("mentari-kolektif:") && !keys.includes(key)) keys.push(key);
-    }
-    for (const key of keys) {
-      const parsed = JSON.parse(localStorage.getItem(key) || "") as { rows?: unknown };
+  const keys = userId ? [`mentari-kolektif:${userId}`] : [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index) || "";
+    if (key.startsWith("mentari-kolektif:") && !keys.includes(key)) keys.push(key);
+  }
+  for (const key of keys) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as { rows?: unknown };
       const name = namesFromGroups(customerId, parsed.rows);
       if (name) return name;
+    } catch {
+      continue;
     }
-  } catch {
-    return "";
   }
   return "";
 }

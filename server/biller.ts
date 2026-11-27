@@ -122,20 +122,34 @@ function sameCustomerId(left: string, right: string) {
   return a.length >= 4 && a === b;
 }
 
+function recordText(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return value;
+    if (typeof value === "number" && Number.isFinite(value)) return String(Math.trunc(value));
+  }
+  return "";
+}
+
 export function rememberedCustomerName(
   customerNumber: string,
   sales: { customerNumber?: string; customerName?: string }[],
   groups: { members?: { number?: string; name?: string }[]; bills?: { number?: string; name?: string }[] }[],
 ) {
   for (const sale of sales) {
-    if (!sameCustomerId(String(sale.customerNumber || ""), customerNumber)) continue;
-    const name = plainCustomerName(String(sale.customerName || ""));
+    const record = sale as Record<string, unknown>;
+    const number = String(sale.customerNumber || recordText(record, ["customer_number", "customerId", "number"]));
+    if (!sameCustomerId(number, customerNumber)) continue;
+    const name = plainCustomerName(String(sale.customerName || recordText(record, ["customer_name", "nama", "name"])));
     if (name) return name;
   }
   for (const group of groups) {
     for (const row of [...(group.members ?? []), ...(group.bills ?? [])]) {
-      if (!sameCustomerId(String(row.number || ""), customerNumber)) continue;
-      const name = plainCustomerName(String(row.name || ""));
+      if (!row || typeof row !== "object") continue;
+      const record = row as Record<string, unknown>;
+      const number = recordText(record, ["number", "customerNumber", "customer_number", "customerId", "custId", "idpel", "no"]);
+      if (!sameCustomerId(number, customerNumber)) continue;
+      const name = plainCustomerName(recordText(record, ["name", "customerName", "customer_name", "nama"]));
       if (name) return name;
     }
   }
@@ -498,7 +512,7 @@ async function applyDigiflazzStatus(env: LedgerEnv, row: StoredDigiSale) {
     category: row.category_slug_snapshot,
     product: row.product_name_snapshot,
     customerNumber,
-    customerName: quote.customerName || row.customer_name || "",
+    customerName: resolvedCustomerName(quote.customerName, row.customer_name || ""),
     amount,
     channel: "production",
     outcome: quote.outcome,
