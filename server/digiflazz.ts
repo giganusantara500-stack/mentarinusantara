@@ -348,11 +348,11 @@ function postpaidPlnRequest(sku: string, category: string, product: string) {
 
 function postpaidPlnRow(row: Record<string, unknown>, nontaglis: boolean) {
   const code = rowSku(row).toLowerCase();
-  const blob = foldLabel(`${text(row.brand)} ${text(row.category)} ${text(row.product_name)} ${code} ${text(row.desc)}`);
+  const blob = foldLabel(`${text(row.brand)} ${text(row.category)} ${text(row.product_name)} ${code} ${text(row.desc)} ${text(row.seller_name)} ${text(row.seller)}`);
   if (/token|prepaid/.test(blob) || /^pln\d/.test(code) || code.endsWith("b")) return false;
-  if (!blob.includes("pln") && code !== "pln") return false;
+  if (!blob.includes("pln") && code !== "pln" && code !== "bplndy") return false;
   if (nontaglis) return blob.includes("nontaglis") || code.includes("nontaglis");
-  return blob.includes("pasca") || blob.includes("postpaid") || blob.includes("tagihan") || code === "pln";
+  return blob.includes("pasca") || blob.includes("postpaid") || blob.includes("tagihan") || code === "pln" || code === "bplndy";
 }
 
 function sellerText(row: Record<string, unknown>) {
@@ -360,12 +360,15 @@ function sellerText(row: Record<string, unknown>) {
 }
 
 function plnPostpaidHints() {
-  const seller = foldLabel(process.env.DIGIFLAZZ_PLN_POSTPAID_SELLER || "arqiva pos").replace(/\s+/g, "");
-  const codes = (process.env.DIGIFLAZZ_PLN_POSTPAID_CODE || "PLNPASCA2300,PLNPASCA2160")
+  const sellers = (process.env.DIGIFLAZZ_PLN_POSTPAID_SELLER || "aneka digital,arqiva pos")
+    .split(/[,;]+/)
+    .map((item) => foldLabel(item).replace(/\s+/g, ""))
+    .filter(Boolean);
+  const codes = (process.env.DIGIFLAZZ_PLN_POSTPAID_CODE || "BPLNDY,PLNPASCA2300,PLNPASCA2160")
     .split(/[,;\s]+/)
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
-  return { seller, codes };
+  return { sellers, codes };
 }
 
 function preferredPlnPostpaid(rows: Record<string, unknown>[]) {
@@ -373,11 +376,12 @@ function preferredPlnPostpaid(rows: Record<string, unknown>[]) {
   const ranked = rows.flatMap((row) => {
     const seller = sellerText(row);
     const code = rowSku(row).toLowerCase();
+    const sellerRank = hints.sellers.findIndex((item) => seller.includes(item));
     const hinted = hints.codes.findIndex((item) => code === item || seller.includes(item));
     let score = 0;
-    if (hints.seller && seller.includes(hints.seller)) score += 50;
+    if (sellerRank >= 0) score += (hints.sellers.length - sellerRank) * 100;
     if (hinted >= 0) score += 40 - hinted;
-    else if (/plnpasca\d+/.test(seller) || /plnpasca\d+/.test(code)) score += 10;
+    else if (/plnpasca\d+/.test(seller) || /plnpasca\d+/.test(code) || code === "bplndy") score += 10;
     return score > 0 ? [{ row, score }] : [];
   }).sort((left, right) => right.score - left.score);
   return ranked[0]?.row;
