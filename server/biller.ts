@@ -1,6 +1,7 @@
 import { billIsPaid, callbackRef, digiflazzReady, inquireDigiflazz, newRefId, payDigiflazz, productKind, resolveBuyerSku, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
 import { findCatalogItem, foldLabel } from "../src/lib/billerCatalog";
-import { recordLoketSale, walletBalance, type LedgerEnv } from "./ledger";
+import { listNetworkSales, listSimulations, recordLoketSale, walletBalance, type LedgerEnv } from "./ledger";
+import { ownerCollectives } from "./ops";
 
 export type BillerMode = "simulation" | "h2h";
 export type PaymentStatus = "simulated" | "pending" | "success" | "failed" | "refunded";
@@ -100,6 +101,60 @@ const simulationProvider: BillerProvider = {
     return { outcome: "success", message: "Simulasi tidak memanggil penyedia biller." };
   },
 };
+
+function plainCustomerName(value: string) {
+  const name = value.trim();
+  if (!name || name.includes("*") || /^pelanggan(\s+\d+)?$/i.test(name)) return "";
+  return name;
+}
+
+export function resolvedCustomerName(providerName: string, remembered: string) {
+  return plainCustomerName(providerName) || plainCustomerName(remembered) || providerName.trim();
+}
+
+function customerIdKey(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function sameCustomerId(left: string, right: string) {
+  const a = customerIdKey(left);
+  const b = customerIdKey(right);
+  return a.length >= 4 && a === b;
+}
+
+export function rememberedCustomerName(
+  customerNumber: string,
+  sales: { customerNumber?: string; customerName?: string }[],
+  groups: { members?: { number?: string; name?: string }[]; bills?: { number?: string; name?: string }[] }[],
+) {
+  for (const sale of sales) {
+    if (!sameCustomerId(String(sale.customerNumber || ""), customerNumber)) continue;
+    const name = plainCustomerName(String(sale.customerName || ""));
+    if (name) return name;
+  }
+  for (const group of groups) {
+    for (const row of [...(group.members ?? []), ...(group.bills ?? [])]) {
+      if (!sameCustomerId(String(row.number || ""), customerNumber)) continue;
+      const name = plainCustomerName(String(row.name || ""));
+      if (name) return name;
+    }
+  }
+  return "";
+}
+
+async function nameDirectory(env: LedgerEnv, actorId: string) {
+  const [sales, simulations, groups] = await Promise.all([
+    listNetworkSales(env, actorId).catch(() => []),
+    listSimulations(env, actorId).catch(() => []),
+    ownerCollectives(env, actorId).catch(() => []),
+  ]);
+  return { sales: [...sales, ...simulations], groups };
+}
+
+function withRememberedName<T extends { customerName: string }>(bill: T, customerNumber: string, directory: Awaited<ReturnType<typeof nameDirectory>>) {
+  const next = resolvedCustomerName(bill.customerName, rememberedCustomerName(customerNumber, directory.sales, directory.groups));
+  return next === bill.customerName ? bill : { ...bill, customerName: next };
+}
 
 function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
   const chosen = adminFee > 0;
@@ -214,6 +269,11 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     const balance = await walletBalance(env, actorId);
     return { error: inquiry.message || "Tagihan tidak dapat dicek.", status: inquiry.status === "not_found" ? 404 : 409, balance, paymentStatus: "failed" as PaymentStatus, mode };
   }
+  let customerName = resolvedCustomerName(input.customerName || "", inquiry.bill.customerName);
+  if (!plainCustomerName(customerName)) {
+    const directory = await nameDirectory(env, actorId);
+    customerName = resolvedCustomerName(customerName, rememberedCustomerName(input.customerNumber, directory.sales, directory.groups));
+  }
   const pending = await recordLoketSale(env, actorId, {
     ...input,
     amount: inquiry.bill.total,
@@ -222,7 +282,7 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     adminFee: inquiry.bill.adminFee,
     collfee: inquiry.bill.collfee,
     period: inquiry.bill.period,
-    customerName: inquiry.bill.customerName,
+    customerName,
     providerCost: inquiry.bill.providerCost,
     channel: "production",
     outcome: "pending",
@@ -244,7 +304,7 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     adminFee: inquiry.bill.adminFee,
     collfee: inquiry.bill.collfee,
     period: inquiry.bill.period,
-    customerName: charged.customerName || inquiry.bill.customerName,
+    customerName: resolvedCustomerName(charged.customerName, customerName),
     providerCost: charged.providerCost > 0 ? charged.providerCost : inquiry.bill.providerCost,
     channel: "production",
     outcome: submitted.outcome === "pending" ? "pending" : submitted.outcome,
@@ -268,13 +328,17 @@ export async function handleBillerRequest(method: string, pathname: string, body
       kind: clean(body.kind),
       refId: clean(body.refId),
     });
-    if (result.status === "paid") return { status: 200, body: { mode, statusText: "paid", message: result.message, bill: result.bill, providerRef: result.providerRef, buyerSkuCode: result.buyerSkuCode } };
+    const bill = result.bill && !plainCustomerName(result.bill.customerName)
+      ? withRememberedName(result.bill, clean(body.customerNumber), await nameDirectory(env, actorId))
+      : result.bill;
+    if (result.status === "paid") return { status: 200, body: { mode, statusText: "paid", message: result.message, bill, providerRef: result.providerRef, buyerSkuCode: result.buyerSkuCode } };
     if (result.status !== "found") return { status: result.status === "not_found" ? 404 : 409, body: { error: result.message, mode, statusText: result.status } };
-    return { status: 200, body: { mode, statusText: "found", bill: result.bill, providerRef: result.providerRef, buyerSkuCode: result.buyerSkuCode } };
+    return { status: 200, body: { mode, statusText: "found", bill, providerRef: result.providerRef, buyerSkuCode: result.buyerSkuCode } };
   }
   if (pathname === "/api/biller/inquiry-batch" && method === "POST") {
     const items = Array.isArray(body.items) ? body.items.slice(0, 40) : [];
     if (items.length === 0) return { status: 400, body: { error: "Daftar nomor pelanggan kosong." } };
+    const directoryPromise = nameDirectory(env, actorId);
     const results = await mapPool(items, 4, async (item) => {
       const record = item && typeof item === "object" ? item as Record<string, unknown> : {};
       const key = clean(record.key);
@@ -282,6 +346,8 @@ export async function handleBillerRequest(method: string, pathname: string, body
       const customerNumber = clean(record.customerNumber);
       if (!menu) return { key, customerNumber, statusText: "failed", message: "Produk kolektif belum terpetakan ke DigiFlazz." };
       const result = await inquireBill("h2h", { category: menu.category, product: menu.product, customerNumber, adminFee: Number(record.adminFee) || 0 });
+      const directory = await directoryPromise;
+      const bill = result.bill && !plainCustomerName(result.bill.customerName) ? withRememberedName(result.bill, customerNumber, directory) : result.bill;
       return {
         key,
         customerNumber,
@@ -289,7 +355,7 @@ export async function handleBillerRequest(method: string, pathname: string, body
         product: menu.product,
         statusText: result.status,
         message: result.message || "",
-        bill: result.bill,
+        bill,
         providerRef: result.providerRef,
         buyerSkuCode: result.buyerSkuCode,
       };

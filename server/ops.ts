@@ -99,6 +99,11 @@ function collectivesFromMeta(metadata: Record<string, unknown> | undefined, owne
   return raw.map((item) => normalizeCollective({ ...(item as Collective), ownerId: (item as Collective).ownerId || ownerId }));
 }
 
+export async function ownerCollectives(env: { supabaseUrl: string; serviceRoleKey: string }, ownerId: string) {
+  const loaded = await loadOwnedCollectives(env, ownerId);
+  return loaded.rows;
+}
+
 async function loadOwnedCollectives(env: { supabaseUrl: string; serviceRoleKey: string }, ownerId: string) {
   const headers = serviceHeaders(env);
   const response = await fetch(`${env.supabaseUrl}/auth/v1/admin/users/${ownerId}`, { headers });

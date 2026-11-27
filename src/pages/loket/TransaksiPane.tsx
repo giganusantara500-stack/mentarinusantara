@@ -101,14 +101,24 @@ function firstPlain(names: string[]) {
   return names.map(plainName).find(Boolean) || "";
 }
 
+function entryNumber(entry: object) {
+  const record = entry as Record<string, unknown>;
+  return String(record.number || record.customerNumber || record.customer_number || record.customerId || record.custId || record.idpel || record.no || "");
+}
+
+function entryName(entry: object) {
+  const record = entry as Record<string, unknown>;
+  return String(record.name || record.customerName || record.customer_name || record.nama || "");
+}
+
 function namesFromGroups(customerId: string, groups: unknown) {
   if (!Array.isArray(groups)) return "";
   const found: string[] = [];
   for (const group of groups) {
     if (!group || typeof group !== "object") continue;
-    const record = group as { members?: { number?: string; name?: string }[]; bills?: { number?: string; name?: string }[] };
-    for (const member of record.members ?? []) if (sameCustomer(String(member.number || ""), customerId)) found.push(String(member.name || ""));
-    for (const bill of record.bills ?? []) if (sameCustomer(String(bill.number || ""), customerId)) found.push(String(bill.name || ""));
+    const record = group as { members?: object[]; bills?: object[] };
+    for (const member of record.members ?? []) if (sameCustomer(entryNumber(member), customerId)) found.push(entryName(member));
+    for (const bill of record.bills ?? []) if (sameCustomer(entryNumber(bill), customerId)) found.push(entryName(bill));
   }
   return firstPlain(found);
 }
@@ -277,6 +287,7 @@ export function LoketTransaksiPage() {
   const [number, setNumber] = useState("");
   const [cart, setCart] = useState<CartRow[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
+  const [storedGroups, setStoredGroups] = useState<unknown[]>([]);
   const [reprintId, setReprintId] = useState("");
   const [reprintDate, setReprintDate] = useState("");
   const [reprintHits, setReprintHits] = useState<Sale[]>([]);
@@ -345,6 +356,15 @@ export function LoketTransaksiPage() {
     })();
     return () => { active = false; };
   }, [tick]);
+
+  useEffect(() => {
+    let active = true;
+    void supabase.auth.getSession().then(({ data }) => {
+      const groups = data.session?.user?.user_metadata?.collectives;
+      if (active) setStoredGroups(Array.isArray(groups) ? groups : []);
+    });
+    return () => { active = false; };
+  }, [profile?.id, tick]);
 
   const rows = cart.filter((row) => row.category === category).map((row) => priceRow(row, appliedAdmin));
   const total = rows.reduce((sum, row) => sum + row.total, 0);
@@ -424,7 +444,7 @@ export function LoketTransaksiPage() {
       setChecking(false);
       return;
     }
-    const name = customerLabel(customer, String(bill.customerName || ""), sales, profile?.id || "", saved);
+    const name = customerLabel(customer, String(bill.customerName || ""), sales, profile?.id || "", saved || namesFromGroups(customer, storedGroups));
     const refId = typeof body.providerRef === "string" && body.providerRef ? body.providerRef : crypto.randomUUID();
     const sku = typeof body.buyerSkuCode === "string" ? body.buyerSkuCode : "";
     const providerCost = Number((bill as { providerCost?: number }).providerCost) || 0;
@@ -490,7 +510,10 @@ export function LoketTransaksiPage() {
           category: first.category,
           product: `${first.category} ${first.product}`,
           customerNumber: first.customerId,
-          customerName: first.name === "—" ? "" : first.name,
+          customerName: (() => {
+            const shown = customerLabel(first.customerId, first.name, sales, profile?.id || "", namesFromGroups(first.customerId, storedGroups));
+            return shown === "—" ? "" : shown;
+          })(),
           amount: group.reduce((sum, row) => sum + row.total, 0),
           tagihan: group.reduce((sum, row) => sum + row.amount, 0),
           denda: group.reduce((sum, row) => sum + row.denda, 0),
@@ -637,12 +660,14 @@ export function LoketTransaksiPage() {
               </thead>
               <tbody>
                 {rows.length === 0 && <tr><td colSpan={columns.length} className="px-3 py-8 text-center text-slate-400">Belum ada tagihan. Lakukan Inquiry.</td></tr>}
-                {rows.map((row, index) => (
+                {rows.map((row, index) => {
+                  const name = customerLabel(row.customerId, row.name, sales, profile?.id || "", namesFromGroups(row.customerId, storedGroups));
+                  return (
                   <tr key={row.key} className="border-t border-slate-100 text-slate-700">
                     <td className="px-1 py-2 text-center tabular-nums">{index + 1}</td>
                     <td className="whitespace-nowrap px-2 py-2">{row.category} {row.product}</td>
                     <td className="whitespace-nowrap px-2 py-2 font-mono tracking-tight">{row.customerId}</td>
-                    <td className={`whitespace-normal break-words px-3 py-2 leading-5 ${row.name.includes("*") ? "text-sm font-semibold tracking-wide text-slate-900" : ""}`} title={row.name}>{row.name}</td>
+                    <td className={`whitespace-normal break-words px-3 py-2 leading-5 ${name.includes("*") ? "text-sm font-semibold tracking-wide text-slate-900" : ""}`} title={name}>{name}</td>
                     <td className="whitespace-nowrap px-2 py-2" title={periodLine(row.meter, row.period)}>{periodLine(row.meter, row.period)}</td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatRupiah(row.total)}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.amount)}</td>
@@ -650,7 +675,8 @@ export function LoketTransaksiPage() {
                     <td className="px-1.5 py-2 text-right tabular-nums">{formatRupiah(row.admin)}</td>
                     <td className="px-1.5 py-2 text-right tabular-nums">{formatRupiah(row.collfee)}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           ) : (
@@ -665,14 +691,14 @@ export function LoketTransaksiPage() {
                     <td className="px-3 py-2">{index + 1}</td>
                     <td className="px-3 py-2">{sale.product}</td>
                     <td className="px-3 py-2 font-mono">{sale.customerNumber}</td>
-                    <td className="whitespace-normal break-words px-3 py-2 leading-4">{customerLabel(sale.customerNumber, sale.customerName, sales, profile?.id || "")}</td>
+                    <td className="whitespace-normal break-words px-3 py-2 leading-4">{customerLabel(sale.customerNumber, sale.customerName, sales, profile?.id || "", namesFromGroups(sale.customerNumber, storedGroups))}</td>
                     <td className="px-3 py-2">{formatWaktu(sale.createdAt)}</td>
                     <td className="px-3 py-2 font-semibold">{formatRupiah(sale.amount)}</td>
                     <td className="px-3 py-2">{sale.status}</td>
                     <td className="px-3 py-2">
                       <button type="button" onClick={() => printReceipts(loadPrinterSettings(loketCode), [{
                         id: sale.customerNumber,
-                        name: customerLabel(sale.customerNumber, sale.customerName, sales, profile?.id || ""),
+                        name: customerLabel(sale.customerNumber, sale.customerName, sales, profile?.id || "", namesFromGroups(sale.customerNumber, storedGroups)),
                         product: sale.product,
                         period: sale.period || formatWaktu(sale.createdAt),
                         tagihan: Math.max(0, Number(sale.amount) - Number(sale.adminFee ?? 0)),

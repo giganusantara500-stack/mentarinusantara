@@ -192,6 +192,14 @@ function storedName(name: string) {
   return /^pelanggan(\s+\d+)?$/i.test(value) ? "" : value;
 }
 
+function preferShownName(incoming: string, stored: string) {
+  const plain = (value: string) => {
+    const name = storedName(value);
+    return name && !name.includes("*") ? name : "";
+  };
+  return plain(incoming) || plain(stored) || storedName(incoming) || storedName(stored);
+}
+
 function shownCustomer(name: string) {
   return storedName(name) || "—";
 }
@@ -653,7 +661,7 @@ export function LoketKolektifPage() {
         const note = String(hit?.message || (statusText === "not_found" ? "Tidak ada tagihan." : "Jawaban untuk ID ini tidak kembali."));
         return {
           number: member.number,
-          name: inquired || storedName(member.name),
+          name: preferShownName(inquired, member.name),
           product: member.product || "",
           period: String(quote.period || (status === "LAINNYA" ? "-" : "")),
           total: Number(quote.total) || 0,

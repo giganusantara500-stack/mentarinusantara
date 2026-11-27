@@ -121,17 +121,17 @@ function named(value: unknown) {
   return raw;
 }
 
-function customerNameFrom(data: Record<string, unknown>) {
+export function customerNameFrom(data: Record<string, unknown>) {
   const desc = data.desc && typeof data.desc === "object" && !Array.isArray(data.desc) ? data.desc as Record<string, unknown> : {};
-  const direct = named(data.customer_name) || named(desc.customer_name);
-  if (direct) return direct;
-  const detail = Array.isArray(desc.detail) ? desc.detail : [];
+  const detail = Array.isArray(desc.detail) ? desc.detail : Array.isArray(data.detail) ? data.detail : [];
   const fromDetail = detail.flatMap((row) => {
     if (!row || typeof row !== "object") return [];
     const record = row as Record<string, unknown>;
     return [named(record.nama), named(record.customer_name), named(record.nama_pelanggan), named(record.name)];
   });
   const names = [
+    named(data.customer_name),
+    named(desc.customer_name),
     named(data.nama),
     named(data.nama_pelanggan),
     named(data.name),
