@@ -128,6 +128,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       adminFee: Number(body.adminFee) || 0,
       collfee: Number(body.collfee) || 0,
       period: clean(body.period),
+      providerCost: Number(body.providerCost) || 0,
       parentId,
       clientRef,
       buyerSkuCode: clean(body.buyerSkuCode),

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
@@ -56,6 +56,7 @@ interface BillMonth {
 
 interface CartRow {
   key: string;
+  payKey: string;
   category: string;
   product: string;
   customerId: string;
@@ -63,10 +64,8 @@ interface CartRow {
   period: string;
   amount: number;
   denda: number;
-  admin: number;
   collfee: number;
-  total: number;
-  lines: BillMonth[];
+  providerCost: number;
   providerRef?: string;
   sku?: string;
 }
@@ -78,8 +77,35 @@ async function authHeader() {
 
 function shownName(value: unknown) {
   const name = String(value ?? "").trim();
-  if (!name || /^pelanggan(\s+\d+)?$/i.test(name)) return "—";
+  if (!name || /^pelanggan(\s+\d+)?$/i.test(name)) return "";
   return name;
+}
+
+function plainName(value: string) {
+  const name = shownName(value);
+  return name && !name.includes("*") ? name : "";
+}
+
+function kolektifName(userId: string, customerId: string) {
+  if (!userId || !customerId) return "";
+  try {
+    const parsed = JSON.parse(localStorage.getItem(`mentari-kolektif:${userId}`) || "") as { rows?: { members?: { number?: string; name?: string }[]; bills?: { number?: string; name?: string }[] }[] };
+    const found: string[] = [];
+    for (const group of parsed.rows ?? []) {
+      for (const member of group.members ?? []) if (String(member.number || "") === customerId) found.push(String(member.name || ""));
+      for (const bill of group.bills ?? []) if (String(bill.number || "") === customerId) found.push(String(bill.name || ""));
+    }
+    return found.map(plainName).find(Boolean) || "";
+  } catch {
+    return "";
+  }
+}
+
+function customerLabel(customerId: string, digiName: string, history: Sale[], userId: string) {
+  const direct = plainName(digiName);
+  if (direct) return direct;
+  const past = history.find((sale) => sale.customerNumber === customerId && plainName(sale.customerName));
+  return plainName(past?.customerName || "") || kolektifName(userId, customerId) || shownName(digiName) || "—";
 }
 
 function billMonths(value: unknown): BillMonth[] {
@@ -96,10 +122,21 @@ function billMonths(value: unknown): BillMonth[] {
 }
 
 function columnWidth(head: string) {
-  if (head === "No") return "2.5rem";
-  if (head === "Nama") return "24%";
-  if (head === "Periode") return "18%";
+  if (head === "No") return "2.75rem";
+  if (head === "Nama") return "22%";
+  if (head === "Tot. Tagihan" || head === "Tagihan" || head === "Denda" || head === "Admin Bank" || head === "Collfee") return "11%";
   return undefined;
+}
+
+function headClass(head: string) {
+  if (head === "No") return "px-1 text-center";
+  if (head === "Tot. Tagihan" || head === "Tagihan" || head === "Denda" || head === "Admin Bank" || head === "Collfee") return "px-3 text-right";
+  return "px-2";
+}
+
+function priceRow(row: CartRow, admin: number) {
+  const total = row.amount + row.denda + admin;
+  return { ...row, admin, total };
 }
 
 function AreaPicker({ value, options, onChange }: { value: string; options: string[]; onChange: (value: string) => void }) {
@@ -199,10 +236,7 @@ export function LoketTransaksiPage() {
     if (choices.length > 0 && !choices.includes(product)) setProduct(choices[0]);
   }, [choiceKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const appliedAdmin = category === "PLN" ? adminFee : (BILLER_ADMIN[category] ?? 0);
-  const showAdmin = category === "PLN";
-  const columns = showAdmin
-    ? ["No", "Produk", "Cust.ID", "Nama", "Periode", "Tot. Tagihan", "Tagihan", "Denda", "Admin Bank", "Collfee"]
-    : ["No", "Produk", "Cust.ID", "Nama", "Periode", "Tot. Tagihan", "Tagihan", "Denda", "Collfee"];
+  const columns = ["No", "Produk", "Cust.ID", "Nama", "Periode", "Tot. Tagihan", "Tagihan", "Denda", "Admin Bank", "Collfee"];
 
   const clearDraft = () => {
     draftRef.current += 1;
@@ -251,7 +285,7 @@ export function LoketTransaksiPage() {
     return () => { active = false; };
   }, [tick]);
 
-  const rows = cart.filter((row) => row.category === category);
+  const rows = cart.filter((row) => row.category === category).map((row) => priceRow(row, appliedAdmin));
   const total = rows.reduce((sum, row) => sum + row.total, 0);
   const checkReprint = () => {
     if (!reprintId.trim() && !reprintDate) {
@@ -323,15 +357,20 @@ export function LoketTransaksiPage() {
       setChecking(false);
       return;
     }
-    const lines = billMonths(bill.lines);
-    const found = { name: shownName(bill.customerName), period: bill.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || 0, admin: Number(bill.adminFee) || 0, collfee: Number(bill.collfee) || 0, total: Number(bill.total) || 0, lines };
+    const name = customerLabel(customer, String(bill.customerName || ""), sales, profile?.id || "");
     const refId = typeof body.providerRef === "string" && body.providerRef ? body.providerRef : crypto.randomUUID();
     const sku = typeof body.buyerSkuCode === "string" ? body.buyerSkuCode : "";
+    const providerCost = Number((bill as { providerCost?: number }).providerCost) || 0;
+    const monthLines = billMonths(bill.lines).filter((line) => line.amount != null);
+    const shared = { payKey: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: customer, name, collfee: Number(bill.collfee) || 0, providerCost };
+    const built: CartRow[] = monthLines.length > 1
+      ? monthLines.map((line, index) => ({ ...shared, key: `${refId}:${index}`, period: line.period || `Lembar ${index + 1}`, amount: line.amount ?? 0, denda: line.denda ?? 0 }))
+      : [{ ...shared, key: refId, period: bill.period || monthLines[0]?.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || monthLines[0]?.denda || 0 }];
     let added = false;
-    setCart((rows) => {
-      if (rows.some((row) => row.category === activeCategory && row.customerId === customer)) return rows;
+    setCart((current) => {
+      if (current.some((row) => row.category === activeCategory && row.customerId === customer)) return current;
       added = true;
-      return [...rows, { ...found, key: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: customer }];
+      return [...current, ...built];
     });
     if (draftRef.current !== generation) {
       inquiring.current = false;
@@ -342,8 +381,12 @@ export function LoketTransaksiPage() {
       setMessage("");
       setError(`ID ${customer} sudah ada di antrean ${activeCategory}. Tidak ditambahkan lagi.`);
     } else {
+      const priced = built.map((row) => priceRow(row, activeCategory === "PLN" ? adminFee : (BILLER_ADMIN[activeCategory] ?? 0)));
+      const billTotal = priced.reduce((sum, row) => sum + row.total, 0);
       setError("");
-      setMessage(`${activeCategory} ${activeProduct}: ${found.name} · ${found.period || "periode belum tersedia"} · tagihan ${formatRupiah(found.amount)} · denda ${formatRupiah(found.denda)} · admin ${formatRupiah(found.admin)} · total ${formatRupiah(found.total)}.`);
+      setMessage(priced.length > 1
+        ? `${priced.length} lembar ${activeProduct} untuk ${priced[0].name}. Tiap lembar memakai admin ${formatRupiah(priced[0].admin)}. Total ${formatRupiah(billTotal)}.`
+        : `${activeCategory} ${activeProduct}: ${priced[0].name} · ${priced[0].period || "periode belum tersedia"} · tagihan ${formatRupiah(priced[0].amount)} · denda ${formatRupiah(priced[0].denda)} · admin ${formatRupiah(priced[0].admin)} · total ${formatRupiah(priced[0].total)}.`);
       setNumber("");
     }
     inquiring.current = false;
@@ -358,7 +401,13 @@ export function LoketTransaksiPage() {
     setError("");
     let balance = 0;
     let lastStatus = "";
+    const groups = new Map<string, typeof rows>();
     for (const row of rows) {
+      const key = row.payKey || row.providerRef || row.key;
+      groups.set(key, [...(groups.get(key) ?? []), row]);
+    }
+    for (const [payKey, group] of groups) {
+      const first = group[0];
       let response: Response;
       try {
       response = await fetch(apiUrl("/api/loket-sales"), {
@@ -366,19 +415,20 @@ export function LoketTransaksiPage() {
         headers: await authHeader(),
         body: JSON.stringify({
           channel: "digiflazz",
-          clientRef: row.providerRef || row.key,
-          providerRef: row.providerRef,
-          buyerSkuCode: row.sku,
-          category: row.category,
-          product: `${row.category} ${row.product}`,
-          customerNumber: row.customerId,
-          customerName: row.name === "—" ? "" : row.name,
-          amount: row.total,
-          tagihan: row.amount,
-          denda: row.denda,
-          adminFee: row.admin,
-          collfee: row.collfee,
-          period: row.period,
+          clientRef: payKey,
+          providerRef: first.providerRef || payKey,
+          buyerSkuCode: first.sku,
+          category: first.category,
+          product: `${first.category} ${first.product}`,
+          customerNumber: first.customerId,
+          customerName: first.name === "—" ? "" : first.name,
+          amount: group.reduce((sum, row) => sum + row.total, 0),
+          tagihan: group.reduce((sum, row) => sum + row.amount, 0),
+          denda: group.reduce((sum, row) => sum + row.denda, 0),
+          adminFee: group.reduce((sum, row) => sum + row.admin, 0),
+          collfee: group.reduce((sum, row) => sum + row.collfee, 0),
+          providerCost: Math.max(...group.map((row) => row.providerCost || 0)),
+          period: group.map((row) => row.period).filter(Boolean).join(", "),
           loketName,
         }),
       });
@@ -404,7 +454,7 @@ export function LoketTransaksiPage() {
       }
       balance = Number(body.balance);
       lastStatus = String(body.statusText || "");
-      if (lastStatus === "pending") setPendingRef(row.providerRef || row.key);
+      if (lastStatus === "pending") setPendingRef(payKey);
     }
     paying.current = false;
     if (draftRef.current !== generation) return;
@@ -514,51 +564,24 @@ export function LoketTransaksiPage() {
                 {columns.map((head) => <col key={head} style={{ width: columnWidth(head) }} />)}
               </colgroup>
               <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
-                <tr>{columns.map((head) => <th key={head} className={`py-2 font-semibold ${head === "No" ? "px-1 text-center" : "px-2"}`}>{head}</th>)}</tr>
+                <tr>{columns.map((head) => <th key={head} className={`py-2 font-semibold ${headClass(head)}`}>{head}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.length === 0 && <tr><td colSpan={columns.length} className="px-3 py-8 text-center text-slate-400">Belum ada tagihan. Lakukan Inquiry.</td></tr>}
-                {rows.map((row, index) => {
-                  const split = row.lines.length > 1;
-                  const unsplit = !split && /\d+\s+lembar/i.test(row.period) && row.lines.filter((line) => line.amount != null).length < 2;
-                  return (
-                    <Fragment key={row.key}>
-                      <tr className="border-t border-slate-100 text-slate-700">
-                        <td className="px-1 py-2 text-center tabular-nums">{index + 1}</td>
-                        <td className="px-2 py-2">{row.category} {row.product}</td>
-                        <td className="break-all px-2 py-2 font-mono">{row.customerId}</td>
-                        <td className="whitespace-normal break-words px-2 py-2 leading-4" title={row.name}>{row.name}</td>
-                        <td className="whitespace-normal break-words px-2 py-2 leading-4">{row.period}</td>
-                        <td className="px-2 py-2 font-semibold">{formatRupiah(row.total)}</td>
-                        <td className="px-2 py-2">{formatRupiah(row.amount)}</td>
-                        <td className="px-2 py-2">{formatRupiah(row.denda)}</td>
-                        {showAdmin && <td className="px-2 py-2">{formatRupiah(row.admin)}</td>}
-                        <td className="px-2 py-2">{formatRupiah(row.collfee)}</td>
-                      </tr>
-                      {(split || unsplit) && (
-                        <tr className="bg-slate-50 text-[11px] text-slate-600">
-                          <td />
-                          <td colSpan={columns.length - 1} className="px-2 py-1.5">
-                            {split && (
-                              <ul className="space-y-0.5">
-                                {row.lines.map((line, lineIndex) => (
-                                  <li key={`${row.key}-${lineIndex}`} className="flex flex-wrap gap-x-3">
-                                    <span className="font-semibold text-slate-700">{line.period || "Periode"}</span>
-                                    {line.amount != null && <span>Tagihan {formatRupiah(line.amount)}</span>}
-                                    {line.denda != null && <span>Denda {formatRupiah(line.denda)}</span>}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                            {row.lines.some((line) => line.amount == null) || unsplit ? (
-                              <p className={split ? "mt-1" : ""}>DigiFlazz tidak memecah nominal per bulan. Pembayaran tetap memakai total tagihan.</p>
-                            ) : null}
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
+                {rows.map((row, index) => (
+                  <tr key={row.key} className="border-t border-slate-100 text-slate-700">
+                    <td className="px-1 py-2 text-center tabular-nums">{index + 1}</td>
+                    <td className="px-2 py-2">{row.category} {row.product}</td>
+                    <td className="break-all px-2 py-2 font-mono">{row.customerId}</td>
+                    <td className="whitespace-normal break-words px-3 py-2 leading-4" title={row.name}>{row.name}</td>
+                    <td className="whitespace-normal break-words px-2 py-2 leading-4">{row.period}</td>
+                    <td className="px-3 py-2 text-right font-semibold tabular-nums">{formatRupiah(row.total)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.amount)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.denda)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.admin)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatRupiah(row.collfee)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           ) : (
@@ -573,14 +596,14 @@ export function LoketTransaksiPage() {
                     <td className="px-3 py-2">{index + 1}</td>
                     <td className="px-3 py-2">{sale.product}</td>
                     <td className="px-3 py-2 font-mono">{sale.customerNumber}</td>
-                    <td className="px-3 py-2">{sale.customerName}</td>
+                    <td className="whitespace-normal break-words px-3 py-2 leading-4">{customerLabel(sale.customerNumber, sale.customerName, sales, profile?.id || "")}</td>
                     <td className="px-3 py-2">{formatWaktu(sale.createdAt)}</td>
                     <td className="px-3 py-2 font-semibold">{formatRupiah(sale.amount)}</td>
                     <td className="px-3 py-2">{sale.status}</td>
                     <td className="px-3 py-2">
                       <button type="button" onClick={() => printReceipts(loadPrinterSettings(loketCode), [{
                         id: sale.customerNumber,
-                        name: sale.customerName,
+                        name: customerLabel(sale.customerNumber, sale.customerName, sales, profile?.id || ""),
                         product: sale.product,
                         period: sale.period || formatWaktu(sale.createdAt),
                         tagihan: Math.max(0, Number(sale.amount) - Number(sale.adminFee ?? 0)),

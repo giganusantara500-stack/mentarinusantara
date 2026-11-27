@@ -102,9 +102,10 @@ const simulationProvider: BillerProvider = {
 };
 
 function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
-  const fee = quote.adminFee > 0 ? quote.adminFee : adminFee;
+  const chosen = adminFee > 0;
+  const fee = chosen ? adminFee : quote.adminFee;
   const summed = quote.amount + quote.denda + fee;
-  const total = quote.adminFee > 0 ? (quote.total || summed) : summed;
+  const total = chosen ? summed : (quote.adminFee > 0 ? (quote.total || summed) : summed);
   return {
     customerName: quote.customerName,
     period: quote.period,
@@ -112,7 +113,7 @@ function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
     denda: quote.denda,
     adminFee: fee,
     collfee: 0,
-    total: total || quote.total || summed,
+    total: total || summed,
     providerCost: quote.providerCost > 0 ? quote.providerCost : Math.max(0, quote.amount + quote.denda),
     lines: quote.lines ?? [],
   };
@@ -237,14 +238,14 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
   const charged = submitted.bill && submitted.bill.total >= 1000 ? submitted.bill : inquiry.bill;
   const settled = await recordLoketSale(env, actorId, {
     ...input,
-    amount: charged.total,
-    tagihan: charged.amount,
-    denda: charged.denda,
-    adminFee: charged.adminFee,
-    collfee: charged.collfee,
-    period: charged.period || inquiry.bill.period,
+    amount: inquiry.bill.total,
+    tagihan: inquiry.bill.amount,
+    denda: inquiry.bill.denda,
+    adminFee: inquiry.bill.adminFee,
+    collfee: inquiry.bill.collfee,
+    period: inquiry.bill.period,
     customerName: charged.customerName || inquiry.bill.customerName,
-    providerCost: charged.providerCost || inquiry.bill.providerCost,
+    providerCost: charged.providerCost > 0 ? charged.providerCost : inquiry.bill.providerCost,
     channel: "production",
     outcome: submitted.outcome === "pending" ? "pending" : submitted.outcome,
     clientRef: refId,
