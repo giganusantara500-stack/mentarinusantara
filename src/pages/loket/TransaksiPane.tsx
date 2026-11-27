@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
@@ -25,11 +25,11 @@ const BILLER_ADMIN: Record<string, number> = {
   "Masa Aktif": 1500,
   Gas: 2500,
   PDAM: 2500,
-  "HP Pascabayar": 2500,
+  "HP Postpaid": 2500,
   Internet: 2500,
   BPJS: 2500,
   "by.U": 2500,
-  "TV Pascabayar": 3000,
+  "TV Postpaid": 3000,
   Lainnya: 2500,
 };
 
@@ -48,6 +48,12 @@ interface Sale {
   createdAt: string;
 }
 
+interface BillMonth {
+  period: string;
+  amount: number | null;
+  denda: number | null;
+}
+
 interface CartRow {
   key: string;
   category: string;
@@ -60,6 +66,7 @@ interface CartRow {
   admin: number;
   collfee: number;
   total: number;
+  lines: BillMonth[];
   providerRef?: string;
   sku?: string;
 }
@@ -73,6 +80,26 @@ function shownName(value: unknown) {
   const name = String(value ?? "").trim();
   if (!name || /^pelanggan(\s+\d+)?$/i.test(name)) return "—";
   return name;
+}
+
+function billMonths(value: unknown): BillMonth[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const record = row as Record<string, unknown>;
+    const period = String(record.period ?? "").trim();
+    const amount = record.amount === null || record.amount === undefined || record.amount === "" ? null : Number(record.amount);
+    const denda = record.denda === null || record.denda === undefined || record.denda === "" ? null : Number(record.denda);
+    if (!period && amount === null && denda === null) return [];
+    return [{ period, amount: typeof amount === "number" && Number.isFinite(amount) ? amount : null, denda: typeof denda === "number" && Number.isFinite(denda) ? denda : null }];
+  });
+}
+
+function columnWidth(head: string) {
+  if (head === "No") return "2.5rem";
+  if (head === "Nama") return "24%";
+  if (head === "Periode") return "18%";
+  return undefined;
 }
 
 function AreaPicker({ value, options, onChange }: { value: string; options: string[]; onChange: (value: string) => void }) {
@@ -281,7 +308,7 @@ export function LoketTransaksiPage() {
       return;
     }
     const body = await response.json().catch(() => ({}));
-    const bill = body.bill as { customerName?: string; period?: string; amount?: number; denda?: number; adminFee?: number; collfee?: number; total?: number } | undefined;
+    const bill = body.bill as { customerName?: string; period?: string; amount?: number; denda?: number; adminFee?: number; collfee?: number; total?: number; lines?: unknown } | undefined;
     if (body.statusText === "paid") {
       setMessage("");
       setError(body.message || "Tagihan sudah lunas.");
@@ -296,7 +323,8 @@ export function LoketTransaksiPage() {
       setChecking(false);
       return;
     }
-    const found = { name: shownName(bill.customerName), period: bill.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || 0, admin: Number(bill.adminFee) || 0, collfee: Number(bill.collfee) || 0, total: Number(bill.total) || 0 };
+    const lines = billMonths(bill.lines);
+    const found = { name: shownName(bill.customerName), period: bill.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || 0, admin: Number(bill.adminFee) || 0, collfee: Number(bill.collfee) || 0, total: Number(bill.total) || 0, lines };
     const refId = typeof body.providerRef === "string" && body.providerRef ? body.providerRef : crypto.randomUUID();
     const sku = typeof body.buyerSkuCode === "string" ? body.buyerSkuCode : "";
     let added = false;
@@ -482,25 +510,55 @@ export function LoketTransaksiPage() {
         <div className="min-h-0 flex-1 overflow-auto">
           {mode === "bayar" ? (
             <table className="w-full table-fixed text-left text-xs">
+              <colgroup>
+                {columns.map((head) => <col key={head} style={{ width: columnWidth(head) }} />)}
+              </colgroup>
               <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
-                <tr>{columns.map((head) => <th key={head} className="px-3 py-2 font-semibold">{head}</th>)}</tr>
+                <tr>{columns.map((head) => <th key={head} className={`py-2 font-semibold ${head === "No" ? "px-1 text-center" : "px-2"}`}>{head}</th>)}</tr>
               </thead>
               <tbody>
                 {rows.length === 0 && <tr><td colSpan={columns.length} className="px-3 py-8 text-center text-slate-400">Belum ada tagihan. Lakukan Inquiry.</td></tr>}
-                {rows.map((row, index) => (
-                  <tr key={row.key} className="border-t border-slate-100 text-slate-700">
-                    <td className="px-3 py-2">{index + 1}</td>
-                    <td className="px-3 py-2">{row.category} {row.product}</td>
-                    <td className="px-3 py-2 font-mono">{row.customerId}</td>
-                    <td className="px-3 py-2">{row.name}</td>
-                    <td className="px-3 py-2">{row.period}</td>
-                    <td className="px-3 py-2 font-semibold">{formatRupiah(row.total)}</td>
-                    <td className="px-3 py-2">{formatRupiah(row.amount)}</td>
-                    <td className="px-3 py-2">{formatRupiah(row.denda)}</td>
-                    {showAdmin && <td className="px-3 py-2">{formatRupiah(row.admin)}</td>}
-                    <td className="px-3 py-2">{formatRupiah(row.collfee)}</td>
-                  </tr>
-                ))}
+                {rows.map((row, index) => {
+                  const split = row.lines.length > 1;
+                  const unsplit = !split && /\d+\s+lembar/i.test(row.period) && row.lines.filter((line) => line.amount != null).length < 2;
+                  return (
+                    <Fragment key={row.key}>
+                      <tr className="border-t border-slate-100 text-slate-700">
+                        <td className="px-1 py-2 text-center tabular-nums">{index + 1}</td>
+                        <td className="px-2 py-2">{row.category} {row.product}</td>
+                        <td className="break-all px-2 py-2 font-mono">{row.customerId}</td>
+                        <td className="whitespace-normal break-words px-2 py-2 leading-4" title={row.name}>{row.name}</td>
+                        <td className="whitespace-normal break-words px-2 py-2 leading-4">{row.period}</td>
+                        <td className="px-2 py-2 font-semibold">{formatRupiah(row.total)}</td>
+                        <td className="px-2 py-2">{formatRupiah(row.amount)}</td>
+                        <td className="px-2 py-2">{formatRupiah(row.denda)}</td>
+                        {showAdmin && <td className="px-2 py-2">{formatRupiah(row.admin)}</td>}
+                        <td className="px-2 py-2">{formatRupiah(row.collfee)}</td>
+                      </tr>
+                      {(split || unsplit) && (
+                        <tr className="bg-slate-50 text-[11px] text-slate-600">
+                          <td />
+                          <td colSpan={columns.length - 1} className="px-2 py-1.5">
+                            {split && (
+                              <ul className="space-y-0.5">
+                                {row.lines.map((line, lineIndex) => (
+                                  <li key={`${row.key}-${lineIndex}`} className="flex flex-wrap gap-x-3">
+                                    <span className="font-semibold text-slate-700">{line.period || "Periode"}</span>
+                                    {line.amount != null && <span>Tagihan {formatRupiah(line.amount)}</span>}
+                                    {line.denda != null && <span>Denda {formatRupiah(line.denda)}</span>}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {row.lines.some((line) => line.amount == null) || unsplit ? (
+                              <p className={split ? "mt-1" : ""}>DigiFlazz tidak memecah nominal per bulan. Pembayaran tetap memakai total tagihan.</p>
+                            ) : null}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           ) : (

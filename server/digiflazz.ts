@@ -4,6 +4,12 @@ import { findCatalogItem, foldLabel } from "../src/lib/billerCatalog";
 export type DigiKind = "prepaid" | "postpaid";
 export type DigiOutcome = "pending" | "success" | "failed" | "not_found";
 
+export interface BillMonth {
+  period: string;
+  amount: number | null;
+  denda: number | null;
+}
+
 export interface DigiQuote {
   outcome: DigiOutcome;
   message: string;
@@ -18,6 +24,7 @@ export interface DigiQuote {
   total: number;
   providerCost: number;
   sn: string;
+  lines?: BillMonth[];
 }
 
 const DEFAULT_BASE = "https://api.digiflazz.com/v1";
@@ -117,19 +124,23 @@ function named(value: unknown) {
 function customerNameFrom(data: Record<string, unknown>) {
   const desc = data.desc && typeof data.desc === "object" && !Array.isArray(data.desc) ? data.desc as Record<string, unknown> : {};
   const detail = Array.isArray(desc.detail) ? desc.detail : [];
-  const fromDetail = detail
-    .map((row) => (row && typeof row === "object" ? named((row as Record<string, unknown>).nama) || named((row as Record<string, unknown>).customer_name) || named((row as Record<string, unknown>).name) : ""))
-    .find(Boolean);
-  return named(data.customer_name)
-    || named(data.nama)
-    || named(data.nama_pelanggan)
-    || named(data.name)
-    || named(desc.customer_name)
-    || named(desc.nama)
-    || named(desc.nama_pelanggan)
-    || named(desc.name)
-    || fromDetail
-    || "";
+  const fromDetail = detail.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const record = row as Record<string, unknown>;
+    return [named(record.nama), named(record.customer_name), named(record.nama_pelanggan), named(record.name)];
+  });
+  const names = [
+    named(data.customer_name),
+    named(data.nama),
+    named(data.nama_pelanggan),
+    named(data.name),
+    named(desc.customer_name),
+    named(desc.nama),
+    named(desc.nama_pelanggan),
+    named(desc.name),
+    ...fromDetail,
+  ].filter(Boolean);
+  return names.find((name) => !name.includes("*")) || names[0] || "";
 }
 
 function billDetail(data: Record<string, unknown>) {
@@ -139,8 +150,24 @@ function billDetail(data: Record<string, unknown>) {
   return { desc, rows };
 }
 
+function present(value: unknown) {
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
+function monthLines(rows: Record<string, unknown>[]): BillMonth[] {
+  return rows.flatMap((row) => {
+    const period = monthLabel(scalar(row.periode) || scalar(row.period));
+    const amountSource = row.nilai_tagihan ?? row.tagihan ?? row.amount;
+    const hasAmount = present(amountSource);
+    const hasDenda = present(row.denda);
+    if (!period && !hasAmount && !hasDenda) return [];
+    return [{ period, amount: hasAmount ? money(amountSource) : null, denda: hasDenda ? money(row.denda) : null }];
+  });
+}
+
 function quoteFrom(data: Record<string, unknown>, fallback: { refId: string; sku: string; customerNumber: string }): DigiQuote {
   const { desc, rows } = billDetail(data);
+  const lines = monthLines(rows);
   const denda = rows.reduce((sum, row) => sum + money(row.denda), 0);
   const tagihan = rows.reduce((sum, row) => sum + money(row.nilai_tagihan ?? row.tagihan ?? row.amount), 0);
   const adminFee = money(data.admin) || rows.reduce((sum, row) => sum + money(row.admin), 0);
@@ -177,6 +204,7 @@ function quoteFrom(data: Record<string, unknown>, fallback: { refId: string; sku
     total: total || amount,
     providerCost,
     sn: text(data.sn),
+    lines,
   };
 }
 

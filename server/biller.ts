@@ -14,6 +14,7 @@ export interface BillQuote {
   collfee: number;
   total: number;
   providerCost: number;
+  lines?: { period: string; amount: number | null; denda: number | null }[];
 }
 
 interface InquiryInput {
@@ -113,6 +114,7 @@ function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
     collfee: 0,
     total: total || quote.total || summed,
     providerCost: quote.providerCost > 0 ? quote.providerCost : Math.max(0, quote.amount + quote.denda),
+    lines: quote.lines ?? [],
   };
 }
 
@@ -348,7 +350,7 @@ function menuForCollective(category: string, product: string) {
   const direct = findCatalogItem(category, product) || findCatalogItem(product, category);
   if (direct) return { category: direct.category, product: direct.label };
   const key = foldLabel(`${category} ${product}`);
-  if (key.includes("pln")) return { category: "PLN", product: "Pascabayar" };
+  if (key.includes("pln")) return { category: "PLN", product: "Postpaid" };
   if (key.includes("bpjs")) return { category: "BPJS", product: "BPJS Kesehatan" };
   if (key.includes("telkom") || key.includes("pstn")) return { category: "Internet", product: "Telkom" };
   if (key.includes("gas") || key.includes("pertagas") || key.includes("pgn")) return { category: "Gas", product: "Pertagas 20.000" };

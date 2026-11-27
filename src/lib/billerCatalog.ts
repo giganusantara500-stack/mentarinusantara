@@ -16,7 +16,7 @@ const prepaid = "prepaid" as const;
 const postpaid = "postpaid" as const;
 
 export const BILLER_CATALOG: CatalogItem[] = [
-  item("PLN", "Pascabayar", "pln", postpaid, ["postpaid", "pascabayar"]),
+  item("PLN", "Postpaid", "pln", postpaid, ["pascabayar"]),
   item("PLN", "Nontaglis", "plnnontaglis", postpaid, ["nontaglis"]),
   item("PLN", "Token 20.000", "pln20", prepaid, ["prepaid 20", "token 20"]),
   item("PLN", "Token 50.000", "pln50", prepaid, ["prepaid 50", "token 50"]),
@@ -105,11 +105,11 @@ export const BILLER_CATALOG: CatalogItem[] = [
   item("PDAM", "PDAM Tegal", "tegal", postpaid, ["tegal", "kab tegal"]),
   item("PDAM", "PDAM Yogyakarta", "yoya", postpaid, ["yoya", "yogyakarta", "kota yogyakarta"]),
 
-  item("HP Pascabayar", "Telkomsel Halo", "halo", postpaid, ["halo", "tagihan halo"]),
-  item("HP Pascabayar", "Indosat Matrix", "matrix", postpaid, ["matrix", "indosat pascabayar"]),
-  item("HP Pascabayar", "Smartfren", "smart", postpaid, ["smart", "smartfren pascabayar"]),
-  item("HP Pascabayar", "Three", "three", postpaid, ["three", "tri", "three pascabayar"]),
-  item("HP Pascabayar", "XL", "xl", postpaid, ["xl", "xl pascabayar"]),
+  item("HP Postpaid", "Telkomsel Halo", "halo", postpaid, ["halo", "tagihan halo"]),
+  item("HP Postpaid", "Indosat Matrix", "matrix", postpaid, ["matrix", "indosat pascabayar", "indosat postpaid"]),
+  item("HP Postpaid", "Smartfren", "smart", postpaid, ["smart", "smartfren pascabayar", "smartfren postpaid"]),
+  item("HP Postpaid", "Three", "three", postpaid, ["three", "tri", "three pascabayar", "three postpaid"]),
+  item("HP Postpaid", "XL", "xl", postpaid, ["xl", "xl pascabayar", "xl postpaid"]),
 
   item("Internet", "Biznet", "biz", postpaid),
   item("Internet", "BNEt", "bne", postpaid),
@@ -125,20 +125,20 @@ export const BILLER_CATALOG: CatalogItem[] = [
 
   item("by.U", "by.U", "by", postpaid),
 
-  item("TV Pascabayar", "Biznet", "biznet", postpaid),
-  item("TV Pascabayar", "Indovision", "indovi", postpaid),
-  item("TV Pascabayar", "Iconnet", "iconnet", postpaid),
-  item("TV Pascabayar", "Indosat HiFi", "indosathifi", postpaid),
-  item("TV Pascabayar", "K-Vision 50.000", "kvision50", postpaid),
-  item("TV Pascabayar", "K-Vision 75.000", "kvision75", postpaid),
-  item("TV Pascabayar", "K-Vision 100.000", "kvision100", postpaid),
-  item("TV Pascabayar", "K-Vision 125.000", "kvision125", postpaid),
-  item("TV Pascabayar", "K-Vision 150.000", "kvision150", postpaid),
-  item("TV Pascabayar", "K-Vision 200.000", "kvision200", postpaid),
-  item("TV Pascabayar", "K-Vision 300.000", "kvision300", postpaid),
-  item("TV Pascabayar", "K-Vision 500.000", "kvision500", postpaid),
-  item("TV Pascabayar", "Nexmedia", "nexmedia", postpaid),
-  item("TV Pascabayar", "TelkomVision", "telkomvision", postpaid, ["transvision"]),
+  item("TV Postpaid", "Biznet", "biznet", postpaid),
+  item("TV Postpaid", "Indovision", "indovi", postpaid),
+  item("TV Postpaid", "Iconnet", "iconnet", postpaid),
+  item("TV Postpaid", "Indosat HiFi", "indosathifi", postpaid),
+  item("TV Postpaid", "K-Vision 50.000", "kvision50", postpaid),
+  item("TV Postpaid", "K-Vision 75.000", "kvision75", postpaid),
+  item("TV Postpaid", "K-Vision 100.000", "kvision100", postpaid),
+  item("TV Postpaid", "K-Vision 125.000", "kvision125", postpaid),
+  item("TV Postpaid", "K-Vision 150.000", "kvision150", postpaid),
+  item("TV Postpaid", "K-Vision 200.000", "kvision200", postpaid),
+  item("TV Postpaid", "K-Vision 300.000", "kvision300", postpaid),
+  item("TV Postpaid", "K-Vision 500.000", "kvision500", postpaid),
+  item("TV Postpaid", "Nexmedia", "nexmedia", postpaid),
+  item("TV Postpaid", "TelkomVision", "telkomvision", postpaid, ["transvision"]),
 
   item("Lainnya", "Telkomsel Omni", "telkomselomni", postpaid),
   item("Lainnya", "Indosat Only4u", "indosatonly4u", postpaid),
@@ -163,17 +163,21 @@ export function productsFor(category: string) {
   return BILLER_CATALOG.filter((entry) => entry.category === category && !isHiddenVariant(entry)).map((entry) => entry.label);
 }
 
+function foldProduct(value: string) {
+  return foldLabel(value).replace(/\bpascabayar\b/g, "postpaid");
+}
+
 export function findCatalogItem(category: string, product: string) {
-  const cat = foldLabel(category);
-  const raw = foldLabel(product);
+  const cat = foldProduct(category);
+  const raw = foldLabel(product).replace(/\bpascabayar\b/g, "postpaid");
   const stripped = cat && raw.startsWith(`${cat} `) ? raw.slice(cat.length + 1) : raw;
   const matches = (entry: CatalogItem) => {
-    const label = foldLabel(entry.label);
+    const label = foldProduct(entry.label);
     const sku = entry.sku.toLowerCase();
-    const aliases = (entry.aliases ?? []).map((alias) => foldLabel(alias));
-    const prefixed = foldLabel(`${entry.category} ${entry.label}`);
+    const aliases = (entry.aliases ?? []).map((alias) => foldProduct(alias));
+    const prefixed = foldProduct(`${entry.category} ${entry.label}`);
     return stripped === label || raw === label || stripped === sku || raw === sku || raw === prefixed || aliases.includes(stripped) || aliases.includes(raw);
   };
-  const inCategory = BILLER_CATALOG.filter((entry) => foldLabel(entry.category) === cat);
+  const inCategory = BILLER_CATALOG.filter((entry) => foldProduct(entry.category) === cat);
   return (inCategory.length ? inCategory : BILLER_CATALOG).find(matches) ?? BILLER_CATALOG.find(matches);
 }

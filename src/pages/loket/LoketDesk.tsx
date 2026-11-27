@@ -26,7 +26,7 @@ const PRODUCTS: Record<string, string[]> = {
   "Pajak PBB": ["Pajak Daerah DKI Jakarta", "PBB Depok", "PBB Aceh Utara", "PBB Banyuwangi", "PBB Bandung", "PBB Surabaya"],
   "Internet & TV": ["Indihome", "Firstmedia", "Indovision", "MyRepublic", "CBN", "Transvision", "Biznet Home", "Iconnet"],
   Topup: ["Pulsa HP", "Data/Internet", "E-Money", "E-Wallet"],
-  Telco: ["Tagihan Halo", "XL Pascabayar", "Indosat Pascabayar", "Three Pascabayar", "Smartfren Pascabayar"],
+  Telco: ["Tagihan Halo", "XL Postpaid", "Indosat Postpaid", "Three Postpaid", "Smartfren Postpaid"],
 };
 const BANKS = ["BCA", "Mandiri", "BRI", "BNI", "BSI"];
 
@@ -280,7 +280,7 @@ function isCustomerId(value: string) {
 function canonicalCategory(product?: string): string {
   const raw = (product || "").trim();
   if (!raw) return "CUSTID";
-  const key = raw.toUpperCase().replace(/\s+/g, " ");
+  const key = raw.toUpperCase().replace(/\s+/g, " ").replace(/PASCABAYAR/g, "POSTPAID");
   if ((KOLEKTIF_CATEGORIES as readonly string[]).includes(key)) return key;
   for (const [category, names] of Object.entries(PRODUCTS)) {
     const canon = category.toUpperCase().replace(/\s+/g, " ");
