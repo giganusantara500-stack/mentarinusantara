@@ -7,6 +7,7 @@ import { CapaianChart } from "@/components/dashboard/CapaianChart";
 import { WelcomeGreeting } from "@/components/dashboard/WelcomeGreeting";
 import { buildThreeMonthSheets, isCountedSale } from "@/lib/sheetChart";
 import { formatRupiah } from "@/lib/format";
+import { pendingIsLive } from "@/lib/pendingWindow";
 import { depositRequest } from "@/lib/depositApi";
 import { ticketPhase } from "@/lib/depositStatus";
 import { Button } from "@/components/ui/Button";
@@ -163,7 +164,7 @@ export function OpsDashboardPage() {
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const today = archive.filter((row) => row.status === "success" && new Date(row.created_at) >= todayStart);
   const month = archive.filter((row) => row.status === "success" && new Date(row.created_at) >= monthStart);
-  const outstanding = transactions.filter((row) => row.status === "pending" && (!networkView || networkLoketIds.has(row.user_id))).reduce((sum, row) => sum + Number(row.amount), 0);
+  const outstanding = transactions.filter((row) => row.status === "pending" && pendingIsLive(row.created_at) && (!networkView || networkLoketIds.has(row.user_id))).reduce((sum, row) => sum + Number(row.amount), 0);
   const approved = scopedTickets.filter((ticket) => ticket.status === "approved");
   const cmsToday = approved.filter((ticket) => cmsWhen(ticket) >= todayStart);
   const cmsMonth = approved.filter((ticket) => cmsWhen(ticket) >= monthStart);

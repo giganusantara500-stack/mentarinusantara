@@ -157,6 +157,9 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
   const [busy, setBusy] = useState(false);
   const [decideId, setDecideId] = useState("");
   const decideLock = useRef("");
+  const seenPending = useRef<Set<string> | null>(null);
+  const noteTimer = useRef(0);
+  const [depositNote, setDepositNote] = useState("");
 
   const load = async () => {
     try {
@@ -174,6 +177,27 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
   };
 
   useEffect(() => { load(); }, [tick]);
+  useEffect(() => {
+    const mine = tickets.filter((ticket) => !profile?.id || ticket.loketId === profile.id || role === "superadmin");
+    const pendingIds = mine.filter((ticket) => ticket.status === "pending").map((ticket) => ticket.id);
+    const approved = new Set(mine.filter((ticket) => ticket.status === "approved").map((ticket) => ticket.id));
+    if (seenPending.current === null) {
+      seenPending.current = new Set(pendingIds);
+      return;
+    }
+    let justApproved = false;
+    for (const id of seenPending.current) {
+      if (!approved.has(id)) continue;
+      justApproved = true;
+      seenPending.current.delete(id);
+    }
+    for (const id of pendingIds) seenPending.current.add(id);
+    if (!justApproved) return;
+    setDepositNote("Deposit berhasil. Saldo sudah bertambah.");
+    window.clearTimeout(noteTimer.current);
+    noteTimer.current = window.setTimeout(() => setDepositNote(""), 8000);
+  }, [tickets, profile?.id, role]);
+  useEffect(() => () => window.clearTimeout(noteTimer.current), []);
   useEffect(() => {
     const timer = window.setInterval(load, 8000);
     return () => window.clearInterval(timer);
@@ -278,6 +302,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
         </div>
         <button onClick={onClose} className="rounded-full px-3 py-1 text-xs font-semibold text-slate-500">{page ? "Kembali" : "Tutup"}</button>
       </div>
+      {depositNote && <div className="mx-4 mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 sm:mx-[1.5cm]">{depositNote}</div>}
       <div className="flex gap-1 overflow-x-auto border-b border-slate-100 px-4 py-2 sm:px-[1.5cm]">
         {tabs.map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${tab === key ? "bg-sky-700 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>

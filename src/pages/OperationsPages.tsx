@@ -12,6 +12,7 @@ import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
 import { depositErrorText, depositRequest } from "@/lib/depositApi";
 import { ticketPhase } from "@/lib/depositStatus";
+import { pendingIsLive } from "@/lib/pendingWindow";
 import { ROLE_LABELS } from "@/lib/nav";
 import { CATEGORY_LABELS, type ProductCategory } from "@/lib/types";
 import { networkOwners, profileLabel, profilesWithSelf } from "@/lib/network";
@@ -646,7 +647,7 @@ export function OutstandingPage() {
   const drill = useDrill(profiles);
   const [nodeSearch, setNodeSearch] = useState("");
   const rows = useMemo(() => {
-    const pending = transactions.filter((row) => row.status === "pending" && drill.loketIds.includes(row.user_id));
+    const pending = transactions.filter((row) => row.status === "pending" && pendingIsLive(row.created_at) && drill.loketIds.includes(row.user_id));
     const grouped = new Map<string, { count: number; amount: number }>();
     pending.forEach((row) => {
       const current = grouped.get(row.user_id) ?? { count: 0, amount: 0 };

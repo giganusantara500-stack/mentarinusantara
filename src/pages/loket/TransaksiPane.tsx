@@ -10,6 +10,7 @@ import { BILLER_CATEGORIES, faceValue, findCatalogItem, productsFor } from "@/li
 import { applyGroupAdmin, expandBillRows } from "@/lib/billQueue";
 import { loadPrinterSettings, printReceipts, type ReceiptBill } from "@/lib/printer";
 import { apiUrl } from "@/lib/apiBase";
+import { PENDING_HOLD_MS, pendingIsLive } from "@/lib/pendingWindow";
 
 const CATEGORIES = BILLER_CATEGORIES;
 const ADMIN_FEES = [4800, 4900, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 10000, 11000, 12000, 13000, 14000, 15000];
@@ -354,6 +355,7 @@ export function LoketTransaksiPage() {
   const draftRef = useRef(0);
   const inquiring = useRef(false);
   const paying = useRef(false);
+  const salesRef = useRef<Sale[]>([]);
   const loketName = profile?.full_name || profile?.username || "Loket";
   const productLabel = category === "PDAM" || category === "Pajak PBB" ? "Wilayah" : "Produk";
   const idLabel = category === "BPJS" ? "Nomor VA" : category === "Pulsa" || category === "Paket Data" || category === "SMS & Telpon" || category === "Masa Aktif" || category === "by.U" ? "Nomor HP" : category === "Games" ? "User ID" : category === "E-Money" ? "Nomor Akun" : "Customer ID";
@@ -409,8 +411,12 @@ export function LoketTransaksiPage() {
       if (!active) return;
       const loaded = [...(body.simulations ?? []), ...(body.sales ?? [])] as Sale[];
       setSales(loaded);
-      const open = loaded.find((sale) => sale.status === "pending" && sale.clientRef);
-      if (open?.clientRef) setPendingRef(open.clientRef);
+      setPendingRef((current) => {
+        const match = loaded.find((sale) => sale.clientRef === current);
+        if (match) return match.status === "pending" && pendingIsLive(match.createdAt) ? current : "";
+        const open = loaded.find((sale) => sale.status === "pending" && sale.clientRef && pendingIsLive(sale.createdAt));
+        return open?.clientRef || current;
+      });
     })();
     return () => { active = false; };
   }, [tick]);
@@ -655,6 +661,51 @@ export function LoketTransaksiPage() {
     if (settled) setPendingRef("");
     requestRefresh();
   };
+
+  salesRef.current = sales;
+
+  useEffect(() => {
+    if (!pendingRef) return;
+    let stopped = false;
+    const known = salesRef.current.find((sale) => sale.clientRef === pendingRef);
+    const age = known ? Date.now() - new Date(known.createdAt).getTime() : 0;
+    const remain = Math.max(1000, PENDING_HOLD_MS - (Number.isFinite(age) && age > 0 ? age : 0));
+    const release = () => {
+      if (stopped) return;
+      stopped = true;
+      setPendingRef((current) => current === pendingRef ? "" : current);
+      setMessage("Pembayaran belum selesai dalam 1 menit. Saldo tidak dipotong dan tidak lagi dihitung di OS. Hasil provider yang datang kemudian tetap memperbarui status dan saldo.");
+      requestRefresh();
+    };
+    const probe = async () => {
+      if (stopped || paying.current) return;
+      try {
+        const response = await fetch(apiUrl("/api/biller/status"), {
+          method: "POST",
+          headers: await authHeader(),
+          body: JSON.stringify({ clientRef: pendingRef }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (stopped || !response.ok) return;
+        const statusText = String(body.statusText || "pending");
+        if (statusText !== "success" && statusText !== "failed" && statusText !== "refunded") return;
+        stopped = true;
+        setPendingRef("");
+        setError("");
+        setMessage(`Status pembayaran: ${paymentLabel(statusText)}. ${body.message || ""} Saldo ${formatRupiah(Number(body.balance) || 0)}.`);
+        requestRefresh();
+      } catch {
+        /* cek berikutnya tetap berjalan sampai batas 1 menit */
+      }
+    };
+    const pulse = window.setInterval(() => { void probe(); }, 15000);
+    const end = window.setTimeout(release, remain);
+    return () => {
+      stopped = true;
+      window.clearInterval(pulse);
+      window.clearTimeout(end);
+    };
+  }, [pendingRef]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-1 overflow-hidden pb-6">

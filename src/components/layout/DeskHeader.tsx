@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { apiUrl } from "@/lib/apiBase";
+import { pendingIsLive } from "@/lib/pendingWindow";
 
 export function useDeskStats(tick: number) {
   const { profile } = useAuth();
@@ -15,7 +16,6 @@ export function useDeskStats(tick: number) {
   const [outstanding, setOutstanding] = useState(0);
   const [loketCode, setLoketCode] = useState("");
   const [runText, setRunText] = useState("");
-  const [ticketHint, setTicketHint] = useState("");
 
   useEffect(() => {
     if (!profile) return;
@@ -34,19 +34,13 @@ export function useDeskStats(tick: number) {
       const today = new Date().toDateString();
       const settled = (sale: { status: string }) => sale.status === "success" || sale.status === "simulated";
       const todaySales = sales.filter((sale) => settled(sale) && new Date(sale.createdAt).toDateString() === today);
-      const pending = sales.filter((sale) => sale.status === "pending").reduce((sum, sale) => sum + Number(sale.amount), 0);
+      const pending = sales.filter((sale) => sale.status === "pending" && pendingIsLive(sale.createdAt)).reduce((sum, sale) => sum + Number(sale.amount), 0);
       if (!active) return;
       setBalance(Number(wallet?.balance ?? salesBody.balance ?? 0));
       setTodayCount(todaySales.length);
       setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0));
       setOutstanding(pending);
       setLoketCode(String(wallet?.loketCode || salesBody.loketCode || profile.loket_code || ""));
-      if (profile.role === "loket") {
-        const depositRes = await fetch("/api/deposits", { headers });
-        const depositBody = depositRes.ok ? await depositRes.json() : null;
-        const ticket = (depositBody?.tickets ?? [])[0] as { status?: string; uniqueCode?: string } | undefined;
-        setTicketHint(ticket?.status === "pending" ? `Menunggu Transfer · kode ${ticket.uniqueCode || ""}` : ticket?.status === "approved" ? "Deposit Berhasil" : "");
-      }
       const runBody = runRes.ok ? await runRes.json() : null;
       setRunText(String(runBody?.text ?? ""));
     })();
@@ -73,12 +67,6 @@ export function useDeskStats(tick: number) {
           const runBody = await runRes.json();
           setRunText(String(runBody?.text ?? ""));
         }
-        if (profile.role === "loket") {
-          const depositRes = await fetch("/api/deposits", { headers });
-          const depositBody = depositRes.ok ? await depositRes.json() : null;
-          const ticket = (depositBody?.tickets ?? [])[0] as { status?: string; uniqueCode?: string } | undefined;
-          setTicketHint(ticket?.status === "pending" ? `Menunggu Transfer · kode ${ticket.uniqueCode || ""}` : ticket?.status === "approved" ? "Deposit Berhasil" : "");
-        }
         if (salesRes.ok) {
           const body = await salesRes.json();
           const sales = (body.sales ?? []) as { amount: number; createdAt: string; status?: string }[];
@@ -87,14 +75,14 @@ export function useDeskStats(tick: number) {
           const todaySales = sales.filter((sale) => settled(sale) && new Date(sale.createdAt).toDateString() === today);
           setTodayCount(todaySales.length);
           setTodayAmount(todaySales.reduce((sum, sale) => sum + Number(sale.amount), 0));
-          setOutstanding(sales.filter((sale) => sale.status === "pending").reduce((sum, sale) => sum + Number(sale.amount), 0));
+          setOutstanding(sales.filter((sale) => sale.status === "pending" && pendingIsLive(sale.createdAt)).reduce((sum, sale) => sum + Number(sale.amount), 0));
         }
       })();
     }, 5000);
     return () => window.clearInterval(timer);
   }, [profile]);
 
-  return { balance, todayCount, todayAmount, outstanding, loketCode, runText, ticketHint };
+  return { balance, todayCount, todayAmount, outstanding, loketCode, runText };
 }
 
 interface HeaderProps {
@@ -148,7 +136,7 @@ export function DeskHeader({ brand, stats, onDeposit, onRefresh, onLogout, showS
       </div>
       {showStats && (
         <div className="flex w-full items-stretch justify-start gap-2 overflow-x-auto border-b border-slate-200 bg-white px-3 py-2 text-slate-900">
-          <Stat icon={Wallet} tone="bg-cyan-400 text-sky-950" label="Saldo" value={formatRupiah(stats.balance)} hint={stats.ticketHint || undefined} className="w-[220px]" />
+          <Stat icon={Wallet} tone="bg-cyan-400 text-sky-950" label="Saldo" value={formatRupiah(stats.balance)} className="w-[220px]" />
           <Stat icon={BadgeAlert} tone="bg-yellow-300 text-amber-950" label="OS" value={formatRupiah(stats.outstanding)} className="w-[190px]" />
           <Stat icon={Receipt} tone="bg-lime-400 text-green-950" label="Trx Hari Ini" value={`${stats.todayCount} · ${formatRupiah(stats.todayAmount)}`} className="w-[190px]" />
           <Stat icon={Store} tone="bg-sky-950 text-white" label="Loket" value={identity} hint={profile.username || deskName} wrap className="min-w-[300px] max-w-[380px]" />
