@@ -185,8 +185,35 @@ export function decideTicket(env: LedgerEnv, actorId: string, ticketId: string, 
   return ledgerApi(env, "decide_ticket", actorId, { id: ticketId, action });
 }
 
-export function distributeBalance(env: LedgerEnv, actorId: string, toId: string, amount: number, toName: string) {
-  return ledgerApi(env, "distribute", actorId, { loketId: toId, amount, loketName: toName });
+export function distributeBalance(env: LedgerEnv, actorId: string, toId: string, amount: number, toName: string, clientRef = "") {
+  return ledgerApi(env, "distribute", actorId, { loketId: toId, amount, loketName: toName, clientRef });
+}
+
+export async function syncProviderDeposit(env: LedgerEnv, actorId: string, deposit: number) {
+  if (!env.supabaseUrl || !env.serviceRoleKey) {
+    return { error: "Konfigurasi database belum lengkap.", status: 500 };
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${env.supabaseUrl}/rest/v1/rpc/ledger_sync_provider`, {
+      method: "POST",
+      headers: {
+        apikey: env.serviceRoleKey,
+        Authorization: `Bearer ${env.serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_actor: actorId, p_deposit: Math.round(deposit) }),
+    });
+  } catch {
+    return { error: "Database saldo tidak dapat dihubungi.", status: 500 };
+  }
+  const body = await response.json().catch(() => null) as ({ error?: string; status?: number; balance?: number; providerBalance?: number; credited?: number; consumed?: number; message?: string } | null);
+  if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)) {
+    const missing = String(body && "message" in body ? body.message : "").includes("ledger_sync_provider");
+    return { error: missing ? "Fungsi tarik saldo DigiFlazz belum terpasang. Jalankan migrasi terbaru, lalu muat ulang." : "Database saldo menolak penarikan DigiFlazz.", status: response.status || 500 };
+  }
+  if (body.error && !body.status) return { error: body.message || body.error, status: 500 };
+  return body;
 }
 
 export function creditWallet(env: LedgerEnv, actorId: string, userId: string, amount: number) {
@@ -204,6 +231,7 @@ export function recordLoketSale(env: LedgerEnv, actorId: string, sale: {
   adminFee?: number;
   collfee?: number;
   period?: string;
+  providerCost?: number;
   parentId?: string;
   loketName?: string;
   loketCode?: string;

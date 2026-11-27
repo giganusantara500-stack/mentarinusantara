@@ -158,12 +158,19 @@ export function LoketTransaksiPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [checking, setChecking] = useState(false);
   const [pendingRef, setPendingRef] = useState("");
   const draftRef = useRef(0);
+  const inquiring = useRef(false);
+  const paying = useRef(false);
   const loketName = profile?.full_name || profile?.username || "Loket";
   const productLabel = category === "PDAM" || category === "Pajak PBB" ? "Wilayah" : "Produk";
   const idLabel = category === "BPJS" ? "Nomor VA" : category === "Pulsa" || category === "Paket Data" || category === "SMS & Telpon" || category === "Masa Aktif" || category === "by.U" ? "Nomor HP" : category === "Games" ? "User ID" : category === "E-Money" ? "Nomor Akun" : "Customer ID";
   const choices = productsFor(category);
+  const choiceKey = choices.join("|");
+  useEffect(() => {
+    if (choices.length > 0 && !choices.includes(product)) setProduct(choices[0]);
+  }, [choiceKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const appliedAdmin = category === "PLN" ? adminFee : (BILLER_ADMIN[category] ?? 0);
   const showAdmin = category === "PLN";
   const columns = showAdmin
@@ -235,39 +242,90 @@ export function LoketTransaksiPage() {
   };
 
   const lookup = async () => {
+    if (inquiring.current || paying.current) return;
     const generation = draftRef.current;
     const activeCategory = category;
     const activeProduct = product;
+    const customer = number.trim();
+    if (customer.length < 4) {
+      setMessage("");
+      setError("Nomor pelanggan terlalu pendek.");
+      return;
+    }
+    if (cart.some((row) => row.category === activeCategory && row.customerId === customer)) {
+      setMessage("");
+      setError(`ID ${customer} sudah ada di antrean ${activeCategory}. Tidak ditambahkan lagi.`);
+      return;
+    }
+    inquiring.current = true;
+    setChecking(true);
+    setError("");
+    setMessage("Mengecek tagihan...");
     let response: Response;
     try {
       response = await fetch(apiUrl("/api/biller/inquiry"), {
       method: "POST",
       headers: await authHeader(),
-      body: JSON.stringify({ mode: "digiflazz", category, product, customerNumber: number, adminFee: appliedAdmin, months, taxYear }),
+      body: JSON.stringify({ mode: "digiflazz", category: activeCategory, product: activeProduct, customerNumber: customer, adminFee: appliedAdmin, months, taxYear }),
     });
     } catch {
-      if (draftRef.current !== generation) return;
-      setError("Backend VPS tidak dapat dihubungi.");
+      if (draftRef.current === generation) setError("Backend VPS tidak dapat dihubungi.");
+      if (draftRef.current === generation) setMessage("");
+      inquiring.current = false;
+      setChecking(false);
       return;
     }
-    if (draftRef.current !== generation) return;
+    if (draftRef.current !== generation) {
+      inquiring.current = false;
+      setChecking(false);
+      return;
+    }
     const body = await response.json().catch(() => ({}));
     const bill = body.bill as { customerName?: string; period?: string; amount?: number; denda?: number; adminFee?: number; collfee?: number; total?: number } | undefined;
-    if (body.statusText === "paid") { setError(body.message || "Tagihan sudah lunas."); return; }
-    if (!response.ok || !bill) { setError(body.error || "Tagihan tidak ditemukan."); return; }
+    if (body.statusText === "paid") {
+      setMessage("");
+      setError(body.message || "Tagihan sudah lunas.");
+      inquiring.current = false;
+      setChecking(false);
+      return;
+    }
+    if (!response.ok || !bill) {
+      setMessage("");
+      setError(body.error || body.message || "Tagihan tidak ditemukan.");
+      inquiring.current = false;
+      setChecking(false);
+      return;
+    }
     const found = { name: shownName(bill.customerName), period: bill.period || "", amount: Number(bill.amount) || 0, denda: Number(bill.denda) || 0, admin: Number(bill.adminFee) || 0, collfee: Number(bill.collfee) || 0, total: Number(bill.total) || 0 };
-    if (draftRef.current !== generation) return;
     const refId = typeof body.providerRef === "string" && body.providerRef ? body.providerRef : crypto.randomUUID();
     const sku = typeof body.buyerSkuCode === "string" ? body.buyerSkuCode : "";
-    setCart((rows) => [...rows, { ...found, key: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: number.trim() }]);
-    setError("");
-    setMessage("");
-    setNumber("");
+    let added = false;
+    setCart((rows) => {
+      if (rows.some((row) => row.category === activeCategory && row.customerId === customer)) return rows;
+      added = true;
+      return [...rows, { ...found, key: refId, providerRef: refId, sku, category: activeCategory, product: activeProduct, customerId: customer }];
+    });
+    if (draftRef.current !== generation) {
+      inquiring.current = false;
+      setChecking(false);
+      return;
+    }
+    if (!added) {
+      setMessage("");
+      setError(`ID ${customer} sudah ada di antrean ${activeCategory}. Tidak ditambahkan lagi.`);
+    } else {
+      setError("");
+      setMessage(`${activeCategory} ${activeProduct}: ${found.name} · ${found.period || "periode belum tersedia"} · tagihan ${formatRupiah(found.amount)} · denda ${formatRupiah(found.denda)} · admin ${formatRupiah(found.admin)} · total ${formatRupiah(found.total)}.`);
+      setNumber("");
+    }
+    inquiring.current = false;
+    setChecking(false);
   };
 
   const pay = async () => {
     const generation = draftRef.current;
-    if (rows.length === 0 || busy) return;
+    if (rows.length === 0 || busy || paying.current || inquiring.current) return;
+    paying.current = true;
     setBusy(true);
     setError("");
     let balance = 0;
@@ -297,15 +355,20 @@ export function LoketTransaksiPage() {
         }),
       });
       } catch {
+        paying.current = false;
         if (draftRef.current !== generation) return;
         setBusy(false);
         setError("Backend VPS tidak dapat dihubungi. Ulangi cek status sebelum membayar lagi.");
         requestRefresh();
         return;
       }
-      if (draftRef.current !== generation) return;
-      const body = await response.json();
+      if (draftRef.current !== generation) {
+        paying.current = false;
+        return;
+      }
+      const body = await response.json().catch(() => ({}));
       if (!response.ok) {
+        paying.current = false;
         setBusy(false);
         setError(body.error || "Pembayaran berhenti karena saldo atau data tidak cukup.");
         requestRefresh();
@@ -315,6 +378,7 @@ export function LoketTransaksiPage() {
       lastStatus = String(body.statusText || "");
       if (lastStatus === "pending") setPendingRef(row.providerRef || row.key);
     }
+    paying.current = false;
     if (draftRef.current !== generation) return;
     setBusy(false);
     setCart([]);
@@ -402,9 +466,9 @@ export function LoketTransaksiPage() {
               </Field>
             ) : <div />}
             <Field label={idLabel}>
-              <Input value={number} onChange={(event) => setNumber(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); lookup(); } }} placeholder={idLabel} />
+              <Input value={number} disabled={checking} onChange={(event) => setNumber(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void lookup(); } }} placeholder={idLabel} />
             </Field>
-            <button type="button" onClick={lookup} className="h-9 rounded-md bg-amber-500 px-3 text-sm font-black text-slate-950">Inquiry</button>
+            <button type="button" onClick={() => void lookup()} disabled={checking} className="h-9 rounded-md bg-amber-500 px-3 text-sm font-black text-slate-950 disabled:opacity-50">{checking ? "Mengecek..." : "Inquiry"}</button>
           </div>
         ) : (
           <div className="grid h-[78px] shrink-0 grid-cols-4 items-end gap-2 overflow-hidden px-2 py-1.5">
@@ -479,7 +543,7 @@ export function LoketTransaksiPage() {
               <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-3 font-black" disabled={rows.length === 0} onClick={() => printReceipts(loadPrinterSettings(loketCode), rows.map((row): ReceiptBill => ({ id: row.customerId, name: row.name, product: `${row.category} ${row.product}`, period: row.period, tagihan: row.amount + row.denda, admin: row.admin, total: row.total })), `${loketCode} - ${loketName}`)}>Cetak Info Tagihan</Button>
               <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-4 font-black" onClick={() => { setCart([]); setNumber(""); setError(""); setMessage(""); }}>Hapus</Button>
               {pendingRef && <button type="button" onClick={checkStatus} disabled={busy} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/40 px-3 text-sm font-black text-white">Cek status</button>}
-              <button onClick={pay} disabled={busy || rows.length === 0} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-50">
+              <button onClick={() => void pay()} disabled={busy || checking || rows.length === 0} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-50">
                 {busy ? "Memproses..." : `BAYAR ${formatRupiah(total)}`}
               </button>
             </div>

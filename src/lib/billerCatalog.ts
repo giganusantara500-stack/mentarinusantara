@@ -155,8 +155,12 @@ export function foldLabel(value: string) {
     .replace(/(\d)\s+(?=\d)/g, "$1");
 }
 
+export function isHiddenVariant(entry: CatalogItem) {
+  return /\sB$/i.test(entry.label.trim()) || /^pln\d+b$/i.test(entry.sku);
+}
+
 export function productsFor(category: string) {
-  return BILLER_CATALOG.filter((entry) => entry.category === category).map((entry) => entry.label);
+  return BILLER_CATALOG.filter((entry) => entry.category === category && !isHiddenVariant(entry)).map((entry) => entry.label);
 }
 
 export function findCatalogItem(category: string, product: string) {

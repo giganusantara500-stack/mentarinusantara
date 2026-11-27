@@ -16,6 +16,7 @@ export interface DigiQuote {
   denda: number;
   adminFee: number;
   total: number;
+  providerCost: number;
   sn: string;
 }
 
@@ -74,6 +75,20 @@ function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function scalar(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return String(Math.trunc(value));
+  return text(value);
+}
+
+const MONTHS = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+
+function monthLabel(raw: string) {
+  const digits = raw.replace(/\D/g, "");
+  const match = digits.match(/^(20\d{2})(0[1-9]|1[0-2])$/);
+  if (!match) return raw.trim();
+  return `${MONTHS[Number(match[2]) - 1]} ${match[1]}`;
+}
+
 function payloadOf(body: unknown) {
   if (!body || typeof body !== "object") return {} as Record<string, unknown>;
   const record = body as Record<string, unknown>;
@@ -116,29 +131,50 @@ function customerNameFrom(data: Record<string, unknown>) {
     || "";
 }
 
+function billDetail(data: Record<string, unknown>) {
+  const desc = data.desc && typeof data.desc === "object" && !Array.isArray(data.desc) ? data.desc as Record<string, unknown> : {};
+  const nested = Array.isArray(desc.detail) ? desc.detail : Array.isArray(data.detail) ? data.detail : [];
+  const rows = nested.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row));
+  return { desc, rows };
+}
+
 function quoteFrom(data: Record<string, unknown>, fallback: { refId: string; sku: string; customerNumber: string }): DigiQuote {
-  const details = data.desc && typeof data.desc === "object" ? (data.desc as Record<string, unknown>).detail : undefined;
-  const rows = Array.isArray(details) ? details : [];
-  const denda = rows.reduce((sum, row) => sum + money((row as Record<string, unknown>)?.denda), 0);
-  const tagihan = rows.reduce((sum, row) => sum + money((row as Record<string, unknown>)?.nilai_tagihan), 0);
-  const adminFee = money(data.admin);
+  const { desc, rows } = billDetail(data);
+  const denda = rows.reduce((sum, row) => sum + money(row.denda), 0);
+  const tagihan = rows.reduce((sum, row) => sum + money(row.nilai_tagihan ?? row.tagihan ?? row.amount), 0);
+  const adminFee = money(data.admin) || rows.reduce((sum, row) => sum + money(row.admin), 0);
   const price = money(data.price);
   const selling = money(data.selling_price);
-  const amount = tagihan || Math.max(0, price - adminFee - denda) || price;
-  const total = selling || price || amount + denda + adminFee;
+  const amount = tagihan || Math.max(0, (selling || price) - adminFee - denda) || price;
+  const parts = amount + denda + adminFee;
+  const total = parts > 0 ? parts : (selling || price || amount);
+  const providerCost = price > 0 ? price : Math.max(0, amount + denda);
+  const periods = rows.map((row) => monthLabel(scalar(row.periode) || scalar(row.period))).filter(Boolean);
+  const topPeriod = monthLabel(scalar(data.period) || scalar(data.periode));
+  const tarif = text(desc.tarif) || text(data.tarif);
+  const daya = scalar(desc.daya) || scalar(data.daya);
+  const meter = [tarif, daya ? `${daya.replace(/\D/g, "") || daya} VA` : ""].filter(Boolean).join(" / ");
+  const lembar = money(desc.lembar_tagihan) || periods.length;
+  const periodCore = periods.length > 0 ? [...new Set(periods)].join(", ") : topPeriod;
+  const period = [meter, lembar > 1 ? `${lembar} lembar` : "", periodCore].filter(Boolean).join(" · ");
   const message = text(data.message);
+  let outcome = mapDigiOutcome(text(data.status), scalar(data.rc), message);
+  if (outcome === "failed" && total >= 1000 && !/gagal|tidak ditemukan|tidak ada tagihan|invalid|salah|cutoff|gangguan/.test(message.toLowerCase())) {
+    outcome = "success";
+  }
   return {
-    outcome: mapDigiOutcome(text(data.status), text(data.rc), message),
-    message: message || "DigiFlazz tidak mengirim keterangan.",
+    outcome,
+    message: message || (outcome === "success" ? "Tagihan ditemukan." : "DigiFlazz tidak mengirim keterangan."),
     refId: text(data.ref_id) || fallback.refId,
     sku: text(data.buyer_sku_code) || fallback.sku,
     customerName: customerNameFrom(data),
     customerNumber: text(data.customer_no) || fallback.customerNumber,
-    period: text(data.period) || text(data.desc && typeof data.desc === "object" ? (data.desc as Record<string, unknown>).lembar_tagihan : ""),
+    period,
     amount,
     denda,
     adminFee,
     total: total || amount,
+    providerCost,
     sn: text(data.sn),
   };
 }
@@ -153,6 +189,39 @@ async function postDigi(path: string, body: Record<string, unknown>) {
   });
   const json = await response.json().catch(() => null);
   return payloadOf(json);
+}
+
+const depositCache: { at: number; balance: number | null; error: string } = { at: 0, balance: null, error: "" };
+
+export async function digiflazzDeposit(fresh = false) {
+  if (!digiflazzReady()) return { balance: null as number | null, error: "Username atau API key DigiFlazz belum diisi." };
+  if (!fresh && depositCache.at > 0 && Date.now() - depositCache.at < 60_000) {
+    return { balance: depositCache.balance, error: depositCache.error };
+  }
+  try {
+    const config = digiflazzConfig();
+    const data = await postDigi("/cek-saldo", {
+      cmd: "deposit",
+      username: config.username,
+      sign: digiflazzSign(config.username, config.apiKey, "depo"),
+    });
+    const reported = data.deposit !== undefined && data.deposit !== null && String(data.deposit).trim() !== "";
+    const balance = money(data.deposit);
+    const message = text(data.message);
+    const rc = scalar(data.rc);
+    if (!reported || (rc && rc !== "00" && rc !== "0") || (balance <= 0 && /gagal|invalid|salah|tidak/.test(message.toLowerCase()))) {
+      depositCache.at = Date.now();
+      depositCache.balance = null;
+      depositCache.error = message || "Saldo DigiFlazz tidak terbaca.";
+      return { balance: null, error: depositCache.error };
+    }
+    depositCache.at = Date.now();
+    depositCache.balance = balance;
+    depositCache.error = "";
+    return { balance, error: "" };
+  } catch {
+    return { balance: depositCache.balance, error: "Saldo DigiFlazz tidak dapat dihubungi." };
+  }
 }
 
 function signedTransaction(refId: string, sku: string, customerNumber: string, commands?: string) {
@@ -231,12 +300,33 @@ function mentionsAmount(row: Record<string, unknown>, amount: number) {
   return price > 0 && Math.abs(price - amount) <= Math.max(2500, Math.round(amount * 0.08));
 }
 
+function postpaidPlnRequest(sku: string, category: string, product: string) {
+  const blob = foldLabel(`${category} ${product} ${sku}`);
+  if (blob.includes("token") || /^pln\d/.test(sku.trim().toLowerCase())) return false;
+  if (!blob.includes("pln") && !sku.trim().toLowerCase().startsWith("pln")) return false;
+  return blob.includes("pasca") || blob.includes("postpaid") || blob.includes("nontaglis") || sku.trim().toLowerCase() === "pln";
+}
+
+function postpaidPlnRow(row: Record<string, unknown>, nontaglis: boolean) {
+  const code = rowSku(row).toLowerCase();
+  const blob = foldLabel(`${text(row.brand)} ${text(row.category)} ${text(row.product_name)} ${code}`);
+  if (/token|prepaid/.test(blob) || /^pln\d/.test(code) || code.endsWith("b")) return false;
+  if (!blob.includes("pln") && code !== "pln") return false;
+  if (nontaglis) return blob.includes("nontaglis") || code.includes("nontaglis");
+  return blob.includes("pasca") || blob.includes("postpaid") || blob.includes("tagihan") || code === "pln";
+}
+
 export function selectPriceRow(rows: Record<string, unknown>[], sku: string, category: string, product: string) {
   const wanted = sku.trim().toLowerCase();
   const active = rows.filter(rowActive);
   const pool = active.length > 0 ? active : [];
   const exact = pool.find((row) => rowSku(row).toLowerCase() === wanted);
-  if (exact) return exact;
+  if (exact && !(postpaidPlnRequest(wanted, category, product) && /^pln\d/.test(rowSku(exact).toLowerCase()))) return exact;
+  if (postpaidPlnRequest(wanted, category, product)) {
+    const nontaglis = foldLabel(`${category} ${product} ${wanted}`).includes("nontaglis");
+    const pasca = pool.find((row) => postpaidPlnRow(row, nontaglis));
+    if (pasca) return pasca;
+  }
   const amount = plnAmount(wanted);
   if (amount > 0) {
     const variantB = wanted.endsWith("b");
@@ -248,10 +338,13 @@ export function selectPriceRow(rows: Record<string, unknown>[], sku: string, cat
       return brand.includes("pln") && mentionsAmount(row, amount);
     });
     const sameVariant = candidates.find((row) => rowSku(row).toLowerCase().endsWith("b") === variantB);
-    return sameVariant ?? candidates[0] ?? null;
+    if (sameVariant) return sameVariant;
+    if (!variantB) return candidates.find((row) => !rowSku(row).toLowerCase().endsWith("b")) ?? null;
+    return candidates[0] ?? null;
   }
   let best: { row: Record<string, unknown>; score: number } | null = null;
   for (const row of pool) {
+    if (!wanted.endsWith("b") && rowSku(row).toLowerCase().endsWith("b")) continue;
     const score = priceScore(row, product || sku, category);
     if (score >= 60 && (!best || score > best.score)) best = { row, score };
   }
@@ -337,7 +430,7 @@ export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; cus
       const message = listed.rows.length === 0
         ? (listed.message || "Daftar harga DigiFlazz tidak dapat dibaca. Coba lagi beberapa saat.")
         : `Produk ${input.sku || input.product || "ini"} belum aktif di daftar harga DigiFlazz.`;
-      return { outcome: "failed", message, refId: input.refId, sku: input.sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, sn: "" };
+      return { outcome: "failed", message, refId: input.refId, sku: input.sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, providerCost: 0, sn: "" };
     }
     const sku = rowSku(match) || input.sku;
     const price = money(match.price);
@@ -349,7 +442,7 @@ export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; cus
         customerName = subscriber.name;
         period = subscriber.period;
         if (!customerName && subscriber.rc !== "86" && subscriber.outcome !== "success" && subscriber.outcome !== "pending") {
-          return { outcome: subscriber.outcome === "not_found" ? "not_found" : "failed", message: subscriber.message || "Nomor meter PLN tidak ditemukan.", refId: input.refId, sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, sn: "" };
+          return { outcome: subscriber.outcome === "not_found" ? "not_found" : "failed", message: subscriber.message || "Nomor meter PLN tidak ditemukan.", refId: input.refId, sku, customerName: "", customerNumber: input.customerNumber, period: "", amount: 0, denda: 0, adminFee: 0, total: 0, providerCost: 0, sn: "" };
         }
       } catch {
         customerName = "";
@@ -367,6 +460,7 @@ export async function inquireDigiflazz(input: { kind: DigiKind; sku: string; cus
       denda: 0,
       adminFee: 0,
       total: price,
+      providerCost: price,
       sn: "",
     };
   }

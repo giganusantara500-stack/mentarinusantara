@@ -180,7 +180,7 @@ function ProtectedApp() {
       case "/transfer": return <DashboardPage onNavigate={navigate} />;
       case "/setoran":
       case "/deposit-approval":
-        return <ManageSetoranPage />;
+        return isSuperAdmin ? <ManageSetoranPage /> : <OpsDashboardPage />;
       case "/saldo": return <BalanceMonitorPage />;
       case "/pembagian":
         return isSuperAdmin ? <BalanceAllocationPage /> : <BalanceMonitorPage />;

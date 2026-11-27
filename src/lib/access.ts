@@ -24,13 +24,13 @@ const LOKET = new Set([
 
 const SUBMITRA = new Set([
   "/dashboard", "/mutasi", "/transaksi", "/riwayat", "/rekap", "/qris", "/deposit",
-  "/setoran", "/deposit-approval", "/saldo", "/outstanding", "/loket", "/kolektif-admin",
+  "/saldo", "/outstanding", "/loket", "/kolektif-admin",
   "/blokir", "/pengaturan", "/pengumuman", "/laporan", "/keamanan",
 ]);
 
 const MITRA = new Set([...SUBMITRA, "/submitra", "/runtext"]);
 
-const SUPER = new Set([...MITRA, "/mitra", "/harga", "/pembagian", "/produk", "/beli", "/setup-superadmin"]);
+const SUPER = new Set([...MITRA, "/mitra", "/harga", "/pembagian", "/produk", "/beli", "/setup-superadmin", "/setoran", "/deposit-approval"]);
 
 export function routeBase(path: string) {
   const base = (path.split("?")[0] || "/").replace(/\/+$/, "") || "/";

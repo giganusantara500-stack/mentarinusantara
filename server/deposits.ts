@@ -1,7 +1,8 @@
 import { DEPOSIT_ACCOUNTS } from "../src/lib/banks";
 import { networkLoketIds, touchActivity } from "./accountAdmin";
 import { requestedMode, runBillerPayment } from "./biller";
-import { cancelOwnTicket, claimTicket, createTicket, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, PUSAT_ACCOUNT, walletBalance, type DepositTicket } from "./ledger";
+import { digiflazzDeposit } from "./digiflazz";
+import { cancelOwnTicket, claimTicket, createTicket, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, PUSAT_ACCOUNT, syncProviderDeposit, walletBalance, type DepositTicket } from "./ledger";
 import { ensureLoketCode, listAuthUsers, loketCodeFor, makeTransferCode } from "./loketCode";
 
 interface Env {
@@ -142,7 +143,26 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
     const own = await walletBalance(env, caller.id);
     const mainBalance = caller.role === "super_admin" ? await walletBalance(env, caller.id, PUSAT_ACCOUNT) : own;
-    return { status: 200, body: { balance: caller.role === "super_admin" ? mainBalance : own, mainBalance, loketCode } };
+    const provider = caller.role === "super_admin" ? await digiflazzDeposit().catch(() => ({ balance: null as number | null, error: "Saldo DigiFlazz tidak dapat dihubungi." })) : { balance: null as number | null, error: "" };
+    const feeBalance = caller.role === "super_admin" ? await walletBalance(env, caller.id, "__fee__") : 0;
+    return { status: 200, body: { balance: caller.role === "super_admin" ? mainBalance : own, mainBalance, loketCode, providerBalance: provider.balance, providerError: provider.error, feeBalance } };
+  }
+
+  if (pathname === "/api/wallet/sync" && method === "POST") {
+    if (caller.role !== "super_admin") return { status: 403, body: { error: "Hanya Super Admin yang dapat menarik saldo DigiFlazz." } };
+    const provider = await digiflazzDeposit(true).catch(() => ({ balance: null as number | null, error: "Saldo DigiFlazz tidak dapat dihubungi." }));
+    if (provider.balance == null) return { status: 502, body: { error: provider.error || "Saldo DigiFlazz tidak terbaca." } };
+    const synced = await syncProviderDeposit(env, caller.id, provider.balance);
+    if (synced.error || synced.balance === undefined) return { status: synced.status || 500, body: { error: synced.error || "Saldo Utama gagal diselaraskan." } };
+    const credited = Number(synced.credited) || 0;
+    const consumed = Number(synced.consumed) || 0;
+    const rupiah = (value: number) => `Rp${Math.round(value).toLocaleString("id-ID")}`;
+    const note = credited > 0
+      ? `Setoran DigiFlazz ${rupiah(credited)} masuk ke Saldo Utama.`
+      : consumed > 0
+        ? "Saldo DigiFlazz turun karena pemakaian transaksi. Saldo Utama tidak dipotong lagi."
+        : "Saldo Utama sudah mengikuti setoran DigiFlazz yang baru.";
+    return { status: 200, body: { balance: synced.balance, providerBalance: provider.balance, credited, consumed, message: note } };
   }
 
   if (pathname === "/api/deposits" && method === "POST") {
@@ -206,22 +226,20 @@ export async function handleDepositRequest(method: string, pathname: string, bod
   }
 
   if (pathname === "/api/distribute" && method === "POST") {
-    if (caller.role !== "super_admin") return { status: 403, body: { error: "Hanya Super Admin yang dapat mendistribusikan saldo ke Mitra, Sub Mitra, dan Loket." } };
+    if (caller.role !== "super_admin") return { status: 403, body: { error: "Hanya Super Admin yang dapat mendistribusikan saldo ke Loket." } };
     const loketId = clean(body.loketId);
-    const amount = Number(body.amount);
+    const amount = Math.round(Number(body.amount));
+    if (!loketId || !Number.isFinite(amount) || amount < 1000) return { status: 400, body: { error: "Pilih loket dan nominal minimal Rp1.000." } };
     const scope = await networkLoketIds(authorization, env);
-    if (!loketId || !scope?.includes(loketId)) return { status: 403, body: { error: "Loket ini tidak berada di jaringan Anda." } };
+    if (scope && !scope.includes(loketId)) return { status: 403, body: { error: "Loket ini tidak berada di jaringan Anda." } };
     const target = await profileRow(env, loketId);
-    if (canonRole(target?.role) !== "loket") return { status: 403, body: { error: "Saldo hanya dapat dikirim ke loket di jaringan Anda." } };
-    const owns = target?.created_by === caller.id || target?.parent_id === caller.id || target?.mitra_id === caller.id;
-    if (target?.mitra_id && target.mitra_id !== caller.id && !owns) return { status: 403, body: { error: "Loket ini milik mitra lain." } };
-    if (!owns && target?.created_by && target.created_by !== caller.id && target?.parent_id && target.parent_id !== caller.id) {
-      return { status: 403, body: { error: "Saldo hanya dapat dikirim ke loket buatan jaringan Anda." } };
-    }
+    if (canonRole(target?.role) !== "loket") return { status: 403, body: { error: "Saldo hanya dapat dikirim ke loket." } };
     const users = await listAuthUsers(env);
     const loketUser = users.find((user) => user.id === loketId);
     const loketName = clean(loketUser?.user_metadata?.full_name) || clean(loketUser?.user_metadata?.username) || "Loket";
-    const result = await distributeBalance(env, caller.id, loketId, amount, loketName);
+    const rawRef = clean(body.clientRef);
+    const clientRef = /^[A-Za-z0-9:_-]{8,80}$/.test(rawRef) ? rawRef : "";
+    const result = await distributeBalance(env, caller.id, loketId, amount, loketName, clientRef);
     if (result.error || result.fromBalance === undefined || result.toBalance === undefined) return { status: result.status, body: { error: result.error } };
     return { status: 200, body: { id: result.id, balance: result.fromBalance, loketBalance: result.toBalance } };
   }

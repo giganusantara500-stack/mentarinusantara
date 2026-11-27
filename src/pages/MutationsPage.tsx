@@ -64,7 +64,9 @@ export function MutationsPage() {
   });
 
   const userName = (uid: string) => {
-    if (uid === "__pusat__") return "Kas Pusat";
+    if (uid === "__pusat__") return "Saldo Utama";
+    if (uid === "__fee__") return "Fee internal Mentari";
+    if (uid === "__digiflazz__") return "Penanda DigiFlazz";
     const p = profiles.find((x) => x.id === uid);
     return p ? (p.full_name || p.email) : "—";
   };

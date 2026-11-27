@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth";
 import { useNetworkLoketSales, useProfiles, useTransactions, roleToUi } from "@/lib/hooks";
@@ -197,10 +197,14 @@ export function ManageSetoranPage() {
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [pool, setPool] = useState(0);
+  const [poolReady, setPoolReady] = useState(false);
+  const [provider, setProvider] = useState<number | null>(null);
+  const [providerError, setProviderError] = useState("");
+  const [feeBalance, setFeeBalance] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [note, setNote] = useState("");
   const [detail, setDetail] = useState<Ticket | null>(null);
   const globalQueue = isSuperAdmin;
-  const role = profile?.role;
-  const canRequest = role === "mitra" || role === "submitra";
   const networkIds = new Set(profiles.map((item) => item.id));
 
   const load = async () => {
@@ -212,7 +216,30 @@ export function ManageSetoranPage() {
     setTickets((result.body.tickets ?? []) as Ticket[]);
     setMutations((result.body.mutations ?? []) as FundMutation[]);
     const wallet = await fetch("/api/wallet", { headers });
-    if (wallet.ok) setPool(Number((await wallet.json()).balance) || 0);
+    if (wallet.ok) {
+      const body = await wallet.json();
+      setPool(Number(body.balance) || 0);
+      setPoolReady(true);
+      setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
+      setProviderError(String(body.providerError || ""));
+      setFeeBalance(Number(body.feeBalance) || 0);
+    }
+  };
+  const sync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setError("");
+    setNote("");
+    const response = await fetch("/api/wallet/sync", { method: "POST", headers: await authHeader() });
+    const body = await response.json().catch(() => null);
+    setSyncing(false);
+    if (!response.ok) { setError(body?.error || "Saldo DigiFlazz gagal ditarik."); return; }
+    setPool(Number(body.balance) || 0);
+    setPoolReady(true);
+    setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
+    setProviderError("");
+    setNote(String(body.message || "Saldo Utama diperbarui dari DigiFlazz."));
+    await load();
   };
   useEffect(() => {
     load();
@@ -255,27 +282,49 @@ export function ManageSetoranPage() {
   });
 
   const accountName = (id: string) => {
-    if (id === "__pusat__") return "Kas Pusat";
+    if (id === "__pusat__") return "Saldo Utama";
+    if (id === "__fee__") return "Fee internal Mentari";
+    if (id === "__digiflazz__") return "Penanda DigiFlazz";
     const match = profiles.find((item) => item.id === id);
     return match?.full_name || match?.username || id.slice(0, 8);
   };
 
+  if (!isSuperAdmin) {
+    return (
+      <Shell title="Persetujuan Deposit" description="Menu ini hanya untuk Super Admin.">
+        <Card>
+          <div className="p-4 text-sm text-slate-600">Mitra dan Sub Mitra mengajukan tiket di menu Tiket Deposit. Super Admin yang menyetujui memindahkan Saldo Utama ke pemohon satu kali.</div>
+        </Card>
+      </Shell>
+    );
+  }
+
   return (
     <Shell
       title="Persetujuan Deposit"
-      description={globalQueue
-        ? `Antrean deposit Loket, Sub Mitra, dan Mitra. Menyetujui tiket memindahkan Saldo Utama ke pemohon tepat satu kali. Saldo Utama saat ini ${formatRupiah(pool)}.`
-        : "Pantauan setoran di jaringan Anda. Persetujuan tiket rekening pusat dilakukan di pusat."}
+      description="Menyetujui tiket memindahkan Saldo Utama ke Loket, Sub Mitra, atau Mitra tepat satu kali. Tarik saldo DigiFlazz dulu bila Saldo Utama belum cukup."
     >
-      {canRequest && (
-        <Card className="mb-4">
-          <CardHeader title="Ajukan tiket deposit" subtitle="Kode unik, hitung mundur, dan status ada di menu Tiket Deposit." />
-          <div className="p-4">
-            <Button onClick={() => { window.location.hash = "/deposit"; }}>Buka Tiket Deposit</Button>
+      <Card className="mb-4">
+        <CardHeader title="Saldo untuk menyetujui deposit" subtitle="Tarik setoran DigiFlazz ke Saldo Utama. Fee internal adalah selisih harga jual loket dan biaya DigiFlazz; angka itu tidak mengurangi saldo DigiFlazz. Rekonsiliasi: DigiFlazz ≈ Saldo Utama + saldo dompet jaringan + fee internal." />
+        <div className="flex flex-wrap items-end gap-4 p-4">
+          <div>
+            <div className="text-xs text-slate-500">Saldo Utama</div>
+            <div className="text-lg font-bold text-slate-900">{formatRupiah(pool)}</div>
           </div>
-        </Card>
-      )}
+          <div>
+            <div className="text-xs text-slate-500">Saldo DigiFlazz</div>
+            <div className="text-lg font-bold text-slate-900">{provider == null ? "Belum terbaca" : formatRupiah(provider)}</div>
+            {providerError && <div className="text-xs text-rose-600">{providerError}</div>}
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Fee internal Mentari</div>
+            <div className="text-lg font-bold text-slate-900">{formatRupiah(feeBalance)}</div>
+          </div>
+          <Button onClick={() => void sync()} disabled={syncing}>{syncing ? "Menarik..." : "Tarik saldo DigiFlazz"}</Button>
+        </div>
+      </Card>
       {error && <div className="mb-3 text-sm text-rose-600">{error}</div>}
+      {note && <div className="mb-3 text-sm text-emerald-700">{note}</div>}
       <div className={`mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-3 ${globalQueue ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
         <Field label="Status">
           <Select value={status} onChange={(event) => setStatus(event.target.value)}>
@@ -315,6 +364,7 @@ export function ManageSetoranPage() {
               {rows.map((ticket) => {
                 const loket = loketOf(ticket);
                 const allowed = canDecide(ticket);
+                const short = poolReady && (ticket.baseAmount ?? ticket.amount) > pool;
                 return (
                   <tr key={ticket.id} className="border-t border-slate-100">
                     <td className="px-3 py-2"><div className="font-semibold text-slate-900">{loket.name}</div><div className="text-xs text-slate-500">{loket.code ? `Kode ${loket.code}` : formatWaktu(ticket.transferAt)}</div></td>
@@ -326,7 +376,8 @@ export function ManageSetoranPage() {
                     <td className="px-3 py-2">
                       {allowed ? (
                         <div className="flex flex-wrap gap-2">
-                          {ticket.status === "pending" && <Button size="sm" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "approve")}>Approve</Button>}
+                          {ticket.status === "pending" && <Button size="sm" disabled={busyId === ticket.id || short} onClick={() => decide(ticket.id, "approve")}>Approve</Button>}
+                          {ticket.status === "pending" && short && <span className="text-xs text-rose-600">Saldo Utama kurang. Tarik DigiFlazz dulu.</span>}
                           {ticket.status === "pending" && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "cancel")}>Tolak</Button>}
                           {ticket.status === "approved" && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "pending")}>Kembalikan</Button>}
                           {ticket.status === "approved" && <Button size="sm" variant="danger" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "void")}>Tarik Kembali</Button>}
@@ -344,7 +395,7 @@ export function ManageSetoranPage() {
         </div>
       </Card>
       <Card className="mt-4">
-        <CardHeader title="Riwayat mutasi dana" subtitle={globalQueue ? "Kas pusat dan saldo pemohon" : "Mutasi di jaringan Anda"} />
+        <CardHeader title="Riwayat mutasi dana" subtitle="Saldo Utama, pemohon, dan fee internal tercatat terpisah." />
         <div className="divide-y divide-slate-100">
           {mutations.length === 0 && <div className="px-4 py-6 text-center text-sm text-slate-500">Belum ada mutasi deposit.</div>}
           {mutations.slice(0, 30).map((row) => (
@@ -393,7 +444,73 @@ export function BalanceAllocationPage() {
   const [amount, setAmount] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [pool, setPool] = useState(0);
+  const [provider, setProvider] = useState<number | null>(null);
+  const [providerError, setProviderError] = useState("");
+  const [feeBalance, setFeeBalance] = useState(0);
+  const [loketId, setLoketId] = useState("");
+  const [transferAmount, setTransferAmount] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [sending, setSending] = useState(false);
+  const sendLock = useRef(false);
+  const transferKey = useRef("");
   const targets = profiles.filter((profile) => profile.role !== "super_admin");
+  const lokets = profiles.filter((profile) => profile.role === "loket");
+  const loadWallet = async () => {
+    const response = await fetch("/api/wallet", { headers: await authHeader() });
+    if (!response.ok) return;
+    const body = await response.json();
+    setPool(Number(body.balance) || 0);
+    setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
+    setProviderError(String(body.providerError || ""));
+    setFeeBalance(Number(body.feeBalance) || 0);
+  };
+  useEffect(() => { void loadWallet(); }, []);
+  const sync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setError("");
+    setMessage("");
+    const response = await fetch("/api/wallet/sync", { method: "POST", headers: await authHeader() });
+    const body = await response.json().catch(() => null);
+    setSyncing(false);
+    if (!response.ok) { setError(body?.error || "Saldo DigiFlazz gagal ditarik."); return; }
+    setPool(Number(body.balance) || 0);
+    setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
+    setProviderError("");
+    setMessage(String(body.message || "Saldo Utama diperbarui dari DigiFlazz."));
+  };
+  const send = async () => {
+    if (sendLock.current || sending) return;
+    const nominal = Number(transferAmount);
+    if (!loketId || !Number.isFinite(nominal) || nominal < 1000) {
+      setError("Pilih loket dan nominal minimal Rp1.000.");
+      return;
+    }
+    if (nominal > pool) {
+      setError("Saldo Utama tidak cukup untuk transfer ini.");
+      return;
+    }
+    sendLock.current = true;
+    setSending(true);
+    setError("");
+    setMessage("");
+    if (!transferKey.current) transferKey.current = `dist-${crypto.randomUUID()}`;
+    const response = await fetch("/api/distribute", {
+      method: "POST",
+      headers: await authHeader(),
+      body: JSON.stringify({ loketId, amount: nominal, clientRef: transferKey.current }),
+    });
+    const body = await response.json().catch(() => null);
+    sendLock.current = false;
+    setSending(false);
+    if (!response.ok) { setError(body?.error || "Saldo gagal dikirim ke loket."); return; }
+    transferKey.current = "";
+    setTransferAmount("");
+    setPool(Number(body.balance) || 0);
+    const loket = lokets.find((item) => item.id === loketId);
+    setMessage(`Terkirim ke ${loket ? profileLabel(loket) : "loket"}. Saldo Utama ${formatRupiah(Number(body.balance))}. Saldo loket ${formatRupiah(Number(body.loketBalance))}.`);
+  };
   const save = async () => {
     const response = await fetch("/api/allocate", {
       method: "POST",
@@ -403,13 +520,52 @@ export function BalanceAllocationPage() {
     const body = await response.json().catch(() => null);
     if (!response.ok) { setError(body?.error || "Saldo gagal dibagikan."); setMessage(""); return; }
     setError("");
-    setMessage(`Saldo diperbarui menjadi ${formatRupiah(Number(body.balance))}.`);
+    setMessage(`Penyesuaian tersimpan. Saldo tujuan ${formatRupiah(Number(body.balance))}.`);
     setAmount("");
+    await loadWallet();
   };
   return (
-    <Shell title="Pembagian Saldo" description="Modal dan saldo jaringan hanya dapat ditambah oleh Super Admin.">
+    <Shell title="Pembagian Saldo" description={`Saldo Utama ${formatRupiah(pool)} didistribusikan ke loket. Transfer memotong Saldo Utama dan menambah saldo loket dalam satu catatan.`}>
+      <Card className="mb-4">
+        <CardHeader title="Saldo DigiFlazz, Saldo Utama, dan fee internal" subtitle="Setoran baru di DigiFlazz masuk ke Saldo Utama. Biaya DigiFlazz adalah harga penyedia. Fee internal Mentari adalah selisih harga jual dan biaya itu, dicatat terpisah, dan tidak mengurangi saldo DigiFlazz. Rekonsiliasi: DigiFlazz ≈ Saldo Utama + saldo dompet + fee internal." />
+        <div className="flex flex-wrap items-end gap-3 p-4">
+          <div>
+            <div className="text-xs text-slate-500">Saldo Utama</div>
+            <div className="text-lg font-bold text-slate-900">{formatRupiah(pool)}</div>
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Saldo DigiFlazz</div>
+            <div className="text-lg font-bold text-slate-900">{provider == null ? "Belum terbaca" : formatRupiah(provider)}</div>
+            {providerError && <div className="text-xs text-rose-600">{providerError}</div>}
+          </div>
+          <div>
+            <div className="text-xs text-slate-500">Fee internal Mentari</div>
+            <div className="text-lg font-bold text-slate-900">{formatRupiah(feeBalance)}</div>
+          </div>
+          <Button onClick={() => void sync()} disabled={syncing}>{syncing ? "Menarik..." : "Tarik saldo DigiFlazz"}</Button>
+        </div>
+      </Card>
+      <Card className="mb-4">
+        <CardHeader title="Transfer ke loket" subtitle="Nominal dipotong dari Saldo Utama dan masuk ke dompet loket. Permintaan yang sama tidak dipotong dua kali." />
+        <div className="grid gap-3 p-4 sm:grid-cols-3">
+          <Field label="Loket tujuan">
+            <Select value={loketId} onChange={(event) => setLoketId(event.target.value)}>
+              <option value="">Pilih loket</option>
+              {lokets.map((profile) => (
+                <option key={profile.id} value={profile.id}>{profile.loket_code ? `${profile.loket_code} - ` : ""}{profileLabel(profile)}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Nominal">
+            <Input inputMode="numeric" value={transferAmount} onChange={(event) => setTransferAmount(event.target.value.replace(/\D/g, ""))} placeholder="100000" />
+          </Field>
+          <div className="flex items-end">
+            <Button onClick={() => void send()} disabled={sending || !loketId || Number(transferAmount) < 1000 || Number(transferAmount) > pool}>{sending ? "Mengirim..." : "Kirim ke Loket"}</Button>
+          </div>
+        </div>
+      </Card>
       <Card>
-        <CardHeader title="Tambah saldo akun" subtitle="Nominal positif menambah saldo. Nominal minus mengurangi saldo." />
+        <CardHeader title="Penyesuaian manual" subtitle="Pakai hanya untuk koreksi. Nominal positif menambah saldo tujuan tanpa memotong Saldo Utama. Transfer ke loket ada di kartu di atas." />
         <div className="space-y-3 p-4">
           {error && <div className="text-sm text-rose-600">{error}</div>}
           {message && <div className="text-sm text-emerald-600">{message}</div>}
@@ -427,7 +583,7 @@ export function BalanceAllocationPage() {
           <Field label="Nominal">
             <Input inputMode="numeric" value={amount} onChange={(event) => setAmount(event.target.value.replace(/[^\d-]/g, ""))} placeholder="100000" />
           </Field>
-          <Button onClick={save} disabled={!userId || !amount || Number(amount) === 0}>Simpan Saldo</Button>
+          <Button onClick={() => void save()} disabled={!userId || !amount || Number(amount) === 0}>Simpan Penyesuaian</Button>
         </div>
       </Card>
     </Shell>

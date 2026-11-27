@@ -13,6 +13,7 @@ export interface BillQuote {
   adminFee: number;
   collfee: number;
   total: number;
+  providerCost: number;
 }
 
 interface InquiryInput {
@@ -35,6 +36,7 @@ interface PayInput extends InquiryInput {
   denda?: number;
   collfee?: number;
   period?: string;
+  providerCost?: number;
   loketName?: string;
   loketCode?: string;
   parentId?: string;
@@ -83,6 +85,7 @@ function simulationBill(input: InquiryInput): BillQuote | null {
     adminFee: input.adminFee,
     collfee: 0,
     total: billAmount + billFine + input.adminFee,
+    providerCost: billAmount + billFine,
   };
 }
 
@@ -98,7 +101,9 @@ const simulationProvider: BillerProvider = {
 };
 
 function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
-  const fee = quote.adminFee || adminFee;
+  const fee = quote.adminFee > 0 ? quote.adminFee : adminFee;
+  const summed = quote.amount + quote.denda + fee;
+  const total = quote.adminFee > 0 ? (quote.total || summed) : summed;
   return {
     customerName: quote.customerName,
     period: quote.period,
@@ -106,7 +111,8 @@ function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
     denda: quote.denda,
     adminFee: fee,
     collfee: 0,
-    total: quote.total || quote.amount + quote.denda + fee,
+    total: total || quote.total || summed,
+    providerCost: quote.providerCost > 0 ? quote.providerCost : Math.max(0, quote.amount + quote.denda),
   };
 }
 
@@ -194,7 +200,7 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
   const sku = await resolveBuyerSku(kind, input.category, input.product, clean(input.buyerSkuCode));
   const refId = clean(input.providerRef) || input.clientRef;
   const inquiry = input.providerRef
-    ? { status: "found" as const, message: "", providerRef: refId, bill: { customerName: input.customerName || "", period: input.period || "", amount: Number(input.tagihan) || Number(input.amount) || 0, denda: Number(input.denda) || 0, adminFee: input.adminFee, collfee: Number(input.collfee) || 0, total: Number(input.amount) || 0 } }
+    ? { status: "found" as const, message: "", providerRef: refId, bill: { customerName: input.customerName || "", period: input.period || "", amount: Number(input.tagihan) || Number(input.amount) || 0, denda: Number(input.denda) || 0, adminFee: input.adminFee, collfee: Number(input.collfee) || 0, total: Number(input.amount) || 0, providerCost: Number(input.providerCost) || 0 } }
     : await h2hProvider.inquire({ ...input, refId });
   if (inquiry.status !== "found" || !inquiry.bill || inquiry.bill.total < 1000) {
     const balance = await walletBalance(env, actorId);
@@ -209,6 +215,7 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     collfee: inquiry.bill.collfee,
     period: inquiry.bill.period,
     customerName: inquiry.bill.customerName,
+    providerCost: inquiry.bill.providerCost,
     channel: "production",
     outcome: "pending",
     clientRef: refId,
@@ -230,6 +237,7 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     collfee: charged.collfee,
     period: charged.period || inquiry.bill.period,
     customerName: charged.customerName || inquiry.bill.customerName,
+    providerCost: charged.providerCost || inquiry.bill.providerCost,
     channel: "production",
     outcome: submitted.outcome === "pending" ? "pending" : submitted.outcome,
     clientRef: refId,
@@ -261,11 +269,13 @@ export async function handleBillerRequest(method: string, pathname: string, body
     if (items.length === 0) return { status: 400, body: { error: "Daftar nomor pelanggan kosong." } };
     const results = await mapPool(items, 4, async (item) => {
       const record = item && typeof item === "object" ? item as Record<string, unknown> : {};
+      const key = clean(record.key);
       const menu = menuForCollective(clean(record.category), clean(record.product));
       const customerNumber = clean(record.customerNumber);
-      if (!menu) return { customerNumber, statusText: "failed", message: "Produk kolektif belum terpetakan ke DigiFlazz." };
+      if (!menu) return { key, customerNumber, statusText: "failed", message: "Produk kolektif belum terpetakan ke DigiFlazz." };
       const result = await inquireBill("h2h", { category: menu.category, product: menu.product, customerNumber, adminFee: Number(record.adminFee) || 0 });
       return {
+        key,
         customerNumber,
         category: menu.category,
         product: menu.product,

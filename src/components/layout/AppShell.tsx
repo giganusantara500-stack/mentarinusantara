@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { PLATFORM_NAME } from "@/lib/brand";
+import { useAuth } from "@/lib/auth";
 import { Sidebar } from "./Sidebar";
 import { DeskHeader, useDeskStats } from "./DeskHeader";
 
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export function AppShell({ current, onNavigate, onLogout, onSecurity, children }: Props) {
+  const { profile } = useAuth();
   const [tick, setTick] = useState(0);
   const stats = useDeskStats(tick);
   const fitDashboard = current === "/dashboard";
@@ -26,7 +28,7 @@ export function AppShell({ current, onNavigate, onLogout, onSecurity, children }
           brand={PLATFORM_NAME}
           stats={stats}
           showStats={false}
-          onDeposit={() => onNavigate("/setoran")}
+          onDeposit={() => onNavigate(profile?.role === "super_admin" ? "/setoran" : "/deposit")}
           onRefresh={() => setTick((value) => value + 1)}
           onLogout={onLogout}
         />

@@ -94,6 +94,8 @@ export function OpsDashboardPage() {
   const [tickets, setTickets] = useState<CmsTicket[]>([]);
   const [cmsReady, setCmsReady] = useState(false);
   const [mainBalance, setMainBalance] = useState<number | null>(null);
+  const [providerBalance, setProviderBalance] = useState<number | null>(null);
+  const [feeBalance, setFeeBalance] = useState(0);
   const role = profile ? dbRoleToAppRole(profile.role) : "pending";
   const networkView = role === "mitra" || role === "submitra";
   const networkLoketIds = useMemo(
@@ -126,6 +128,8 @@ export function OpsDashboardPage() {
       if (stop) return;
       setTickets((body?.tickets ?? []) as CmsTicket[]);
       setMainBalance(Number(wallet?.mainBalance ?? wallet?.balance ?? 0));
+      setProviderBalance(wallet?.providerBalance == null ? null : Number(wallet.providerBalance));
+      setFeeBalance(Number(wallet?.feeBalance) || 0);
       setCmsReady(true);
     })();
     return () => { stop = true; };
@@ -143,6 +147,8 @@ export function OpsDashboardPage() {
         if (walletRes.ok) {
           const wallet = await walletRes.json();
           setMainBalance(Number(wallet?.mainBalance ?? wallet?.balance ?? 0));
+          setProviderBalance(wallet?.providerBalance == null ? null : Number(wallet.providerBalance));
+          setFeeBalance(Number(wallet?.feeBalance) || 0);
         }
         if (depositRes.ok) setTickets((depositRes.body.tickets ?? []) as CmsTicket[]);
       })();
@@ -170,8 +176,8 @@ export function OpsDashboardPage() {
     ? [
         { label: "Transaksi Hari Ini", value: txWaiting ? "—" : formatRupiah(sum(today)), hint: `${today.length} transaksi jaringan`, href: "/transaksi", icon: Activity, tone: "from-sky-500 to-cyan-600" },
         { label: "Transaksi Bulan Ini", value: txWaiting ? "—" : formatRupiah(sum(month)), hint: `${month.length} transaksi jaringan`, href: "/rekap", icon: CalendarDays, tone: "from-violet-600 to-purple-700" },
-        { label: "CMS Hari Ini", value: cmsWaiting ? "—" : formatRupiah(sumCms(cmsToday)), hint: `${cmsToday.length} setoran disetujui`, href: "/setoran", icon: Landmark, tone: "from-amber-500 to-orange-600" },
-        { label: "CMS Bulan Ini", value: cmsWaiting ? "—" : formatRupiah(sumCms(cmsMonth)), hint: `${cmsMonth.length} setoran disetujui`, href: "/setoran", icon: Wallet, tone: "from-emerald-500 to-teal-600" },
+        { label: "CMS Hari Ini", value: cmsWaiting ? "—" : formatRupiah(sumCms(cmsToday)), hint: `${cmsToday.length} setoran disetujui`, href: "/deposit", icon: Landmark, tone: "from-amber-500 to-orange-600" },
+        { label: "CMS Bulan Ini", value: cmsWaiting ? "—" : formatRupiah(sumCms(cmsMonth)), hint: `${cmsMonth.length} setoran disetujui`, href: "/deposit", icon: Wallet, tone: "from-emerald-500 to-teal-600" },
         { label: "Total Outstanding", value: txWaiting ? "—" : formatRupiah(outstanding), hint: "Transaksi pending jaringan", href: "/outstanding", icon: BadgeAlert, tone: "from-rose-500 to-pink-600" },
       ]
     : [
@@ -189,6 +195,7 @@ export function OpsDashboardPage() {
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">{role === "submitra" ? "Saldo" : "Saldo Utama"}</div>
           <div className="text-lg font-bold leading-none tabular-nums">{mainBalance === null ? "—" : formatRupiah(mainBalance)}</div>
+          {role === "superadmin" && <div className="mt-1 text-[11px] text-amber-100/80">{providerBalance == null ? "DigiFlazz belum terbaca" : `DigiFlazz ${formatRupiah(providerBalance)}`} · Fee internal {formatRupiah(feeBalance)}</div>}
         </div>
         {role === "mitra" && tickets.some((ticket) => ticket.loketId === profile.id) && (
           <button type="button" onClick={() => { window.location.hash = "/deposit"; }} className="hidden rounded-lg bg-white/10 px-3 py-1 text-left text-[11px] leading-snug sm:block">
@@ -201,7 +208,7 @@ export function OpsDashboardPage() {
         )}
         <div className="ml-auto hidden max-w-[46%] text-right text-[11px] leading-snug text-white/70 sm:block">
           {role === "superadmin"
-            ? "Menyetujui tiket memindahkan Saldo Utama ke Mitra, Sub Mitra, atau Loket, satu kali."
+            ? "Tiket memindahkan Saldo Utama satu kali. Transfer ke loket memotong Saldo Utama yang sama."
             : "Pengajuan deposit menunggu persetujuan Super Admin sebelum saldo bertambah."}
         </div>
       </div>
@@ -233,6 +240,8 @@ export function OpsDashboardPage() {
           const wallet = walletRes.ok ? await walletRes.json() : null;
           setTickets((body?.tickets ?? []) as CmsTicket[]);
           setMainBalance(Number(wallet?.mainBalance ?? wallet?.balance ?? 0));
+          setProviderBalance(wallet?.providerBalance == null ? null : Number(wallet.providerBalance));
+          setFeeBalance(Number(wallet?.feeBalance) || 0);
         })();
       }} />}
       <div className="relative mt-3 flex min-h-0 flex-1 flex-col">
