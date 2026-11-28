@@ -1250,35 +1250,42 @@ export function LoketKolektifPage() {
           <button onClick={() => setHistoryOpen(true)} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold leading-4 text-slate-700">Riwayat Pembayaran</button>
           <button type="button" onClick={recheckBills} disabled={!active || paying || bills.some((row) => row.period === "Memuat")} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold leading-4 text-slate-700 disabled:opacity-40">Cek Ulang</button>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-1 px-2 py-1">
-          {([
-            ["semua", `Semua (${counts.semua})`],
-            ["BL LNS", `BL LUNAS (${counts["BL LNS"]})`],
-            ["LUNAS", `LUNAS (${counts.LUNAS})`],
-            ["LAINNYA", `Perlu Diperiksa (${counts.LAINNYA})`],
-          ] as const).map(([key, label]) => (
-            <button key={key} onClick={() => setFilter(key)} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold leading-4 ${filter === key ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>
-          ))}
-          <label className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-slate-600">
-            Admin Bank
-            <Select value={String(plnAdmin)} onChange={(event) => { const fee = Number(event.target.value); setPlnAdmin(fee); savePlnAdmin(fee); }} className="h-7 w-[11rem] min-w-[11rem] shrink-0 py-0 text-xs leading-4" style={{ width: "11rem", minWidth: "11rem", paddingLeft: 10, paddingRight: 28, fontSize: 12 }}>
+        <div className="shrink-0 space-y-1 px-2 py-1">
+          <div className="flex flex-wrap gap-1">
+            {([
+              ["semua", `Semua (${counts.semua})`],
+              ["BL LNS", `BL LUNAS (${counts["BL LNS"]})`],
+              ["LUNAS", `LUNAS (${counts.LUNAS})`],
+              ["LAINNYA", `Perlu Diperiksa (${counts.LAINNYA})`],
+            ] as const).map(([key, label]) => (
+              <button key={key} onClick={() => setFilter(key)} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold leading-4 ${filter === key ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>
+            ))}
+          </div>
+          <div className="grid grid-cols-[auto_12rem_minmax(8rem,10rem)] items-center justify-end gap-2">
+            <span className="whitespace-nowrap text-[11px] font-semibold leading-4 text-slate-600">Admin Bank</span>
+            <select
+              value={String(plnAdmin)}
+              onChange={(event) => { const fee = Number(event.target.value); setPlnAdmin(fee); savePlnAdmin(fee); }}
+              className="box-border w-full rounded-md border border-slate-300 bg-white text-[13px] font-semibold text-slate-800"
+              style={{ width: "12rem", minWidth: "12rem", height: "2.25rem", padding: "0.3rem 1.85rem 0.3rem 0.7rem", lineHeight: "1.25rem" }}
+            >
               {ADMIN_FEES.map((fee) => <option key={fee} value={fee}>{formatRupiah(fee)}</option>)}
-            </Select>
-          </label>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} placeholder="Cari ID atau nama" className="h-7 w-40 rounded-md border border-slate-200 px-2 text-xs" />
+            </select>
+            <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} placeholder="Cari ID atau nama" className="box-border h-8 w-full min-w-0 rounded-md border border-slate-200 px-2 text-xs" />
+          </div>
         </div>
         <div className={`h-4 shrink-0 truncate px-2 text-[11px] leading-4 ${noticeTone === "ok" ? "text-emerald-700" : "text-rose-600"}`}>{notice}</div>
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full table-fixed text-left text-xs leading-4">
+          <table className="w-full min-w-[70rem] table-fixed text-left text-xs leading-4">
             <colgroup>
               <col className="w-8" />
               <col className="w-7" />
               <col className="w-[7.25rem]" />
               <col />
-              <col className="w-[6.5rem]" />
+              <col className="w-[7.5rem]" />
               <col className="w-[4.75rem]" />
               <col className="w-[5.25rem]" />
-              <col className="w-[9rem]" />
+              <col className="w-[11rem]" />
               <col className="w-[13.25rem]" />
               <col className="w-16" />
             </colgroup>
@@ -1296,10 +1303,10 @@ export function LoketKolektifPage() {
                   <td className="px-1 py-0.5 tabular-nums">{index + 1}</td>
                   <td className="truncate px-1 py-0.5 font-mono" title={row.number}>{row.number}</td>
                   <td className="truncate px-1 py-0.5" title={shownCustomer(row.name)}>{shownCustomer(row.name)}</td>
-                  <td className="min-w-[6.5rem] whitespace-nowrap px-1 py-0.5" title={row.menuProduct || row.product || ""}>{row.menuProduct || row.product || canonicalCategory(row.product)}</td>
+                  <td className="min-w-[7.5rem] whitespace-nowrap px-1 py-0.5" title={row.menuProduct || row.product || ""}>{row.menuProduct || row.product || canonicalCategory(row.product)}</td>
                   <td className="whitespace-nowrap px-1 py-0.5" title={monthOf(row.period)}>{shortPeriod(row.period)}</td>
                   <td className="whitespace-nowrap px-1 py-0.5 text-right tabular-nums">{row.period === "Memuat" ? "—" : formatRupiah(row.adminFee || 0)}</td>
-                  <td className="min-w-[9rem] whitespace-nowrap px-1 py-0.5 text-right font-semibold tabular-nums">{formatRupiah(row.total)}</td>
+                  <td className="min-w-[11rem] whitespace-nowrap px-1 py-0.5 text-right font-semibold tabular-nums">{formatRupiah(row.total)}</td>
                   <td className="whitespace-nowrap px-1 py-0.5" title={billStatusLabel(row)}>{billStatusLabel(row)}</td>
                   <td className="px-1 py-0.5 text-right"><button type="button" onClick={() => releaseCustomer(memberKey(row))} className="text-[11px] font-semibold leading-4 text-rose-600">Keluarkan</button></td>
                 </tr>
