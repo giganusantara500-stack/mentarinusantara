@@ -1259,13 +1259,11 @@ export function LoketKolektifPage() {
           ] as const).map(([key, label]) => (
             <button key={key} onClick={() => setFilter(key)} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold leading-4 ${filter === key ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>
           ))}
-          <label className="ml-auto flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+          <label className="ml-auto flex shrink-0 items-center gap-1.5 text-[11px] font-semibold text-slate-600">
             Admin Bank
-            <span className="w-40">
-              <Select value={String(plnAdmin)} onChange={(event) => { const fee = Number(event.target.value); setPlnAdmin(fee); savePlnAdmin(fee); }} className="h-7 px-2 py-0 text-xs">
-                {ADMIN_FEES.map((fee) => <option key={fee} value={fee}>{formatRupiah(fee)}</option>)}
-              </Select>
-            </span>
+            <Select value={String(plnAdmin)} onChange={(event) => { const fee = Number(event.target.value); setPlnAdmin(fee); savePlnAdmin(fee); }} className="h-7 w-[11rem] min-w-[11rem] shrink-0 py-0 text-xs leading-4" style={{ width: "11rem", minWidth: "11rem", paddingLeft: 10, paddingRight: 28, fontSize: 12 }}>
+              {ADMIN_FEES.map((fee) => <option key={fee} value={fee}>{formatRupiah(fee)}</option>)}
+            </Select>
           </label>
           <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} placeholder="Cari ID atau nama" className="h-7 w-40 rounded-md border border-slate-200 px-2 text-xs" />
         </div>
@@ -1277,10 +1275,10 @@ export function LoketKolektifPage() {
               <col className="w-7" />
               <col className="w-[7.25rem]" />
               <col />
-              <col className="w-[4.5rem]" />
+              <col className="w-[6.5rem]" />
               <col className="w-[4.75rem]" />
               <col className="w-[5.25rem]" />
-              <col className="w-[7.5rem]" />
+              <col className="w-[9rem]" />
               <col className="w-[13.25rem]" />
               <col className="w-16" />
             </colgroup>
@@ -1298,10 +1296,10 @@ export function LoketKolektifPage() {
                   <td className="px-1 py-0.5 tabular-nums">{index + 1}</td>
                   <td className="truncate px-1 py-0.5 font-mono" title={row.number}>{row.number}</td>
                   <td className="truncate px-1 py-0.5" title={shownCustomer(row.name)}>{shownCustomer(row.name)}</td>
-                  <td className="truncate px-1 py-0.5" title={row.menuProduct || row.product || ""}>{row.menuProduct || row.product || canonicalCategory(row.product)}</td>
+                  <td className="min-w-[6.5rem] whitespace-nowrap px-1 py-0.5" title={row.menuProduct || row.product || ""}>{row.menuProduct || row.product || canonicalCategory(row.product)}</td>
                   <td className="whitespace-nowrap px-1 py-0.5" title={monthOf(row.period)}>{shortPeriod(row.period)}</td>
                   <td className="whitespace-nowrap px-1 py-0.5 text-right tabular-nums">{row.period === "Memuat" ? "—" : formatRupiah(row.adminFee || 0)}</td>
-                  <td className="whitespace-nowrap px-1 py-0.5 text-right font-semibold tabular-nums">{formatRupiah(row.total)}</td>
+                  <td className="min-w-[9rem] whitespace-nowrap px-1 py-0.5 text-right font-semibold tabular-nums">{formatRupiah(row.total)}</td>
                   <td className="whitespace-nowrap px-1 py-0.5" title={billStatusLabel(row)}>{billStatusLabel(row)}</td>
                   <td className="px-1 py-0.5 text-right"><button type="button" onClick={() => releaseCustomer(memberKey(row))} className="text-[11px] font-semibold leading-4 text-rose-600">Keluarkan</button></td>
                 </tr>
