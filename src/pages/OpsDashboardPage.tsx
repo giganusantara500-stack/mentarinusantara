@@ -38,7 +38,8 @@ function cmsWhen(ticket: CmsTicket) {
 }
 
 function cmsAmount(ticket: CmsTicket) {
-  return Number(ticket.baseAmount ?? ticket.amount) || 0;
+  if (ticket.status === "approved" || ticket.status === "reversed") return Number(ticket.amount) || Number(ticket.transferAmount) || 0;
+  return Number(ticket.transferAmount) || Number(ticket.amount) || 0;
 }
 
 function DepositTasks({ tickets, onChanged }: { tickets: CmsTicket[]; onChanged: () => void }) {
@@ -68,7 +69,7 @@ function DepositTasks({ tickets, onChanged }: { tickets: CmsTicket[]; onChanged:
           <div key={ticket.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
             <div>
               <div className="text-sm font-semibold text-slate-900">{ticket.loketName || "Pemohon"} · {ticket.applicantRole === "mitra" ? "Mitra" : ticket.applicantRole === "submitra" ? "Sub Mitra" : "Loket"} · {formatRupiah(ticket.transferAmount ?? ticket.amount)}</div>
-              <div className="text-xs text-slate-500">Kode unik {ticket.uniqueCode || "-"} · saldo yang pindah {formatRupiah(ticket.baseAmount ?? ticket.amount)}</div>
+              <div className="text-xs text-slate-500">Kode unik {ticket.uniqueCode || "-"} ikut masuk · saldo yang pindah {formatRupiah(cmsAmount(ticket))}</div>
             </div>
             <div className="flex items-center gap-2">
               <Badge tone={ticketPhase(ticket, Date.now(), "admin").tone}>{ticketPhase(ticket, Date.now(), "admin").label}</Badge>

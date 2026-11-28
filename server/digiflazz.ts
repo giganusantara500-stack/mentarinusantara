@@ -703,20 +703,31 @@ export async function statusDigiflazz(input: { kind: DigiKind; sku: string; cust
   return quoteFrom(data, input);
 }
 
+function formatSerial(value: string) {
+  const compact = value.replace(/\s+/g, "").trim();
+  if (!compact || /^(sukses|success|pending|proses|gagal|failed|ok)$/i.test(compact)) return "";
+  const digits = compact.replace(/\D/g, "");
+  if (digits.length >= 16 && digits.length <= 24 && digits.length >= compact.replace(/-/g, "").length - 2) {
+    return digits.replace(/(\d{4})(?=\d)/g, "$1-");
+  }
+  if (compact.length >= 4 && compact.length <= 48 && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(compact)) return compact;
+  return "";
+}
+
 export function displayToken(...parts: string[]) {
   const blob = parts.map((part) => part.trim()).filter(Boolean).join(" ");
   if (!blob) return "";
-  const labeled = blob.match(/token\s*[/:]\s*([0-9][0-9\s-]{7,})/i);
+  const labeled = blob.match(/(?:token|sn|serial(?:\s*number)?|voucher|pin)\s*[:/#-]?\s*([A-Za-z0-9][A-Za-z0-9._:-]{3,40})/i);
   const dashed = blob.match(/\d{4}(?:[-\s]\d{4}){3,5}/);
   const bare = blob.match(/(?:^|[^\d])(\d{16,24})(?:[^\d]|$)/);
-  const source = labeled?.[1] || dashed?.[0] || bare?.[1] || "";
-  if (source) {
-    const digits = source.replace(/\D/g, "");
-    if (digits.length >= 16 && digits.length <= 24) return digits.replace(/(\d{4})(?=\d)/g, "$1-");
-    return source.replace(/\s+/g, "").trim();
+  const fromLabel = labeled ? formatSerial(labeled[1]) : "";
+  if (fromLabel) return fromLabel;
+  const fromPattern = formatSerial(dashed?.[0] || bare?.[1] || "");
+  if (fromPattern) return fromPattern;
+  for (const part of parts) {
+    const kept = formatSerial(part);
+    if (kept) return kept;
   }
-  const compact = blob.replace(/\s+/g, " ").trim();
-  if (compact.length <= 40 && !compact.includes("/")) return compact;
   return "";
 }
 

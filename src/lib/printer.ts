@@ -190,7 +190,7 @@ export function slipText(bill: ReceiptBill, width: number, _loket: string, copy:
     ]).join("\n");
   }
   const left = Math.max(24, Math.floor(width * 0.5) - 1);
-  const proof = [bill.sn ? field("SN/TOKEN", bill.sn, width) : ""].filter(Boolean);
+  const proof = bill.sn ? tokenLines(bill.sn, width) : [];
   if (isPrepaidProduct(bill.product)) {
     const title = /token/i.test(bill.product) ? "STRUK PEMBELIAN TOKEN LISTRIK" : `STRUK ${bill.product.toUpperCase()}`;
     return padLines([

@@ -86,7 +86,7 @@ function DestinationAccount({ account, amount, ticket }: { account: { bank: stri
         <div className="min-w-0">
           <div className="text-xs text-slate-500">Nilai yang ditransfer</div>
           <div className="break-words text-base font-semibold">{digits ? formatRupiah(transfer) : "Isi nominal terlebih dahulu"}</div>
-          {ticket?.uniqueCode && <div className="break-words text-xs text-slate-500">Nominal {formatRupiah(base)} + kode {ticket.uniqueCode}</div>}
+          {ticket?.uniqueCode && <div className="break-words text-xs text-slate-500">Nominal {formatRupiah(base)} + kode {ticket.uniqueCode} ikut masuk ke saldo</div>}
         </div>
         <CopyChip value={digits} done="Nilai transfer tersalin." disabled={!digits} />
       </div>
@@ -366,7 +366,7 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
             <div key={ticket.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
               <div className="min-w-0">
                 <div className="break-words text-sm font-medium text-slate-800">{ticket.loketName || "Pemohon"} · {roleText(ticket.applicantRole)}</div>
-                <div className="text-xs text-slate-500">Kode {ticket.uniqueCode || "-"} · transfer {formatRupiah(ticket.transferAmount ?? ticket.amount)} · saldo {formatRupiah(ticket.baseAmount ?? ticket.amount)}</div>
+                <div className="text-xs text-slate-500">Kode {ticket.uniqueCode || "-"} ikut masuk · saldo {formatRupiah(ticket.transferAmount ?? ticket.amount)}</div>
               </div>
               <div className="flex items-center gap-2">
                 <Badge tone={ticketPhase(ticket, now, "admin").tone}>{ticketPhase(ticket, now, "admin").label}</Badge>

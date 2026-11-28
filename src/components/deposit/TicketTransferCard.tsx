@@ -70,7 +70,7 @@ export function TicketTransferCard({
       <div className="rounded-lg bg-slate-950 px-4 py-3 text-white">
         <div className="text-xs text-amber-200">Total yang harus ditransfer</div>
         <div className="text-2xl font-black">{formatRupiah(total)}</div>
-        <div className="text-sm text-white/75">Nominal {formatRupiah(ticket.baseAmount ?? ticket.amount)} + kode {ticket.uniqueCode}</div>
+        <div className="text-sm text-white/75">Nominal {formatRupiah(base)} + kode {ticket.uniqueCode} ikut masuk ke saldo setelah disetujui</div>
         <div className="mt-2 font-mono text-3xl font-black tabular-nums">{ticket.status === "pending" ? countdownLabel(ticket.expiresAt, now) : phase.label}</div>
         {ticket.status === "pending" && <div className="text-xs text-white/70">{remain === 0 ? "Waktu pembayaran habis." : "Bayar sebelum waktu ini habis."}</div>}
       </div>
@@ -87,7 +87,7 @@ export function TicketTransferCard({
           <div className="min-w-0">
             <div className="text-xs text-slate-500">Nilai yang ditransfer</div>
             <div className="break-words text-base font-semibold text-slate-950">{formatRupiah(total)}</div>
-            <div className="break-words text-xs text-slate-500">Nominal {formatRupiah(base)} + kode {ticket.uniqueCode || "-"}</div>
+            <div className="break-words text-xs text-slate-500">Kode {ticket.uniqueCode || "-"} termasuk. Saldo yang masuk {formatRupiah(total)}</div>
           </div>
           <CopyChip value={plainTotal} done="Nilai transfer tersalin." />
         </div>

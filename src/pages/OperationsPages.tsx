@@ -220,6 +220,13 @@ function rememberNormalizations(current: NormalizationRow[], incoming: Normaliza
   return incoming.length > 0 ? incoming : current;
 }
 
+function depositCredit(ticket: Ticket) {
+  const transfer = Number(ticket.transferAmount) || 0;
+  const booked = Number(ticket.amount) || 0;
+  if (ticket.status === "approved" || ticket.status === "reversed") return booked || transfer;
+  return transfer || booked;
+}
+
 function NormalizationHistory({ rows }: { rows: NormalizationRow[] }) {
   return (
     <Card className="mb-4">
@@ -465,14 +472,14 @@ export function ManageSetoranPage() {
               {rows.map((ticket) => {
                 const loket = loketOf(ticket);
                 const allowed = canDecide(ticket);
-                const short = poolReady && (ticket.baseAmount ?? ticket.amount) > pool;
+                const short = poolReady && depositCredit(ticket) > pool;
                 return (
                   <tr key={ticket.id} className="border-t border-slate-100">
                     <td className="px-3 py-2"><div className="font-semibold text-slate-900">{loket.name}</div><div className="text-xs text-slate-500">{loket.code ? `Kode ${loket.code}` : formatWaktu(ticket.transferAt)}</div></td>
                     <td className="px-3 py-2">{roleText(ticket.applicantRole)}</td>
                     <td className="px-3 py-2">{!globalQueue && (ticket.uplineRole === "super_admin" || ticket.uplineRole === "superadmin") ? "Pusat" : (ticket.uplineName || "Pusat")}<div className="text-xs text-slate-500">{roleText(ticket.uplineRole)}</div></td>
                     <td className="px-3 py-2">{ticket.bank}<div className="text-xs text-slate-500">{ticket.accountNumber}</div></td>
-                    <td className="px-3 py-2 font-semibold">{formatRupiah(ticket.transferAmount ?? ticket.amount)}<div className="font-mono text-xs text-slate-500">kode {ticket.uniqueCode || "—"} · masuk {formatRupiah(ticket.baseAmount ?? ticket.amount)}</div></td>
+                    <td className="px-3 py-2 font-semibold">{formatRupiah(depositCredit(ticket))}<div className="font-mono text-xs text-slate-500">kode {ticket.uniqueCode || "—"} ikut masuk ke saldo</div></td>
                     <td className="px-3 py-2"><Badge tone={ticketPhase(ticket, Date.now(), "admin").tone}>{ticketPhase(ticket, Date.now(), "admin").label}</Badge></td>
                     <td className="px-3 py-2">
                       {allowed ? (
@@ -518,7 +525,7 @@ export function ManageSetoranPage() {
               <div><div className="text-xs text-slate-500">Waktu mutasi bank</div><div>{formatWaktu(detail.transferAt)}</div></div>
               <div><div className="text-xs text-slate-500">Loket</div><div className="font-semibold">{loketOf(detail).name}</div><div className="text-xs text-slate-500">{loketOf(detail).code ? `Kode ${loketOf(detail).code}` : ""}</div></div>
               <div><div className="text-xs text-slate-500">Sumber</div><div>{detail.bank}</div><div className="text-xs text-slate-500">{detail.accountNumber}</div></div>
-              <div><div className="text-xs text-slate-500">Nominal</div><div className="font-semibold">{formatRupiah(detail.baseAmount ?? detail.amount)}</div></div>
+              <div><div className="text-xs text-slate-500">Masuk ke saldo</div><div className="font-semibold">{formatRupiah(depositCredit(detail))}</div><div className="text-xs text-slate-500">Kode unik {detail.uniqueCode || "—"} termasuk dalam nominal ini</div></div>
               <div><div className="text-xs text-slate-500">Status</div><Badge tone={detail.status === "approved" ? "success" : detail.status === "pending" ? "warning" : detail.status === "reversed" ? "info" : "danger"}>{monitorLabel[detail.status]}</Badge></div>
             </div>
             <div>
