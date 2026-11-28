@@ -155,24 +155,38 @@ Deno.serve(async (req) => {
     }
     if (action === "decide" && decision === "approve") {
       const approved = await admin.rpc("ledger_approve_deposit", { p_actor: user.id, p_ticket: id });
-      if (approved.error) {
-        const missing = /schema cache|could not find the function|PGRST202/i.test(databaseMessage(approved.error));
-        return respond({
-          error: missing
-            ? "Persetujuan belum memasukkan kode unik. Jalankan migrasi SQL terbaru, lalu setujui lagi. Saldo belum berubah."
-            : databaseMessage(approved.error),
-        }, 500);
+      const missing = approved.error && /schema cache|could not find the function|PGRST202/i.test(databaseMessage(approved.error));
+      if (!missing) {
+        if (approved.error) return respond({ error: databaseMessage(approved.error) }, 500);
+        const approvedBody = (approved.data ?? {}) as { error?: string; status?: number; ticket?: { status?: string }; balance?: number };
+        if (approvedBody.error || approvedBody.ticket?.status !== "approved") {
+          return respond({ error: approvedBody.error || "Persetujuan tidak mengubah status tiket. Saldo tidak dipindahkan." }, approvedBody.status || 409);
+        }
+        return respond({ ticket: approvedBody.ticket, balance: approvedBody.balance });
       }
-      const approvedBody = (approved.data ?? {}) as { error?: string; status?: number; ticket?: unknown; balance?: number };
-      if (approvedBody.error || !approvedBody.ticket) {
-        return respond({ error: approvedBody.error || "Status tiket gagal diperbarui." }, approvedBody.status || 500);
+      const row = await admin.from("deposit_tickets").select("status,route,amount,base_amount,unique_code,transfer_amount").eq("id", id).maybeSingle();
+      if (row.error) return respond({ error: `Tiket deposit tidak terbaca. Saldo tidak berubah. ${row.error.message}` }, 500);
+      const current = row.data as { status?: string; route?: string; amount?: number; base_amount?: number; unique_code?: string; transfer_amount?: number } | null;
+      if (current?.status === "pending" && current.route === "pusat") {
+        const base = Number(current.base_amount) || Number(current.amount) || 0;
+        const codeText = String(current.unique_code ?? "");
+        const code = /^[0-9]{1,3}$/.test(codeText) ? Number(codeText) : 0;
+        const transfer = Number(current.transfer_amount) || 0;
+        const credit = transfer >= base + code && base + code > 0 ? transfer : code > 0 ? base + code : Math.max(transfer, base);
+        if (credit > 0 && credit !== Number(current.amount)) {
+          const raised = await admin.from("deposit_tickets").update({ amount: credit }).eq("id", id).eq("status", "pending");
+          if (raised.error) return respond({ error: `Nominal transfer gagal disiapkan. Saldo tidak berubah. ${raised.error.message}` }, 500);
+        }
       }
-      return respond({ ticket: approvedBody.ticket, balance: approvedBody.balance });
     }
     const ledgerAction = action === "cancel" ? "cancel_ticket" : action === "claim" ? "claim_ticket" : "decide_ticket";
     const result = await ledger(admin, ledgerAction, user.id, action === "decide" ? { id, action: decision } : { id });
     if (result.status >= 400 || !result.body.ticket) {
-      return respond({ error: result.body.error || "Status tiket gagal diperbarui." }, result.status || 500);
+      return respond({ error: result.body.error || "Status tiket gagal diperbarui. Saldo tidak berubah." }, result.status || 500);
+    }
+    const decided = result.body.ticket as { status?: string };
+    if (action === "decide" && decision === "approve" && decided.status !== "approved") {
+      return respond({ error: "Persetujuan tidak mengubah status tiket. Saldo tidak dipindahkan." }, 409);
     }
     return respond({ ticket: result.body.ticket, balance: result.body.balance });
   }

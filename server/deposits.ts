@@ -497,7 +497,12 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       : "";
     if (!action) return { status: 400, body: { error: "Aksi tidak valid." } };
     const result = await decideTicket(env, caller.id, clean(body.id), action);
-    if (result.error || !result.ticket) return { status: result.status, body: { error: result.error } };
+    if (result.error || !result.ticket || (action === "approve" && result.ticket.status !== "approved")) {
+      const error = (result.error || "Persetujuan tidak mengubah status tiket. Saldo tidak dipindahkan.").replace(/^SALDO:/, "");
+      console.log(`[deposit] ${action} ${clean(body.id)} gagal ${error}`);
+      return { status: result.status || 409, body: { error } };
+    }
+    if (action === "approve") console.log(`[deposit] approve ${result.ticket.id} nominal ${result.ticket.amount} saldo ${result.balance ?? ""}`);
     return { status: 200, body: { ticket: result.ticket, balance: result.balance } };
   }
 

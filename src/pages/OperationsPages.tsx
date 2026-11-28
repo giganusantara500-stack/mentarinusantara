@@ -261,6 +261,7 @@ export function ManageSetoranPage() {
   const [date, setDate] = useState("");
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
+  const [decideError, setDecideError] = useState("");
   const [busyId, setBusyId] = useState("");
   const [pool, setPool] = useState(0);
   const [poolReady, setPoolReady] = useState(false);
@@ -352,11 +353,17 @@ export function ManageSetoranPage() {
 
   const decide = async (id: string, action: "approve" | "cancel" | "pending" | "void") => {
     setBusyId(id);
-    setError("");
+    setDecideError("");
+    setNote("");
     const session = await supabase.auth.getSession();
     const result = await depositRequest("/api/deposits/decide", "POST", session.data.session?.access_token ?? "", { id, action });
     setBusyId("");
-    if (!result.ok) { setError(depositErrorText(result.status, result.body, "Keputusan gagal disimpan.")); return; }
+    const ticket = result.body.ticket as Ticket | undefined;
+    if (!result.ok || (action === "approve" && ticket?.status !== "approved")) {
+      setDecideError(depositErrorText(result.status, result.body, "Persetujuan gagal. Saldo tidak berubah."));
+      return;
+    }
+    if (action === "approve") setNote(`Deposit disetujui. ${formatRupiah(Number(ticket?.amount) || Number(ticket?.transferAmount) || 0)} berpindah dari Saldo Utama ke pemohon.`);
     await load();
   };
 
@@ -431,6 +438,7 @@ export function ManageSetoranPage() {
       </Card>
       <NormalizationHistory rows={normalizations} />
       {normalizeError && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{normalizeError}</div>}
+      {decideError && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{decideError}</div>}
       {error && <div className="mb-3 text-sm text-rose-600">{error}</div>}
       {note && <div className="mb-3 text-sm text-emerald-700">{note}</div>}
       <div className={`mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-3 ${globalQueue ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
@@ -479,12 +487,12 @@ export function ManageSetoranPage() {
                     <td className="px-3 py-2">{roleText(ticket.applicantRole)}</td>
                     <td className="px-3 py-2">{!globalQueue && (ticket.uplineRole === "super_admin" || ticket.uplineRole === "superadmin") ? "Pusat" : (ticket.uplineName || "Pusat")}<div className="text-xs text-slate-500">{roleText(ticket.uplineRole)}</div></td>
                     <td className="px-3 py-2">{ticket.bank}<div className="text-xs text-slate-500">{ticket.accountNumber}</div></td>
-                    <td className="px-3 py-2 font-semibold">{formatRupiah(depositCredit(ticket))}<div className="font-mono text-xs text-slate-500">kode {ticket.uniqueCode || "—"} ikut masuk ke saldo</div></td>
+                    <td className="px-3 py-2 font-semibold">{formatRupiah(depositCredit(ticket))}<div className="font-mono text-xs text-slate-500">Kode {ticket.uniqueCode || "—"}</div></td>
                     <td className="px-3 py-2"><Badge tone={ticketPhase(ticket, Date.now(), "admin").tone}>{ticketPhase(ticket, Date.now(), "admin").label}</Badge></td>
                     <td className="px-3 py-2">
                       {allowed ? (
                         <div className="flex flex-wrap gap-2">
-                          {ticket.status === "pending" && <Button size="sm" disabled={busyId === ticket.id || short} onClick={() => decide(ticket.id, "approve")}>Approve</Button>}
+                          {ticket.status === "pending" && <Button size="sm" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "approve")}>Approve</Button>}
                           {ticket.status === "pending" && short && <span className="text-xs text-rose-600">Saldo Utama kurang. Tarik DigiFlazz dulu.</span>}
                           {ticket.status === "pending" && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "cancel")}>Tolak</Button>}
                           {ticket.status === "approved" && <Button size="sm" variant="outline" disabled={busyId === ticket.id} onClick={() => decide(ticket.id, "pending")}>Kembalikan</Button>}
@@ -525,7 +533,7 @@ export function ManageSetoranPage() {
               <div><div className="text-xs text-slate-500">Waktu mutasi bank</div><div>{formatWaktu(detail.transferAt)}</div></div>
               <div><div className="text-xs text-slate-500">Loket</div><div className="font-semibold">{loketOf(detail).name}</div><div className="text-xs text-slate-500">{loketOf(detail).code ? `Kode ${loketOf(detail).code}` : ""}</div></div>
               <div><div className="text-xs text-slate-500">Sumber</div><div>{detail.bank}</div><div className="text-xs text-slate-500">{detail.accountNumber}</div></div>
-              <div><div className="text-xs text-slate-500">Masuk ke saldo</div><div className="font-semibold">{formatRupiah(depositCredit(detail))}</div><div className="text-xs text-slate-500">Kode unik {detail.uniqueCode || "—"} termasuk dalam nominal ini</div></div>
+              <div><div className="text-xs text-slate-500">Nominal</div><div className="font-semibold">{formatRupiah(depositCredit(detail))}</div><div className="font-mono text-xs text-slate-500">Kode {detail.uniqueCode || "—"}</div></div>
               <div><div className="text-xs text-slate-500">Status</div><Badge tone={detail.status === "approved" ? "success" : detail.status === "pending" ? "warning" : detail.status === "reversed" ? "info" : "danger"}>{monitorLabel[detail.status]}</Badge></div>
             </div>
             <div>

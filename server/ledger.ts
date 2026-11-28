@@ -201,19 +201,68 @@ export function claimTicket(env: LedgerEnv, actorId: string, ticketId: string) {
   return ledgerApi(env, "claim_ticket", actorId, { id: ticketId });
 }
 
+function serviceHeaders(env: LedgerEnv, prefer = "") {
+  return {
+    apikey: env.serviceRoleKey,
+    Authorization: `Bearer ${env.serviceRoleKey}`,
+    "Content-Type": "application/json",
+    ...(prefer ? { Prefer: prefer } : {}),
+  };
+}
+
+function fullDepositCredit(row: { amount?: number | null; base_amount?: number | null; unique_code?: string | null; transfer_amount?: number | null }) {
+  const base = Number(row.base_amount) || Number(row.amount) || 0;
+  const codeText = String(row.unique_code ?? "");
+  const code = /^[0-9]{1,3}$/.test(codeText) ? Number(codeText) : 0;
+  const transfer = Number(row.transfer_amount) || 0;
+  if (transfer >= base + code && base + code > 0) return transfer;
+  if (code > 0) return base + code;
+  return Math.max(transfer, base);
+}
+
+async function bookFullDepositCredit(env: LedgerEnv, ticketId: string): Promise<{ error?: string; status: number; credit: number }> {
+  const read = await fetch(`${env.supabaseUrl}/rest/v1/deposit_tickets?id=eq.${ticketId}&select=status,route,amount,base_amount,unique_code,transfer_amount`, {
+    headers: serviceHeaders(env),
+    signal: AbortSignal.timeout(12_000),
+  });
+  const rows = await read.json().catch(() => null) as Array<{ status?: string; route?: string; amount?: number; base_amount?: number; unique_code?: string; transfer_amount?: number; message?: string }> | { message?: string } | null;
+  if (!read.ok || !Array.isArray(rows)) {
+    const message = !Array.isArray(rows) ? rows?.message : "";
+    return { error: message || "Tiket deposit tidak terbaca. Saldo tidak berubah.", status: read.status || 500, credit: 0 };
+  }
+  const ticket = rows[0];
+  if (!ticket) return { error: "Tiket deposit tidak ditemukan.", status: 404, credit: 0 };
+  if (ticket.status !== "pending" || ticket.route !== "pusat") return { status: 200, credit: Number(ticket.amount) || 0 };
+  const credit = fullDepositCredit(ticket);
+  if (credit <= 0) return { error: "Nominal transfer tidak valid. Saldo tidak berubah.", status: 400, credit: 0 };
+  if (credit === Number(ticket.amount)) return { status: 200, credit };
+  const write = await fetch(`${env.supabaseUrl}/rest/v1/deposit_tickets?id=eq.${ticketId}&status=eq.pending`, {
+    method: "PATCH",
+    headers: serviceHeaders(env, "return=representation"),
+    body: JSON.stringify({ amount: credit }),
+    signal: AbortSignal.timeout(12_000),
+  });
+  const updated = await write.json().catch(() => null) as Array<{ amount?: number; message?: string }> | { message?: string } | null;
+  const stored = Array.isArray(updated) ? Number(updated[0]?.amount) : 0;
+  if (!write.ok || stored !== credit) {
+    const message = !Array.isArray(updated) ? updated?.message : "";
+    return { error: message || "Nominal transfer gagal disiapkan. Saldo tidak berubah.", status: write.status || 500, credit: 0 };
+  }
+  return { status: 200, credit };
+}
+
 async function approveFullDeposit(env: LedgerEnv, actorId: string, ticketId: string): Promise<LedgerResult> {
   if (!env.supabaseUrl || !env.serviceRoleKey) {
     return { error: "Konfigurasi database belum lengkap.", status: 500 };
+  }
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ticketId)) {
+    return { error: "Tiket deposit tidak valid. Saldo tidak berubah.", status: 400 };
   }
   let response: Response;
   try {
     response = await fetch(`${env.supabaseUrl}/rest/v1/rpc/ledger_approve_deposit`, {
       method: "POST",
-      headers: {
-        apikey: env.serviceRoleKey,
-        Authorization: `Bearer ${env.serviceRoleKey}`,
-        "Content-Type": "application/json",
-      },
+      headers: serviceHeaders(env),
       body: JSON.stringify({ p_actor: actorId, p_ticket: ticketId }),
       signal: AbortSignal.timeout(12_000),
     });
@@ -222,22 +271,28 @@ async function approveFullDeposit(env: LedgerEnv, actorId: string, ticketId: str
     return {
       error: timedOut
         ? "Database saldo tidak menjawab tepat waktu. Cek saldo sebelum menyetujui lagi."
-        : "Database saldo tidak dapat dihubungi.",
+        : "Database saldo tidak dapat dihubungi. Saldo tidak berubah.",
       status: timedOut ? 504 : 500,
     };
   }
   const body = await response.json().catch(() => null) as (LedgerResult & { message?: string; details?: string; hint?: string; code?: string }) | null;
+  const message = String(body?.message || "");
+  const missing = response.status === 404 || body?.code === "PGRST202" || /schema cache|could not find the function|ledger_approve_deposit/i.test(`${message} ${body?.details || ""}`);
+  if (missing) {
+    const booked = await bookFullDepositCredit(env, ticketId).catch(() => ({ error: "Nominal transfer gagal disiapkan. Saldo tidak berubah.", status: 500, credit: 0 }));
+    if (booked.error) return { error: booked.error, status: booked.status };
+    const moved = await ledgerApi(env, "decide_ticket", actorId, { id: ticketId, action: "approve" });
+    console.log(`[deposit] approve ${ticketId} jalur lama nominal ${booked.credit} hasil ${moved.ticket?.status || "gagal"} ${moved.error || ""}`);
+    return moved;
+  }
   if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)) {
-    const message = String(body?.message || "");
-    const missing = body?.code === "PGRST202" || /schema cache|could not find the function|ledger_approve_deposit/i.test(message);
     return {
-      error: missing
-        ? "Persetujuan belum memasukkan kode unik. Jalankan migrasi SQL terbaru, lalu setujui lagi. Saldo belum berubah."
-        : ([body?.message, body?.details, body?.hint].filter(Boolean).join(" — ") || "Database saldo menolak persetujuan."),
+      error: [body?.message, body?.details, body?.hint].filter(Boolean).join(" — ") || "Database saldo menolak persetujuan. Saldo tidak berubah.",
       status: response.status || 500,
     };
   }
-  if (body.error && !body.status) return { error: body.message || body.error, status: 500 };
+  if (body.error) return { error: body.message || body.error, status: body.status || 409 };
+  console.log(`[deposit] approve ${ticketId} nominal ${body.ticket?.amount ?? ""} status ${body.ticket?.status || ""}`);
   return body;
 }
 

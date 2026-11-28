@@ -45,15 +45,21 @@ function cmsAmount(ticket: CmsTicket) {
 function DepositTasks({ tickets, onChanged }: { tickets: CmsTicket[]; onChanged: () => void }) {
   const [busy, setBusy] = useState("");
   const [note, setNote] = useState("");
+  const [problem, setProblem] = useState("");
   const tasks = tickets.filter((ticket) => ticket.status === "pending" && ticketPhase(ticket, Date.now(), "admin").label !== "Kedaluwarsa");
   const decide = async (id: string, action: "approve" | "cancel") => {
     setBusy(id + action);
     setNote("");
+    setProblem("");
     const session = await supabase.auth.getSession();
     const result = await depositRequest("/api/deposits/decide", "POST", session.data.session?.access_token ?? "", { id, action });
     setBusy("");
-    if (!result.ok) { setNote(String(result.body.error || "Tiket gagal diproses.")); return; }
-    setNote(action === "approve" ? "Tiket disetujui. Saldo Utama berkurang dan pindah ke pemohon satu kali." : "Tiket dibatalkan.");
+    const ticket = result.body.ticket as { status?: string; amount?: number; transferAmount?: number } | undefined;
+    if (!result.ok || (action === "approve" && ticket?.status !== "approved")) {
+      setProblem(String(result.body.error || "Persetujuan gagal. Saldo tidak berubah."));
+      return;
+    }
+    setNote(action === "approve" ? `Deposit disetujui. ${formatRupiah(Number(ticket?.amount) || Number(ticket?.transferAmount) || 0)} berpindah dari Saldo Utama ke pemohon.` : "Tiket dibatalkan.");
     onChanged();
   };
   return (
@@ -62,14 +68,15 @@ function DepositTasks({ tickets, onChanged }: { tickets: CmsTicket[]; onChanged:
         <h2 className="text-sm font-bold text-slate-900">Tugas deposit</h2>
         <span className="text-xs text-slate-500">{tasks.length} tiket perlu diperiksa</span>
       </div>
-      {note && <p className="mb-2 text-sm text-slate-700">{note}</p>}
+      {problem && <p className="mb-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{problem}</p>}
+      {note && <p className="mb-2 text-sm text-emerald-700">{note}</p>}
       {tasks.length === 0 && <p className="text-sm text-slate-500">Belum ada tiket yang menunggu pemeriksaan.</p>}
       <div className="space-y-2">
         {tasks.map((ticket) => (
           <div key={ticket.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
             <div>
               <div className="text-sm font-semibold text-slate-900">{ticket.loketName || "Pemohon"} · {ticket.applicantRole === "mitra" ? "Mitra" : ticket.applicantRole === "submitra" ? "Sub Mitra" : "Loket"} · {formatRupiah(ticket.transferAmount ?? ticket.amount)}</div>
-              <div className="text-xs text-slate-500">Kode unik {ticket.uniqueCode || "-"} ikut masuk · saldo yang pindah {formatRupiah(cmsAmount(ticket))}</div>
+              <div className="text-xs text-slate-500">Kode {ticket.uniqueCode || "-"} · {formatRupiah(cmsAmount(ticket))}</div>
             </div>
             <div className="flex items-center gap-2">
               <Badge tone={ticketPhase(ticket, Date.now(), "admin").tone}>{ticketPhase(ticket, Date.now(), "admin").label}</Badge>
