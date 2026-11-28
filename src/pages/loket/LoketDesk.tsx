@@ -166,6 +166,13 @@ function monthOf(period: string) {
   return parts.join(", ") || period;
 }
 
+function shortPeriod(period: string) {
+  const full = monthOf(period);
+  if (!full || full === "Memuat" || full === "-" || full === "Tagihan") return full;
+  const month = full.match(/[A-Za-zÀ-ÿ]+/)?.[0] || full;
+  return month.slice(0, 10);
+}
+
 function billStatusLabel(row: GroupBill) {
   if (row.period === "Memuat") return "Memuat";
   const paid = paidNotice(row.note || "");
@@ -1210,101 +1217,101 @@ export function LoketKolektifPage() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden pb-6">
-    <div className="grid min-h-0 w-full flex-1 grid-cols-1 gap-2 lg:grid-cols-[220px_minmax(0,1fr)]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+    <div className="grid min-h-0 w-full flex-1 grid-cols-1 gap-1 lg:grid-cols-[200px_minmax(0,1fr)]">
       <aside className="flex h-full min-h-0 flex-col overflow-hidden rounded-md border border-slate-300 bg-white">
-        <div className="mb-2 shrink-0 px-2 pt-2 text-xs font-bold uppercase text-slate-500">Kolektor</div>
-        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-2">
+        <div className="shrink-0 px-2 py-1 text-[11px] font-bold uppercase text-slate-500">Kolektor</div>
+        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5">
           {sidebarGroups.length === 0 && <p className="text-xs text-slate-400">{productFilter === "semua" ? "Belum ada kolektor." : `Belum ada kolektor ${productFilter}.`}</p>}
           {sidebarGroups.map((group) => (
-            <button key={group.id} onClick={() => { setActiveId(group.id); setPicked([]); setSessionOmit([]); }} className={`block w-full rounded-lg border px-3 py-2 text-left text-sm ${activeId === group.id ? "border-amber-600 bg-amber-500 font-semibold text-white shadow-sm ring-2 ring-amber-300" : "border-transparent text-slate-700 hover:bg-slate-50"}`}>
+            <button key={group.id} onClick={() => { setActiveId(group.id); setPicked([]); setSessionOmit([]); }} className={`block w-full rounded-md border px-2 py-1 text-left text-xs leading-4 ${activeId === group.id ? "border-amber-600 bg-amber-500 font-semibold text-white shadow-sm ring-2 ring-amber-300" : "border-transparent text-slate-700 hover:bg-slate-50"}`}>
               {group.collector || group.name}
-              <div className={`text-xs ${activeId === group.id ? "text-amber-100" : "text-slate-400"}`}>{group.members.length} pelanggan{productFilter === "semua" && group.category ? ` ${group.category}` : ""}</div>
+              <div className={`text-[11px] leading-4 ${activeId === group.id ? "text-amber-100" : "text-slate-400"}`}>{group.members.length} pelanggan{productFilter === "semua" && group.category ? ` ${group.category}` : ""}</div>
             </button>
           ))}
         </div>
-        <div className="mt-2 flex shrink-0 items-center px-2 py-2.5">
-          <button onClick={() => setManageOpen(true)} className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-700">Kelola Kolektif</button>
+        <div className="flex shrink-0 items-center px-1.5 py-1">
+          <button onClick={() => setManageOpen(true)} className="h-7 w-full rounded-md border border-slate-200 bg-slate-50 px-2 text-[11px] font-semibold text-slate-700">Kelola Kolektif</button>
         </div>
       </aside>
       <section className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-md border border-slate-300 bg-white">
-        <div className="shrink-0 border-b border-slate-100 px-3 py-2 text-sm font-semibold text-slate-900">
+        <div className="shrink-0 border-b border-slate-100 px-2 py-1 text-xs font-semibold leading-4 text-slate-900">
           {activeLabel ? `Kelola Pelanggan - ${activeLabel}${productFilter === "semua" ? "" : ` · ${productFilter}`}` : "Kelola Pelanggan"}
         </div>
-        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-100 px-3 py-2">
+        <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-100 px-2 py-1">
           {(["semua", ...KOLEKTIF_CATEGORIES] as const).map((key) => (
-            <button key={key} type="button" onClick={() => { setProductFilter(key); if (key !== "semua") setBiller(key); setPicked([]); }} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${productFilter === key ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>{key === "semua" ? "Semua" : key}</button>
+            <button key={key} type="button" onClick={() => { setProductFilter(key); if (key !== "semua") setBiller(key); setPicked([]); }} className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold leading-4 ${productFilter === key ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>{key === "semua" ? "Semua" : key}</button>
           ))}
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2 border-b border-slate-100 p-3">
+        <div className="flex shrink-0 flex-wrap gap-1 border-b border-slate-100 px-2 py-1">
           <input ref={fileRef} type="file" accept=".csv,.txt,.xlsx,.xls" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) importFile(file); event.target.value = ""; }} />
-          <button onClick={() => fileRef.current?.click()} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">Impor Excel/CSV</button>
-          <button onClick={() => setSheetOpen(true)} disabled={!active || bills.length === 0 || bills.some((row) => row.period === "Memuat")} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40">Preview List</button>
-          <button onClick={() => setHistoryOpen(true)} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">Riwayat Pembayaran</button>
-          <button type="button" onClick={recheckBills} disabled={!active || paying || bills.some((row) => row.period === "Memuat")} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40">Cek Ulang</button>
+          <button onClick={() => fileRef.current?.click()} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold leading-4 text-slate-700">Impor Excel/CSV</button>
+          <button onClick={() => setSheetOpen(true)} disabled={!active || bills.length === 0 || bills.some((row) => row.period === "Memuat")} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold leading-4 text-slate-700 disabled:opacity-40">Preview List</button>
+          <button onClick={() => setHistoryOpen(true)} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold leading-4 text-slate-700">Riwayat Pembayaran</button>
+          <button type="button" onClick={recheckBills} disabled={!active || paying || bills.some((row) => row.period === "Memuat")} className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold leading-4 text-slate-700 disabled:opacity-40">Cek Ulang</button>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2 px-3 py-3">
+        <div className="flex shrink-0 flex-wrap items-center gap-1 px-2 py-1">
           {([
             ["semua", `Semua (${counts.semua})`],
             ["BL LNS", `BL LUNAS (${counts["BL LNS"]})`],
             ["LUNAS", `LUNAS (${counts.LUNAS})`],
             ["LAINNYA", `Perlu Diperiksa (${counts.LAINNYA})`],
           ] as const).map(([key, label]) => (
-            <button key={key} onClick={() => setFilter(key)} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${filter === key ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>
+            <button key={key} onClick={() => setFilter(key)} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold leading-4 ${filter === key ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>
           ))}
-          <label className="ml-auto flex items-center gap-2 text-xs font-semibold text-slate-600">
+          <label className="ml-auto flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
             Admin Bank
-            <span className="w-28">
-              <Select value={String(plnAdmin)} onChange={(event) => { const fee = Number(event.target.value); setPlnAdmin(fee); savePlnAdmin(fee); }} className="h-8 py-1">
+            <span className="w-40">
+              <Select value={String(plnAdmin)} onChange={(event) => { const fee = Number(event.target.value); setPlnAdmin(fee); savePlnAdmin(fee); }} className="h-7 px-2 py-0 text-xs">
                 {ADMIN_FEES.map((fee) => <option key={fee} value={fee}>{formatRupiah(fee)}</option>)}
               </Select>
             </span>
           </label>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} placeholder="Cari ID atau nama" className="w-48 rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} placeholder="Cari ID atau nama" className="h-7 w-40 rounded-md border border-slate-200 px-2 text-xs" />
         </div>
-        <div className={`h-5 shrink-0 px-3 text-sm ${noticeTone === "ok" ? "text-emerald-700" : "text-rose-600"}`}>{notice}</div>
+        <div className={`h-4 shrink-0 truncate px-2 text-[11px] leading-4 ${noticeTone === "ok" ? "text-emerald-700" : "text-rose-600"}`}>{notice}</div>
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[1100px] table-fixed text-left text-xs">
+          <table className="w-full table-fixed text-left text-xs leading-4">
             <colgroup>
               <col className="w-8" />
-              <col className="w-8" />
-              <col className="w-28" />
-              <col className="w-24" />
-              <col className="w-20" />
-              <col className="w-24" />
-              <col className="w-24" />
-              <col className="w-24" />
-              <col className="w-64" />
-              <col className="w-14" />
+              <col className="w-7" />
+              <col className="w-[7.25rem]" />
+              <col />
+              <col className="w-[4.5rem]" />
+              <col className="w-[4.75rem]" />
+              <col className="w-[5.25rem]" />
+              <col className="w-[7.5rem]" />
+              <col className="w-[13.25rem]" />
+              <col className="w-16" />
             </colgroup>
             <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
               <tr>
-                <th className="px-2 py-2"><input type="checkbox" checked={visible.length > 0 && visible.every((row) => picked.includes(memberKey(row)))} onChange={(event) => setPicked(event.target.checked ? visible.map((row) => memberKey(row)) : [])} /></th>
-                {["No", "ID Pelanggan", "Nama Pelanggan", "Produk", "Periode", "Admin Bank", "Total Bayar", "Status", ""].map((head) => <th key={head || "aksi"} className={`whitespace-nowrap px-2 py-2 font-semibold ${head === "Admin Bank" || head === "Total Bayar" ? "text-right" : ""}`}>{head}</th>)}
+                <th className="px-1 py-1"><input type="checkbox" checked={visible.length > 0 && visible.every((row) => picked.includes(memberKey(row)))} onChange={(event) => setPicked(event.target.checked ? visible.map((row) => memberKey(row)) : [])} /></th>
+                {["No", "ID Pelanggan", "Nama Pelanggan", "Produk", "Periode", "Admin Bank", "Total Bayar", "Status", ""].map((head) => <th key={head || "aksi"} className={`whitespace-nowrap px-1 py-1 font-semibold ${head === "Admin Bank" || head === "Total Bayar" ? "text-right" : ""}`}>{head}</th>)}
               </tr>
             </thead>
             <tbody>
-              {visible.length === 0 && active && <tr><td colSpan={10} className="px-3 py-8 text-center text-slate-500">{bills.length === 0 ? (productFilter === "semua" ? "Belum ada pelanggan pada kolektor ini." : `Belum ada data pelanggan ${productFilter} untuk kolektor ini.`) : "Tidak ada pelanggan pada filter ini."}</td></tr>}
+              {visible.length === 0 && active && <tr><td colSpan={10} className="px-2 py-4 text-center text-slate-500">{bills.length === 0 ? (productFilter === "semua" ? "Belum ada pelanggan pada kolektor ini." : `Belum ada data pelanggan ${productFilter} untuk kolektor ini.`) : "Tidak ada pelanggan pada filter ini."}</td></tr>}
               {visible.map((row, index) => (
                 <tr key={memberKey(row)} className="border-t border-slate-100 text-slate-700">
-                  <td className="px-2 py-2"><input type="checkbox" checked={picked.includes(memberKey(row))} onChange={(event) => setPicked((rows) => event.target.checked ? [...rows, memberKey(row)] : rows.filter((item) => item !== memberKey(row)))} /></td>
-                  <td className="px-2 py-2">{index + 1}</td>
-                  <td className="px-2 py-2 font-mono">{row.number}</td>
-                  <td className="truncate px-2 py-2" title={shownCustomer(row.name)}>{shownCustomer(row.name)}</td>
-                  <td className="truncate px-2 py-2" title={row.menuProduct || row.product || ""}>{row.menuProduct || row.product || canonicalCategory(row.product)}</td>
-                  <td className="truncate px-2 py-2" title={monthOf(row.period)}>{monthOf(row.period)}</td>
-                  <td className="whitespace-nowrap px-2 py-2 text-right">{row.period === "Memuat" ? "—" : formatRupiah(row.adminFee || 0)}</td>
-                  <td className="whitespace-nowrap px-2 py-2 text-right font-semibold">{formatRupiah(row.total)}</td>
-                  <td className="whitespace-nowrap px-2 py-2" title={billStatusLabel(row)}>{billStatusLabel(row)}</td>
-                  <td className="px-2 py-2 text-right"><button type="button" onClick={() => releaseCustomer(memberKey(row))} className="text-xs font-semibold text-rose-600">Keluarkan</button></td>
+                  <td className="px-1 py-0.5"><input type="checkbox" checked={picked.includes(memberKey(row))} onChange={(event) => setPicked((rows) => event.target.checked ? [...rows, memberKey(row)] : rows.filter((item) => item !== memberKey(row)))} /></td>
+                  <td className="px-1 py-0.5 tabular-nums">{index + 1}</td>
+                  <td className="truncate px-1 py-0.5 font-mono" title={row.number}>{row.number}</td>
+                  <td className="truncate px-1 py-0.5" title={shownCustomer(row.name)}>{shownCustomer(row.name)}</td>
+                  <td className="truncate px-1 py-0.5" title={row.menuProduct || row.product || ""}>{row.menuProduct || row.product || canonicalCategory(row.product)}</td>
+                  <td className="whitespace-nowrap px-1 py-0.5" title={monthOf(row.period)}>{shortPeriod(row.period)}</td>
+                  <td className="whitespace-nowrap px-1 py-0.5 text-right tabular-nums">{row.period === "Memuat" ? "—" : formatRupiah(row.adminFee || 0)}</td>
+                  <td className="whitespace-nowrap px-1 py-0.5 text-right font-semibold tabular-nums">{formatRupiah(row.total)}</td>
+                  <td className="whitespace-nowrap px-1 py-0.5" title={billStatusLabel(row)}>{billStatusLabel(row)}</td>
+                  <td className="px-1 py-0.5 text-right"><button type="button" onClick={() => releaseCustomer(memberKey(row))} className="text-[11px] font-semibold leading-4 text-rose-600">Keluarkan</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div className="flex shrink-0 items-center justify-between gap-3 bg-slate-800 px-4 py-2.5 text-white">
-          <div className="min-w-0 text-sm text-slate-200">Total: {bills.length} pelanggan · Total bayar: {formatRupiah(listTotal)}</div>
-          <button type="button" onClick={() => nextBatch.length && setConfirmOpen(true)} disabled={nextBatch.length === 0 || paying} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-40">{paying ? "Memproses" : `Bayar ${nextBatch.length} Lembar`}</button>
+        <div className="flex shrink-0 items-center justify-between gap-2 bg-slate-800 px-2 py-1 text-white">
+          <div className="min-w-0 truncate text-xs text-slate-200">Total: {bills.length} pelanggan · Total bayar: {formatRupiah(listTotal)}</div>
+          <button type="button" onClick={() => nextBatch.length && setConfirmOpen(true)} disabled={nextBatch.length === 0 || paying} className="h-8 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-3 text-xs font-black text-slate-950 disabled:opacity-40">{paying ? "Memproses" : `Bayar ${nextBatch.length} Lembar`}</button>
         </div>
       </section>
     </div>
