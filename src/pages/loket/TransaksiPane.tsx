@@ -6,6 +6,7 @@ import { useLoketRefresh } from "@/components/layout/LoketShell";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { finiteNumber, formatRupiah, formatWaktu } from "@/lib/format";
+import { ADMIN_BANK_EVENT, ADMIN_FEES, BILLER_ADMIN, loadPlnAdmin, savePlnAdmin } from "@/lib/adminBank";
 import { BILLER_CATEGORIES, faceValue, findCatalogItem, productsFor } from "@/lib/billerCatalog";
 import { applyGroupAdmin, expandBillRows } from "@/lib/billQueue";
 import { loadPrinterSettings, printReceipts, type ReceiptBill } from "@/lib/printer";
@@ -13,27 +14,8 @@ import { apiUrl } from "@/lib/apiBase";
 import { PENDING_HOLD_MS } from "@/lib/pendingWindow";
 
 const CATEGORIES = BILLER_CATEGORIES;
-const ADMIN_FEES = [4800, 4900, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 10000, 11000, 12000, 13000, 14000, 15000];
 const BPJS_MONTHS = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, "0"));
 const TAX_YEARS = Array.from({ length: new Date().getFullYear() - 2017 }, (_, index) => String(2019 + index));
-const BILLER_ADMIN: Record<string, number> = {
-  Pulsa: 1500,
-  "Paket Data": 1500,
-  Games: 1500,
-  "E-Money": 1500,
-  "SMS & Telpon": 1500,
-  Voucher: 1500,
-  TV: 1500,
-  "Masa Aktif": 1500,
-  Gas: 2500,
-  PDAM: 2500,
-  "HP Postpaid": 2500,
-  Internet: 2500,
-  BPJS: 2500,
-  "by.U": 2500,
-  "TV Postpaid": 3000,
-  Lainnya: 2500,
-};
 
 interface Sale {
   id: string;
@@ -413,7 +395,7 @@ export function LoketTransaksiPage() {
   const [category, setCategory] = useState(CATEGORIES[0]);
   const [mode, setMode] = useState<"bayar" | "cetak">("bayar");
   const [product, setProduct] = useState(productsFor(CATEGORIES[0])[0]);
-  const [adminFee, setAdminFee] = useState(4800);
+  const [adminFee, setAdminFee] = useState(loadPlnAdmin);
   const [months, setMonths] = useState("01");
   const [taxYear, setTaxYear] = useState(String(new Date().getFullYear()));
   const [number, setNumber] = useState("");
@@ -439,6 +421,15 @@ export function LoketTransaksiPage() {
   useEffect(() => {
     if (choices.length > 0 && !choices.includes(product)) setProduct(choices[0]);
   }, [choiceKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const sync = () => setAdminFee(loadPlnAdmin());
+    window.addEventListener(ADMIN_BANK_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(ADMIN_BANK_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
   const appliedAdmin = category === "PLN" ? adminFee : (BILLER_ADMIN[category] ?? 0);
   const columns = ["No", "Produk", "Cust.ID", "Nama", "Periode", "Tot. Tagihan", "Tagihan", "Denda", "Admin Bank", "Collfee"];
 
@@ -450,7 +441,6 @@ export function LoketTransaksiPage() {
     setReprintId("");
     setReprintDate("");
     setReprintHits([]);
-    setAdminFee(4800);
     setMonths("01");
     setTaxYear(String(new Date().getFullYear()));
     setPendingRef("");
@@ -928,7 +918,7 @@ export function LoketTransaksiPage() {
             </Field>
             {category === "PLN" ? (
               <Field label="Pilihan Admin Bank">
-                <Select value={String(adminFee)} onChange={(event) => setAdminFee(Number(event.target.value))}>
+                <Select value={String(adminFee)} onChange={(event) => { const fee = Number(event.target.value); setAdminFee(fee); savePlnAdmin(fee); }}>
                   {ADMIN_FEES.map((fee) => <option key={fee} value={fee}>{formatRupiah(fee)}</option>)}
                 </Select>
               </Field>

@@ -1,5 +1,5 @@
 import { foldLabel, resolveCollectiveProduct } from "../src/lib/billerCatalog";
-import { billIsPaid, callbackKeys, digiflazzReady, displayToken, inquireDigiflazz, newRefId, payDigiflazz, productKind, quoteFrom, resolveBuyerSku, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
+import { billIsPaid, callbackKeys, digiflazzReady, displayToken, inquireDigiflazz, newRefId, paidBillMessage, payDigiflazz, productKind, quoteFrom, resolveBuyerSku, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
 import { listNetworkSales, listSimulations, recordLoketSale, walletBalance, type LedgerEnv, type LoketSale } from "./ledger";
 import { ownerCollectives } from "./ops";
 
@@ -16,6 +16,7 @@ export interface BillQuote {
   total: number;
   providerCost: number;
   providerAdmin?: number;
+  stand?: string;
   lines?: { period: string; amount: number | null; denda: number | null }[];
 }
 
@@ -214,6 +215,7 @@ function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
     total: total || summed,
     providerCost: quote.providerCost > 0 ? quote.providerCost : Math.max(0, quote.amount + quote.denda),
     providerAdmin: quote.adminFee > 0 ? quote.adminFee : 0,
+    stand: quote.stand || "",
     lines: quote.lines ?? [],
   };
 }
@@ -240,7 +242,8 @@ const h2hProvider: BillerProvider = {
         console.log(`[inquiry] ${kind} ${sku} id···${tail} ${status} ${message.replace(/\s+/g, " ").slice(0, 160)}`);
         return { status, message } as { status: "found" | "not_found" | "unavailable" | "paid"; message: string };
       };
-      if (billIsPaid(quote.message)) return { ...finish("paid", quote.message || "Tagihan sudah lunas."), providerRef: quote.refId, buyerSkuCode: quote.sku || sku, bill: billFromQuote(quote, input.adminFee) };
+      const paidNote = paidBillMessage(quote.message);
+      if (paidNote || billIsPaid(quote.message)) return { ...finish("paid", paidNote || quote.message || "[0088] TAGIHAN SUDAH TERBAYAR"), providerRef: quote.refId, buyerSkuCode: quote.sku || sku, bill: billFromQuote(quote, input.adminFee) };
       if (quote.outcome === "not_found") return { ...finish("not_found", quote.message || "Tidak ada tagihan."), providerRef: quote.refId, buyerSkuCode: quote.sku || sku };
       if (quote.outcome === "failed") return finish("unavailable", quote.message || "DigiFlazz menolak pengecekan.");
       if (quote.total < 1000 && quote.amount < 1000) return finish("unavailable", quote.message || "Harga DigiFlazz belum tersedia untuk kode produk ini.");

@@ -6,6 +6,7 @@ import { useLoketRefresh } from "@/components/layout/LoketShell";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
+import { ADMIN_BANK_EVENT, ADMIN_FEES, adminForProduct, loadPlnAdmin, savePlnAdmin } from "@/lib/adminBank";
 import { BILLER_CATEGORIES, BILLER_CATALOG, collectiveProductChoices, collectiveTab, productsFor, resolveCollectiveProduct } from "@/lib/billerCatalog";
 import { PDAM_AREAS } from "@/lib/pdam";
 import { depositRequest } from "@/lib/depositApi";
@@ -61,7 +62,7 @@ interface Bill {
 }
 
 interface Member { number: string; name: string; product?: string }
-interface GroupBill { number: string; name: string; product?: string; period: string; total: number; status: "LUNAS" | "BL LNS" | "LAINNYA"; note?: string; sku?: string; providerRef?: string; menuCategory?: string; menuProduct?: string; tagihan?: number; denda?: number; adminFee?: number; providerCost?: number }
+interface GroupBill { number: string; name: string; product?: string; period: string; total: number; status: "LUNAS" | "BL LNS" | "LAINNYA"; note?: string; sku?: string; providerRef?: string; menuCategory?: string; menuProduct?: string; tagihan?: number; denda?: number; adminFee?: number; providerCost?: number; stand?: string }
 interface Group {
   id: string;
   name: string;
@@ -140,7 +141,7 @@ function printSheet(text: string) {
   if (!popup) return;
   const body = text.replace(/</g, "&lt;");
   const closeScript = "</" + "script>";
-  popup.document.write(`<!doctype html><html><head><title>Daftar Tagihan Kolektif</title><style>@page{size:A4 portrait;margin:12mm}body{margin:0}pre{font-family:"Courier New",Consolas,monospace;font-size:11px;line-height:1.45;white-space:pre;color:#0f172a}</style></head><body><pre>${body}</pre><script>window.onload=function(){window.print()}${closeScript}</body></html>`);
+  popup.document.write(`<!doctype html><html><head><title>Daftar Tagihan Kolektif</title><style>@page{size:A4 landscape;margin:10mm}body{margin:0}pre{font-family:"Courier New",Consolas,monospace;font-size:10px;line-height:1.35;white-space:pre;color:#0f172a}</style></head><body><pre>${body}</pre><script>window.onload=function(){window.print()}${closeScript}</body></html>`);
   popup.document.close();
   popup.focus();
 }
@@ -153,17 +154,45 @@ function clip(value: string, width: number) {
   return value.length > width ? value.slice(0, width) : value.padEnd(width);
 }
 
-function printStatus(status: GroupBill["status"]) {
-  if (status === "LUNAS") return "LUNAS";
-  if (status === "BL LNS") return "BL LNS";
-  return "GAGAL";
+function paidNotice(message: string) {
+  const cleaned = message.replace(/\s+/g, " ").trim();
+  if (!cleaned || (/belum tersedia/i.test(cleaned) && !/terbayar|dibayar/i.test(cleaned))) return "";
+  if (/\[0*88\]|sudah\s+(di|ter)?bayar|tagihan\s+sudah/i.test(cleaned)) return cleaned;
+  return "";
+}
+
+function monthOf(period: string) {
+  const parts = period.split("·").map((item) => item.trim()).filter((item) => item && !/VA\b/i.test(item) && !/^\d+\s+lembar$/i.test(item));
+  return parts.join(", ") || period;
+}
+
+function billStatusLabel(row: GroupBill) {
+  if (row.period === "Memuat") return "Memuat";
+  const paid = paidNotice(row.note || "");
+  if (row.status === "LUNAS") return paid || "LUNAS";
+  if (row.status === "LAINNYA") return row.note || "Perlu Diperiksa";
+  return "BL LUNAS";
+}
+
+function applyDeskAdmin(row: GroupBill, plnChoice: number): GroupBill {
+  if (row.period === "Memuat" || row.status === "LUNAS" || row.status === "LAINNYA") return row;
+  const admin = adminForProduct(row.menuCategory || row.product || "", row.menuProduct || row.product || "", plnChoice);
+  const denda = row.denda || 0;
+  const tagihan = row.tagihan && row.tagihan > 0 ? row.tagihan : Math.max(0, (row.total || 0) - (row.adminFee || 0) - denda);
+  if (tagihan < 1000 && row.total < 1000) return row;
+  return { ...row, tagihan, adminFee: admin, total: tagihan + denda + admin };
+}
+
+function rupiahCol(value: number, width: number) {
+  const text = formatRupiah(value);
+  return text.length > width ? text.slice(0, width) : text.padStart(width);
 }
 
 function sheetText(group: Group, code: string, loketName: string) {
-  const period = group.bills.find((bill) => bill.period && bill.period !== "Memuat")?.period || new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" });
-  const rule = "=".repeat(92);
-  const line = "-".repeat(92);
-  const header = `${clip("NO", 4)} ${clip("ID PELANGGAN", 16)} ${clip("NAMA PELANGGAN", 22)} ${clip("PERIODE", 16)} ${clip("RP.TOTAL", 14)} STATUS`;
+  const period = group.bills.map((bill) => monthOf(bill.period)).find((item) => item && item !== "Memuat" && item !== "-" && item !== "Tagihan") || new Date().toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+  const rule = "=".repeat(132);
+  const line = "-".repeat(132);
+  const header = `${clip("NO", 4)} ${clip("ID PELANGGAN", 14)} ${clip("NAMA PELANGGAN", 16)} ${clip("PERIODE", 14)} ${clip("STAND METER", 16)} ${"TAGIHAN".padStart(12)} ${"ADMIN BANK".padStart(12)} ${"RP.TOTAL".padStart(14)} STATUS`;
   const lines = [
     rule,
     "MENTARI NUSANTARA",
@@ -177,20 +206,19 @@ function sheetText(group: Group, code: string, loketName: string) {
     header,
     line,
   ];
-  group.bills.forEach((bill, index) => {
-    lines.push(`${clip(String(index + 1), 4)} ${clip(bill.number, 16)} ${clip(bill.name, 22)} ${clip(bill.period, 16)} ${clip(formatRupiah(bill.total), 14)} ${printStatus(bill.status)}`);
-  });
+  const rowLine = (index: number, bill: GroupBill) => `${clip(String(index), 4)} ${clip(bill.number, 14)} ${clip(bill.name || "—", 16)} ${clip(monthOf(bill.period), 14)} ${clip(bill.stand || "-", 16)} ${rupiahCol(bill.tagihan || 0, 12)} ${rupiahCol(bill.adminFee || 0, 12)} ${rupiahCol(bill.total, 14)} ${billStatusLabel(bill)}`;
+  group.bills.forEach((bill, index) => lines.push(rowLine(index + 1, bill)));
   const money = (rows: GroupBill[]) => rows.reduce((total, bill) => total + bill.total, 0);
   const belum = group.bills.filter((bill) => bill.status === "BL LNS");
   const lunas = group.bills.filter((bill) => bill.status === "LUNAS");
   const gagal = group.bills.filter((bill) => bill.status === "LAINNYA");
-  const summary = (label: string, rows: GroupBill[]) => `${label.padEnd(12)}: ${String(rows.length).padStart(4)} lembar    ${formatRupiah(money(rows))}`;
+  const summary = (label: string, rows: GroupBill[]) => `SUBTOTAL ${label.padEnd(12)}: ${String(rows.length).padStart(4)} lembar    ${formatRupiah(money(rows))}`;
   lines.push(line);
-  lines.push(summary("Belum Lunas", belum));
-  lines.push(summary("Lunas", lunas));
-  lines.push(summary("Gagal", gagal));
+  lines.push(summary("BL LUNAS", belum));
+  lines.push(summary("LUNAS", lunas));
+  lines.push(summary("GAGAL", gagal));
   lines.push(line);
-  lines.push(`${clip("", 4)} ${clip("", 16)} ${clip("", 22)} ${clip("TOTAL", 16)} ${formatRupiah(money(group.bills))}`);
+  lines.push(`RP.TOTAL ${formatRupiah(money(group.bills))}    ${group.bills.length} pelanggan`);
   lines.push(rule);
   return lines.join("\n");
 }
@@ -230,6 +258,7 @@ function normalizeBill(bill: Partial<GroupBill>): GroupBill {
     denda: Number(bill.denda) || 0,
     adminFee: Number(bill.adminFee) || 0,
     providerCost: Number(bill.providerCost) || 0,
+    stand: bill.stand ? String(bill.stand) : "",
   };
 }
 
@@ -502,6 +531,7 @@ export function LoketKolektifPage() {
   const [sessionOmit, setSessionOmit] = useState<string[]>([]);
   const [collectorName, setCollectorName] = useState("");
   const [biller, setBiller] = useState("PLN");
+  const [plnAdmin, setPlnAdmin] = useState(loadPlnAdmin);
   const [detailProduct, setDetailProduct] = useState("Postpaid");
   const [custNo, setCustNo] = useState("");
   const [notice, setNotice] = useState("");
@@ -599,6 +629,15 @@ export function LoketKolektifPage() {
   };
   useEffect(() => { void load(); }, [tick, userId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
+    const sync = () => setPlnAdmin(loadPlnAdmin());
+    window.addEventListener(ADMIN_BANK_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => {
+      window.removeEventListener(ADMIN_BANK_EVENT, sync);
+      window.removeEventListener("storage", sync);
+    };
+  }, []);
+  useEffect(() => {
     if (productFilter === "semua") return;
     const group = groups.find((item) => item.id === activeId);
     if (activeId && (!group || !sameCollectorCategory(group, productFilter))) {
@@ -625,7 +664,7 @@ export function LoketKolektifPage() {
     if (!quoteSettled(shown)) return { ...shown, period: "Memuat", total: 0, status: "BL LNS" as const, providerRef: "", note: "" };
     return shown;
   });
-  const bills = tableRows;
+  const bills = tableRows.map((row) => applyDeskAdmin(row, plnAdmin));
   const counts = {
     semua: bills.length,
     "BL LNS": bills.filter((row) => row.status === "BL LNS").length,
@@ -656,7 +695,7 @@ export function LoketKolektifPage() {
           headers: await authHeader(),
           body: JSON.stringify({ items: slice.map((row) => {
             const menu = resolveCollectiveProduct(row.product || "", row.product || "") || resolveCollectiveProduct(canonicalCategory(row.product), row.product || "");
-            return { key: memberKey(row), category: menu?.category || canonicalCategory(row.product), product: menu?.product || row.product || "", customerNumber: row.number };
+            return { key: memberKey(row), category: menu?.category || canonicalCategory(row.product), product: menu?.product || row.product || "", customerNumber: row.number, adminFee: adminForProduct(menu?.category || row.product || "", menu?.product || row.product || "", plnAdmin) };
           }) }),
         }, 90_000);
       } catch {
@@ -695,14 +734,17 @@ export function LoketKolektifPage() {
         const statusText = String(hit?.statusText || "failed");
         const providerRef = String(hit?.providerRef || "");
         const total = Number(quote.total) || 0;
-        let status = statusText === "paid" ? "LUNAS" as const : statusText === "found" ? "BL LNS" as const : "LAINNYA" as const;
+        const incomingNote = String(hit?.message || "");
+        const paid = statusText === "paid" ? (paidNotice(incomingNote) || "[0088] TAGIHAN SUDAH TERBAYAR") : paidNotice(incomingNote);
+        let status = paid ? "LUNAS" as const : statusText === "found" ? "BL LNS" as const : "LAINNYA" as const;
         if (status === "BL LNS" && total < 1000) status = "LAINNYA";
-        const note = String(hit?.message || (statusText === "not_found" ? "Tidak ada tagihan." : status === "LAINNYA" ? "Jawaban untuk ID ini tidak kembali." : ""));
+        const note = paid || incomingNote || (statusText === "not_found" ? "Tidak ada tagihan." : status === "LAINNYA" ? "Jawaban untuk ID ini tidak kembali." : "");
         return {
           number: member.number,
           name: preferShownName(inquired, member.name),
           product: member.product || "",
           period: String(quote.period || (status === "BL LNS" ? "Tagihan" : "-")),
+          stand: String(quote.stand || ""),
           total,
           status,
           note: status === "BL LNS" ? "" : note,
@@ -923,6 +965,10 @@ export function LoketKolektifPage() {
           ?? (numbered.length === 1 && !(numbered[0].product || "").trim() ? numbered[0] : undefined);
         if (target) {
           target.status = "LUNAS";
+          target.total = row.total;
+          target.adminFee = row.adminFee || 0;
+          target.tagihan = row.tagihan || target.tagihan || 0;
+          target.note = "";
           if (!(target.product || "").trim()) target.product = row.product || "";
         }
         slips.push({
@@ -1163,8 +1209,6 @@ export function LoketKolektifPage() {
     })), identityLine(loketCode, loketName));
   };
 
-  const statusText = (status: GroupBill["status"]) => status === "BL LNS" ? "BL LUNAS" : status === "LAINNYA" ? "Perlu Diperiksa" : "LUNAS";
-
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden pb-6">
     <div className="grid min-h-0 w-full flex-1 grid-cols-1 gap-2 lg:grid-cols-[220px_minmax(0,1fr)]">
@@ -1208,44 +1252,51 @@ export function LoketKolektifPage() {
           ] as const).map(([key, label]) => (
             <button key={key} onClick={() => setFilter(key)} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${filter === key ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>
           ))}
-          <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} placeholder="Cari ID atau nama" className="ml-auto w-48 rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
+          <label className="ml-auto flex items-center gap-2 text-xs font-semibold text-slate-600">
+            Admin Bank
+            <span className="w-28">
+              <Select value={String(plnAdmin)} onChange={(event) => { const fee = Number(event.target.value); setPlnAdmin(fee); savePlnAdmin(fee); }} className="h-8 py-1">
+                {ADMIN_FEES.map((fee) => <option key={fee} value={fee}>{formatRupiah(fee)}</option>)}
+              </Select>
+            </span>
+          </label>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} placeholder="Cari ID atau nama" className="w-48 rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
         </div>
         <div className={`h-5 shrink-0 px-3 text-sm ${noticeTone === "ok" ? "text-emerald-700" : "text-rose-600"}`}>{notice}</div>
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full table-fixed text-left text-xs">
+          <table className="w-full min-w-[1100px] table-fixed text-left text-xs">
             <colgroup>
               <col className="w-8" />
-              <col className="w-10" />
-              <col className="w-32" />
-              <col />
-              <col className="w-24" />
-              <col className="w-28" />
+              <col className="w-8" />
               <col className="w-28" />
               <col className="w-24" />
+              <col className="w-20" />
+              <col className="w-24" />
+              <col className="w-24" />
+              <col className="w-24" />
+              <col className="w-64" />
               <col className="w-14" />
             </colgroup>
             <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
               <tr>
                 <th className="px-2 py-2"><input type="checkbox" checked={visible.length > 0 && visible.every((row) => picked.includes(memberKey(row)))} onChange={(event) => setPicked(event.target.checked ? visible.map((row) => memberKey(row)) : [])} /></th>
-                {["No", "ID Pelanggan", "Nama Pelanggan", "Produk", "Periode", "Total Bayar", "Status", ""].map((head) => <th key={head || "aksi"} className="px-2 py-2 font-semibold">{head}</th>)}
+                {["No", "ID Pelanggan", "Nama Pelanggan", "Produk", "Periode", "Admin Bank", "Total Bayar", "Status", ""].map((head) => <th key={head || "aksi"} className={`whitespace-nowrap px-2 py-2 font-semibold ${head === "Admin Bank" || head === "Total Bayar" ? "text-right" : ""}`}>{head}</th>)}
               </tr>
             </thead>
             <tbody>
-              {visible.length === 0 && active && <tr><td colSpan={9} className="px-3 py-8 text-center text-slate-500">{bills.length === 0 ? (productFilter === "semua" ? "Belum ada pelanggan pada kolektor ini." : `Belum ada data pelanggan ${productFilter} untuk kolektor ini.`) : "Tidak ada pelanggan pada filter ini."}</td></tr>}
+              {visible.length === 0 && active && <tr><td colSpan={10} className="px-3 py-8 text-center text-slate-500">{bills.length === 0 ? (productFilter === "semua" ? "Belum ada pelanggan pada kolektor ini." : `Belum ada data pelanggan ${productFilter} untuk kolektor ini.`) : "Tidak ada pelanggan pada filter ini."}</td></tr>}
               {visible.map((row, index) => (
                 <tr key={memberKey(row)} className="border-t border-slate-100 text-slate-700">
-                  <td className="px-3 py-2"><input type="checkbox" checked={picked.includes(memberKey(row))} onChange={(event) => setPicked((rows) => event.target.checked ? [...rows, memberKey(row)] : rows.filter((item) => item !== memberKey(row)))} /></td>
-                  <td className="px-3 py-2">{index + 1}</td>
-                  <td className="px-3 py-2 font-mono">{row.number}</td>
-                  <td className="px-2 py-2 break-words">{shownCustomer(row.name)}</td>
-                  <td className="px-3 py-2">{row.menuProduct || row.product || canonicalCategory(row.product)}</td>
-                  <td className="px-3 py-2 break-words">{row.period}</td>
-                  <td className="px-3 py-2 font-semibold">{formatRupiah(row.total)}</td>
-                  <td className="px-3 py-2" title={row.note || undefined}>
-                    <div>{row.period === "Memuat" ? "Memuat" : statusText(row.status)}</div>
-                    {row.note && <div className="mt-0.5 break-words text-[10px] leading-tight text-slate-500">{row.note}</div>}
-                  </td>
-                  <td className="px-3 py-2 text-right"><button onClick={() => releaseCustomer(memberKey(row))} className="text-xs font-semibold text-rose-600">Keluarkan</button></td>
+                  <td className="px-2 py-2"><input type="checkbox" checked={picked.includes(memberKey(row))} onChange={(event) => setPicked((rows) => event.target.checked ? [...rows, memberKey(row)] : rows.filter((item) => item !== memberKey(row)))} /></td>
+                  <td className="px-2 py-2">{index + 1}</td>
+                  <td className="px-2 py-2 font-mono">{row.number}</td>
+                  <td className="truncate px-2 py-2" title={shownCustomer(row.name)}>{shownCustomer(row.name)}</td>
+                  <td className="truncate px-2 py-2" title={row.menuProduct || row.product || ""}>{row.menuProduct || row.product || canonicalCategory(row.product)}</td>
+                  <td className="truncate px-2 py-2" title={monthOf(row.period)}>{monthOf(row.period)}</td>
+                  <td className="whitespace-nowrap px-2 py-2 text-right">{row.period === "Memuat" ? "—" : formatRupiah(row.adminFee || 0)}</td>
+                  <td className="whitespace-nowrap px-2 py-2 text-right font-semibold">{formatRupiah(row.total)}</td>
+                  <td className="whitespace-nowrap px-2 py-2" title={billStatusLabel(row)}>{billStatusLabel(row)}</td>
+                  <td className="px-2 py-2 text-right"><button type="button" onClick={() => releaseCustomer(memberKey(row))} className="text-xs font-semibold text-rose-600">Keluarkan</button></td>
                 </tr>
               ))}
             </tbody>
@@ -1259,7 +1310,7 @@ export function LoketKolektifPage() {
     </div>
       {sheetOpen && active && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="max-h-[85vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-4 shadow-xl">
+          <div className="max-h-[85vh] w-full max-w-6xl overflow-auto rounded-2xl bg-white p-4 shadow-xl">
             <pre className="overflow-x-auto whitespace-pre font-mono text-[11px] leading-5 text-slate-800">{sheetText({ ...active, bills }, loketCode, loketName)}</pre>
             <div className="mt-4 flex justify-end gap-2">
               <Button onClick={() => printSheet(sheetText({ ...active, bills }, loketCode, loketName))}>CETAK</Button>

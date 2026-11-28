@@ -24,6 +24,7 @@ export interface DigiQuote {
   total: number;
   providerCost: number;
   sn: string;
+  stand?: string;
   lines?: BillMonth[];
 }
 
@@ -52,8 +53,20 @@ export function newRefId() {
   return `MN${randomBytes(12).toString("hex")}`;
 }
 
-export function billIsPaid(message: string) {
-  return /sudah\s+(di)?bayar|sudah\s+lunas|telah\s+lunas|tagihan\s+lunas/.test(message.toLowerCase());
+export function billIsPaid(message: string, rc = "") {
+  const note = message.toLowerCase();
+  const code = rc.replace(/\D/g, "").replace(/^0+/, "");
+  if (code === "88") return true;
+  return /sudah\s+(di|ter)?bayar|sudah\s+lunas|telah\s+lunas|tagihan\s+lunas|tagihan\s+sudah/.test(note);
+}
+
+export function paidBillMessage(message: string, rc = "") {
+  if (!billIsPaid(message, rc)) return "";
+  const cleaned = message.replace(/\s+/g, " ").trim();
+  if (cleaned && !/belum tersedia|tidak mengirim|harga digiflazz/i.test(cleaned)) return cleaned;
+  const digits = rc.replace(/\D/g, "");
+  const code = (digits || "88").padStart(4, "0").slice(-4);
+  return `[${code}] TAGIHAN SUDAH TERBAYAR`;
 }
 
 export function sameSecret(given: string, expected: string) {
@@ -109,7 +122,7 @@ export function mapDigiOutcome(status: string, rc: string, message: string): Dig
   const note = message.toLowerCase();
   if (state.includes("sukses") || state === "success") return "success";
   if (state.includes("gagal") || state === "failed" || note.includes("gagal") || note.includes("ditolak")) return "failed";
-  if (billIsPaid(message)) return "not_found";
+  if (billIsPaid(message, rc)) return "not_found";
   if (note.includes("tidak ditemukan") || note.includes("tidak ada tagihan") || note.includes("tidak ada tunggakan") || rc === "54") return "not_found";
   if (rc === "00") return "success";
   if (state.includes("pending") || state.includes("proses") || state.includes("process") || note.includes("pending") || note.includes("diproses") || note.includes("sedang diproses") || rc === "03" || rc === "39") return "pending";
@@ -244,6 +257,33 @@ function billDetail(data: Record<string, unknown>) {
   return { desc: objectOf(data.desc) ?? {}, rows: detailRows(data) };
 }
 
+function standOf(data: Record<string, unknown>, desc: Record<string, unknown>) {
+  const pools = [desc, data, ...rowList(desc.detail), ...rowList(data.detail), ...rowList(desc.tagihan), ...rowList(data.tagihan)];
+  const first = (keys: string[]) => {
+    for (const row of pools) {
+      for (const key of keys) {
+        const value = scalar(row[key]);
+        if (value) return value;
+      }
+    }
+    return "";
+  };
+  const last = (keys: string[]) => {
+    let found = "";
+    for (const row of pools) {
+      for (const key of keys) {
+        const value = scalar(row[key]);
+        if (value) found = value;
+      }
+    }
+    return found;
+  };
+  const awal = first(["meter_awal", "stand_awal", "stan_awal", "slalwbp"]);
+  const akhir = last(["meter_akhir", "stand_akhir", "stan_akhir", "sahlwbp"]);
+  if (awal && akhir) return `${awal}-${akhir}`;
+  return text(desc.stand_meter) || text(desc.standmeter) || text(data.stand_meter) || text(desc.stand) || "";
+}
+
 function present(value: unknown) {
   return value !== undefined && value !== null && String(value).trim() !== "";
 }
@@ -328,9 +368,11 @@ export function quoteFrom(data: Record<string, unknown>, fallback: { refId: stri
   const lembar = money(desc.lembar_tagihan) || periods.length;
   const periodCore = periods.length > 0 ? [...new Set(periods)].join(", ") : topPeriod;
   const period = [meter, lembar > 1 ? `${lembar} lembar` : "", periodCore].filter(Boolean).join(" · ");
-  const message = text(data.message);
+  const rawMessage = text(data.message);
   const state = text(data.status).toLowerCase();
   const rc = scalar(data.rc);
+  const paidNote = paidBillMessage(rawMessage, rc);
+  const message = paidNote || rawMessage;
   const directSn = displayToken(scalar(data.sn), scalar(data.serial_number), scalar(data.token));
   const sn = directSn || (state.includes("sukses") || state === "success" || rc === "00" ? displayToken(scalar(data.message)) : "");
   let outcome = mapDigiOutcome(text(data.status), rc, message);
@@ -353,6 +395,7 @@ export function quoteFrom(data: Record<string, unknown>, fallback: { refId: stri
     total: total || amount,
     providerCost,
     sn,
+    stand: standOf(data, desc),
     lines,
   };
 }
