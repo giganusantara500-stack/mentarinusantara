@@ -107,10 +107,11 @@ function payloadOf(body: unknown) {
 export function mapDigiOutcome(status: string, rc: string, message: string): DigiOutcome {
   const state = status.toLowerCase();
   const note = message.toLowerCase();
+  if (state.includes("sukses") || state === "success") return "success";
+  if (state.includes("gagal") || state === "failed" || note.includes("gagal") || note.includes("ditolak")) return "failed";
   if (billIsPaid(message)) return "not_found";
   if (note.includes("tidak ditemukan") || note.includes("tidak ada tagihan") || note.includes("tidak ada tunggakan") || rc === "54") return "not_found";
-  if (state.includes("gagal") || state === "failed" || note.includes("gagal") || note.includes("ditolak")) return "failed";
-  if (state.includes("sukses") || state === "success" || rc === "00") return "success";
+  if (rc === "00") return "success";
   if (state.includes("pending") || state.includes("proses") || state.includes("process") || note.includes("pending") || note.includes("diproses") || note.includes("sedang diproses") || rc === "03" || rc === "39") return "pending";
   return "failed";
 }
@@ -328,15 +329,19 @@ export function quoteFrom(data: Record<string, unknown>, fallback: { refId: stri
   const periodCore = periods.length > 0 ? [...new Set(periods)].join(", ") : topPeriod;
   const period = [meter, lembar > 1 ? `${lembar} lembar` : "", periodCore].filter(Boolean).join(" · ");
   const message = text(data.message);
-  let outcome = mapDigiOutcome(text(data.status), scalar(data.rc), message);
+  const state = text(data.status).toLowerCase();
+  const rc = scalar(data.rc);
+  const sn = scalar(data.sn);
+  let outcome = mapDigiOutcome(text(data.status), rc, message);
   if (outcome === "failed" && total >= 1000 && !/gagal|tidak ditemukan|tidak ada tagihan|invalid|salah|cutoff|gangguan|pending|proses|diproses/.test(message.toLowerCase())) {
     outcome = "success";
   }
-  if (text(data.sn) && (scalar(data.rc) === "00" || text(data.status).toLowerCase().includes("sukses"))) outcome = "success";
+  if (sn && !state.includes("gagal") && state !== "failed" && !state.includes("pending") && !state.includes("proses")) outcome = "success";
+  if ((state.includes("sukses") || state === "success") && outcome !== "failed") outcome = "success";
   return {
     outcome,
     message: message || (outcome === "success" ? "Tagihan ditemukan." : "DigiFlazz tidak mengirim keterangan."),
-    refId: text(data.ref_id) || fallback.refId,
+    refId: scalar(data.ref_id) || scalar(data.buyer_tx_id) || fallback.refId,
     sku: text(data.buyer_sku_code) || fallback.sku,
     customerName: customerNameFrom(data),
     customerNumber: text(data.customer_no) || fallback.customerNumber,
@@ -346,7 +351,7 @@ export function quoteFrom(data: Record<string, unknown>, fallback: { refId: stri
     adminFee,
     total: total || amount,
     providerCost,
-    sn: text(data.sn),
+    sn,
     lines,
   };
 }
@@ -698,6 +703,11 @@ export async function statusDigiflazz(input: { kind: DigiKind; sku: string; cust
 }
 
 export function callbackRef(body: Record<string, unknown>) {
+  return callbackKeys(body)[0] || "";
+}
+
+export function callbackKeys(body: Record<string, unknown>) {
   const data = payloadOf(body);
-  return text(data.ref_id) || text(body.ref_id);
+  const keys = [data.ref_id, data.buyer_tx_id, data.trx_id, body.ref_id, body.buyer_tx_id, body.trx_id].map(scalar).filter(Boolean);
+  return [...new Set(keys)];
 }

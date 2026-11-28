@@ -1,6 +1,6 @@
 import { DEPOSIT_ACCOUNTS } from "../src/lib/banks";
 import { networkLoketIds, touchActivity } from "./accountAdmin";
-import { attachSaleReceipts, requestedMode, runBillerPayment } from "./biller";
+import { attachSaleReceipts, requestedMode, runBillerPayment, syncPendingSales } from "./biller";
 import { digiflazzDeposit } from "./digiflazz";
 import { cancelOwnTicket, claimTicket, createTicket, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, PUSAT_ACCOUNT, syncProviderDeposit, walletBalance, type DepositTicket } from "./ledger";
 import { listAuthUsers, loketCodeFor, makeTransferCode } from "./loketCode";
@@ -106,6 +106,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       listSimulations(env, caller.id),
       walletBalance(env, caller.id),
     ]);
+    if (caller.role === "loket") void syncPendingSales(env, caller.id).catch(() => undefined);
     const sales = await attachSaleReceipts(env, listed).catch(() => listed);
     const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
     return { status: 200, body: { sales, simulations, balance, loketCode } };

@@ -10,7 +10,7 @@ import { BILLER_CATEGORIES, faceValue, findCatalogItem, productsFor } from "@/li
 import { applyGroupAdmin, expandBillRows } from "@/lib/billQueue";
 import { loadPrinterSettings, printReceipts, type ReceiptBill } from "@/lib/printer";
 import { apiUrl } from "@/lib/apiBase";
-import { PENDING_HOLD_MS, pendingIsLive } from "@/lib/pendingWindow";
+import { PENDING_HOLD_MS } from "@/lib/pendingWindow";
 
 const CATEGORIES = BILLER_CATEGORIES;
 const ADMIN_FEES = [4800, 4900, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500, 9000, 10000, 11000, 12000, 13000, 14000, 15000];
@@ -485,11 +485,13 @@ export function LoketTransaksiPage() {
       if (!active) return;
       const loaded = [...(body.simulations ?? []), ...(body.sales ?? [])] as Sale[];
       setSales(loaded);
+      salesRef.current = loaded;
+      if (loaded.some((sale) => sale.status === "pending")) void syncStatus(false);
       setPendingRef((current) => {
         const match = loaded.find((sale) => sale.clientRef === current);
-        if (match) return match.status === "pending" && pendingIsLive(match.createdAt) ? current : "";
-        const open = loaded.find((sale) => sale.status === "pending" && sale.clientRef && pendingIsLive(sale.createdAt));
-        return open?.clientRef || current;
+        if (match) return match.status === "pending" ? current : "";
+        const open = loaded.find((sale) => sale.status === "pending" && sale.clientRef);
+        return open?.clientRef || "";
       });
     })();
     return () => { active = false; };
@@ -627,6 +629,39 @@ export function LoketTransaksiPage() {
     if (items.length === 0) return true;
     const slips = items.map((sale) => receiptOf(sale, customerLabel(sale.customerNumber, sale.customerName, salesRef.current, profile?.id || "", namesFromGroups(sale.customerNumber, storedGroups))));
     return printReceipts(loadPrinterSettings(loketCode), slips, `${loketCode} - ${loketName}`);
+  };
+
+  const syncStatus = async (announce: boolean) => {
+    if (paying.current) return;
+    if (announce) {
+      setBusy(true);
+      setError("");
+    }
+    try {
+      const response = await postJson("/api/biller/sync", {}, 70_000);
+      const body = await response.json().catch(() => ({})) as { error?: string; sales?: Sale[] };
+      if (!response.ok) {
+        if (announce) setError(body.error || "Status belum tersinkron.");
+        return;
+      }
+      const incoming = Array.isArray(body.sales) ? body.sales : [];
+      const before = new Map(salesRef.current.map((sale) => [sale.id, sale.status]));
+      const next = [
+        ...incoming,
+        ...salesRef.current.filter((sale) => sale.status === "simulated" && !incoming.some((row) => row.id === sale.id)),
+      ];
+      salesRef.current = next;
+      setSales(next);
+      const fresh = next.filter((sale) => (sale.status === "success" || sale.status === "simulated") && before.get(sale.id) === "pending");
+      if (fresh.length > 0 && !printPaid(fresh)) setError("Struk belum terbuka. Gunakan Cetak Ulang.");
+      else if (announce && fresh.length === 0) setError("");
+      setPendingRef(next.find((sale) => sale.status === "pending" && sale.clientRef)?.clientRef || "");
+      if (announce) requestRefresh();
+    } catch {
+      if (announce) setError("Sinkronisasi status belum mendapat jawaban. Coba lagi.");
+    } finally {
+      if (announce) setBusy(false);
+    }
   };
 
   const readStatus = async (clientRef: string) => {
@@ -994,6 +1029,7 @@ export function LoketTransaksiPage() {
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
               <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-3 font-black" disabled={rows.length === 0} onClick={() => printReceipts(loadPrinterSettings(loketCode), rows.map((row): ReceiptBill => ({ id: row.customerId, name: row.name, product: `${row.category} ${row.product}`, period: row.period, tagihan: row.amount + row.denda, admin: row.admin, total: row.total })), `${loketCode} - ${loketName}`)}>Cetak Info Tagihan</Button>
               <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-4 font-black" onClick={() => { setCart([]); setNumber(""); setError(""); }}>Hapus</Button>
+              {sales.some((sale) => sale.status === "pending") && <button type="button" onClick={() => void syncStatus(true)} disabled={busy} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/40 px-3 text-sm font-black text-white">Sinkronkan</button>}
               {pendingRef && <button type="button" onClick={checkStatus} disabled={busy} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/40 px-3 text-sm font-black text-white">Cek status</button>}
               <button onClick={() => void pay()} disabled={busy || checking || rows.length === 0} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-50">
                 {busy ? "Memproses..." : `BAYAR ${formatRupiah(total)}`}
