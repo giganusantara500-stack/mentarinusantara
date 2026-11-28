@@ -190,9 +190,52 @@ function balanceGapText(provider: number | null, pool: number, network: number, 
   const usedText = `Pemakaian H2H ${formatRupiah(used)} sudah mengurangi saldo DigiFlazz dan tidak ditarik lagi.`;
   if (provider == null) return `Saldo DigiFlazz belum terbaca. ${usedText}`;
   const gap = pool + network + fee - provider;
-  if (gap > 1000) return `Dompet jaringan ${formatRupiah(network)}. Mentari mencatat ${formatRupiah(gap)} di atas saldo DigiFlazz. Setarakan baseline menurunkan kelebihan yang masih di Saldo Utama. Uang yang sudah di dompet loket tidak diambil kembali. ${usedText}`;
-  if (gap < -1000) return `Dompet jaringan ${formatRupiah(network)}. Masih ada ${formatRupiah(-gap)} di DigiFlazz yang belum masuk Saldo Utama. Tarik saldo hanya memasukkan bagian itu. ${usedText}`;
+  if (gap > 1000) return `Dompet jaringan ${formatRupiah(network)}. Mentari mencatat ${formatRupiah(gap)} di atas saldo DigiFlazz. Normalisasi saldo menurunkan kelebihan yang masih di Saldo Utama. Uang yang sudah di dompet loket tidak diambil kembali. ${usedText}`;
+  if (gap < -1000) return `Dompet jaringan ${formatRupiah(network)}. DigiFlazz lebih tinggi ${formatRupiah(-gap)}. Normalisasi saldo memasukkan selisih itu ke Saldo Utama satu kali. ${usedText}`;
   return `Dompet jaringan ${formatRupiah(network)}. Saldo DigiFlazz selaras dengan Saldo Utama, dompet jaringan, dan fee internal. ${usedText}`;
+}
+
+interface NormalizationRow {
+  id: string;
+  at: string;
+  providerBalance: number;
+  pusatBefore: number;
+  pusatAfter: number;
+  direction: "credit" | "debit" | "none";
+  amount: number;
+  remaining: number;
+  note: string;
+}
+
+function normalizeConfirm(provider: number | null, pool: number, network: number, fee: number) {
+  if (provider == null) return "";
+  const gap = pool + network + fee - provider;
+  if (Math.abs(gap) <= 1000) return "";
+  if (gap > 0) return `Mentari mencatat ${formatRupiah(gap)} di atas saldo DigiFlazz ${formatRupiah(provider)}. Normalisasi menurunkan Saldo Utama. Dompet loket tidak dikurangi, dan angka yang sama tidak ditarik ulang. Lanjutkan?`;
+  return `Saldo DigiFlazz ${formatRupiah(provider)} lebih tinggi ${formatRupiah(-gap)} dari catatan Mentari. Normalisasi memasukkan selisih itu ke Saldo Utama satu kali. Tarikan berikutnya tidak menghitung angka yang sama. Lanjutkan?`;
+}
+
+function NormalizationHistory({ rows }: { rows: NormalizationRow[] }) {
+  return (
+    <Card className="mb-4">
+      <CardHeader title="Riwayat normalisasi" subtitle="Penyesuaian Saldo Utama terhadap DigiFlazz. Angka yang sama tidak dicatat dua kali." />
+      {rows.length === 0 ? <p className="px-4 pb-4 text-sm text-slate-500">Belum ada normalisasi saldo.</p> : (
+        <div className="divide-y divide-slate-100">
+          {rows.map((row) => (
+            <div key={row.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
+              <div>
+                <div className="font-semibold text-slate-800">{row.note || "Normalisasi saldo"}</div>
+                <div className="text-xs text-slate-500">{row.at ? formatWaktu(row.at) : ""} · DigiFlazz {formatRupiah(row.providerBalance)} · Saldo Utama {formatRupiah(row.pusatBefore)} → {formatRupiah(row.pusatAfter)}{row.remaining > 0 ? ` · sisa di dompet ${formatRupiah(row.remaining)}` : ""}</div>
+              </div>
+              <div className={row.direction === "credit" ? "font-semibold text-emerald-700" : row.direction === "debit" ? "font-semibold text-rose-700" : "text-slate-500"}>
+                {row.amount > 0 ? `${row.direction === "credit" ? "+" : "−"}${formatRupiah(row.amount)}` : "Tanpa pindah"}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
 }
 
 export function ManageSetoranPage() {
@@ -216,6 +259,7 @@ export function ManageSetoranPage() {
   const [reconcileReady, setReconcileReady] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [aligning, setAligning] = useState(false);
+  const [normalizations, setNormalizations] = useState<NormalizationRow[]>([]);
   const [note, setNote] = useState("");
   const [detail, setDetail] = useState<Ticket | null>(null);
   const globalQueue = isSuperAdmin;
@@ -240,6 +284,7 @@ export function ManageSetoranPage() {
       setNetworkBalance(Number(body.networkBalance) || 0);
       setProviderUsed(Number(body.providerUsed) || 0);
       setReconcileReady(Boolean(body.reconcileReady));
+      setNormalizations(Array.isArray(body.normalizations) ? body.normalizations as NormalizationRow[] : []);
     }
   };
   const sync = async () => {
@@ -264,14 +309,17 @@ export function ManageSetoranPage() {
   };
   const align = async () => {
     if (aligning || syncing) return;
-    if (!window.confirm("Setarakan Saldo Utama dengan saldo DigiFlazz sekarang? Dompet loket tidak dikurangi. Kelebihan yang masih di Saldo Utama diturunkan dan titik acuan tarikan dipasang ulang.")) return;
+    if (provider == null) { setError("Saldo DigiFlazz belum terbaca. Muat ulang, lalu coba lagi."); return; }
+    const warning = normalizeConfirm(provider, pool, networkBalance, feeBalance);
+    if (!warning) { setNote("Saldo Mentari sudah mengikuti DigiFlazz. Tidak ada selisih yang dipindahkan."); return; }
+    if (!window.confirm(warning)) return;
     setAligning(true);
     setError("");
     setNote("");
-    const response = await fetch("/api/wallet/align", { method: "POST", headers: await authHeader() });
+    const response = await fetch("/api/wallet/normalize", { method: "POST", headers: await authHeader() });
     const body = await response.json().catch(() => null);
     setAligning(false);
-    if (!response.ok) { setError(body?.error || "Penyetaraan saldo gagal."); return; }
+    if (!response.ok) { setError(body?.error || "Normalisasi saldo gagal."); return; }
     setPool(Number(body.balance) || 0);
     setPoolReady(true);
     setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
@@ -279,7 +327,8 @@ export function ManageSetoranPage() {
     setNetworkBalance(Number(body.networkBalance) || 0);
     setProviderUsed(Number(body.providerUsed) || 0);
     setReconcileReady(Boolean(body.reconcileReady));
-    setNote(String(body.message || "Saldo disetarakan dengan DigiFlazz."));
+    if (Array.isArray(body.normalizations)) setNormalizations(body.normalizations as NormalizationRow[]);
+    setNote(String(body.message || "Saldo dinormalkan mengikuti DigiFlazz."));
     await load();
   };
   useEffect(() => {
@@ -346,7 +395,7 @@ export function ManageSetoranPage() {
       description="Menyetujui tiket memindahkan Saldo Utama ke Loket, Sub Mitra, atau Mitra tepat satu kali. Tarik saldo DigiFlazz dulu bila Saldo Utama belum cukup."
     >
       <Card className="mb-4">
-        <CardHeader title="Saldo untuk menyetujui deposit" subtitle="Tombol tarik hanya memasukkan setoran DigiFlazz yang belum pernah masuk. Saldo yang sudah dibagikan ke loket tetap di dompet loket." />
+        <CardHeader title="Saldo untuk menyetujui deposit" subtitle="Tarik saldo hanya memasukkan setoran baru. Normalisasi menyamakan Saldo Utama dengan DigiFlazz bila ada selisih, tanpa mengambil uang di dompet loket." />
         <div className="flex flex-wrap items-end gap-4 p-4">
           <div>
             <div className="text-xs text-slate-500">Saldo Utama</div>
@@ -362,10 +411,11 @@ export function ManageSetoranPage() {
             <div className="text-lg font-bold text-slate-900">{formatRupiah(feeBalance)}</div>
           </div>
           <Button onClick={() => void sync()} disabled={syncing || aligning}>{syncing ? "Menarik..." : "Tarik saldo DigiFlazz"}</Button>
-          <Button variant="outline" onClick={() => void align()} disabled={syncing || aligning}>{aligning ? "Menyetarakan..." : "Setarakan baseline"}</Button>
+          <Button variant="outline" onClick={() => void align()} disabled={syncing || aligning}>{aligning ? "Menormalkan..." : "Normalisasi saldo"}</Button>
         </div>
         <p className="px-4 pb-4 text-xs leading-5 text-slate-500">{reconcileReady ? balanceGapText(provider, pool, networkBalance, feeBalance, providerUsed) : "Angka rekonsiliasi lengkap muncul setelah migrasi saldo terbaru dijalankan. Sebelum itu, tarik saldo bisa menghitung ulang setoran yang sudah masuk."}</p>
       </Card>
+      <NormalizationHistory rows={normalizations} />
       {error && <div className="mb-3 text-sm text-rose-600">{error}</div>}
       {note && <div className="mb-3 text-sm text-emerald-700">{note}</div>}
       <div className={`mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-3 ${globalQueue ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
@@ -498,6 +548,7 @@ export function BalanceAllocationPage() {
   const [transferAmount, setTransferAmount] = useState("");
   const [syncing, setSyncing] = useState(false);
   const [aligning, setAligning] = useState(false);
+  const [normalizations, setNormalizations] = useState<NormalizationRow[]>([]);
   const [sending, setSending] = useState(false);
   const sendLock = useRef(false);
   const transferKey = useRef("");
@@ -514,6 +565,7 @@ export function BalanceAllocationPage() {
     setNetworkBalance(Number(body.networkBalance) || 0);
     setProviderUsed(Number(body.providerUsed) || 0);
     setReconcileReady(Boolean(body.reconcileReady));
+    setNormalizations(Array.isArray(body.normalizations) ? body.normalizations as NormalizationRow[] : []);
   };
   useEffect(() => { void loadWallet(); }, []);
   const sync = async () => {
@@ -536,21 +588,25 @@ export function BalanceAllocationPage() {
   };
   const align = async () => {
     if (aligning || syncing) return;
-    if (!window.confirm("Setarakan Saldo Utama dengan saldo DigiFlazz sekarang? Dompet loket tidak dikurangi. Kelebihan yang masih di Saldo Utama diturunkan dan titik acuan tarikan dipasang ulang.")) return;
+    if (provider == null) { setError("Saldo DigiFlazz belum terbaca. Muat ulang, lalu coba lagi."); return; }
+    const warning = normalizeConfirm(provider, pool, networkBalance, feeBalance);
+    if (!warning) { setMessage("Saldo Mentari sudah mengikuti DigiFlazz. Tidak ada selisih yang dipindahkan."); return; }
+    if (!window.confirm(warning)) return;
     setAligning(true);
     setError("");
     setMessage("");
-    const response = await fetch("/api/wallet/align", { method: "POST", headers: await authHeader() });
+    const response = await fetch("/api/wallet/normalize", { method: "POST", headers: await authHeader() });
     const body = await response.json().catch(() => null);
     setAligning(false);
-    if (!response.ok) { setError(body?.error || "Penyetaraan saldo gagal."); return; }
+    if (!response.ok) { setError(body?.error || "Normalisasi saldo gagal."); return; }
     setPool(Number(body.balance) || 0);
     setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
     setFeeBalance(Number(body.feeBalance) || 0);
     setNetworkBalance(Number(body.networkBalance) || 0);
     setProviderUsed(Number(body.providerUsed) || 0);
     setReconcileReady(Boolean(body.reconcileReady));
-    setMessage(String(body.message || "Saldo disetarakan dengan DigiFlazz."));
+    if (Array.isArray(body.normalizations)) setNormalizations(body.normalizations as NormalizationRow[]);
+    setMessage(String(body.message || "Saldo dinormalkan mengikuti DigiFlazz."));
   };
   const send = async () => {
     if (sendLock.current || sending) return;
@@ -599,7 +655,7 @@ export function BalanceAllocationPage() {
   return (
     <Shell title="Pembagian Saldo" description={`Saldo Utama ${formatRupiah(pool)} didistribusikan ke loket. Transfer memotong Saldo Utama dan menambah saldo loket dalam satu catatan.`}>
       <Card className="mb-4">
-        <CardHeader title="Saldo DigiFlazz, Saldo Utama, dan fee internal" subtitle="Tarik saldo hanya memasukkan setoran baru. Transfer ke loket memotong Saldo Utama satu kali." />
+        <CardHeader title="Saldo DigiFlazz, Saldo Utama, dan fee internal" subtitle="Tarik saldo hanya memasukkan setoran baru. Normalisasi menyamakan Saldo Utama dengan DigiFlazz bila ada selisih." />
         <div className="flex flex-wrap items-end gap-3 p-4">
           <div>
             <div className="text-xs text-slate-500">Saldo Utama</div>
@@ -615,10 +671,11 @@ export function BalanceAllocationPage() {
             <div className="text-lg font-bold text-slate-900">{formatRupiah(feeBalance)}</div>
           </div>
           <Button onClick={() => void sync()} disabled={syncing || aligning}>{syncing ? "Menarik..." : "Tarik saldo DigiFlazz"}</Button>
-          <Button variant="outline" onClick={() => void align()} disabled={syncing || aligning}>{aligning ? "Menyetarakan..." : "Setarakan baseline"}</Button>
+          <Button variant="outline" onClick={() => void align()} disabled={syncing || aligning}>{aligning ? "Menormalkan..." : "Normalisasi saldo"}</Button>
         </div>
         <p className="px-4 pb-4 text-xs leading-5 text-slate-500">{reconcileReady ? balanceGapText(provider, pool, networkBalance, feeBalance, providerUsed) : "Angka rekonsiliasi lengkap muncul setelah migrasi saldo terbaru dijalankan. Sebelum itu, tarik saldo bisa menghitung ulang setoran yang sudah masuk."}</p>
       </Card>
+      <NormalizationHistory rows={normalizations} />
       <Card className="mb-4">
         <CardHeader title="Transfer ke loket" subtitle="Nominal dipotong dari Saldo Utama dan masuk ke dompet loket. Permintaan yang sama tidak dipotong dua kali." />
         <div className="grid gap-3 p-4 sm:grid-cols-3">

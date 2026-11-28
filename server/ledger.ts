@@ -282,7 +282,7 @@ export async function alignProviderDeposit(env: LedgerEnv, actorId: string, depo
   } catch {
     return { error: "Database saldo tidak dapat dihubungi.", status: 500 };
   }
-  const body = await response.json().catch(() => null) as ({ error?: string; status?: number; balance?: number; providerBalance?: number; reduced?: number; remaining?: number; shortfall?: number; message?: string } | null);
+  const body = await response.json().catch(() => null) as ({ error?: string; status?: number; balance?: number; providerBalance?: number; reduced?: number; added?: number; remaining?: number; shortfall?: number; direction?: string; message?: string } | null);
   if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)) {
     const missing = String(body && "message" in body ? body.message : "").includes("ledger_align_provider");
     return { error: missing ? "Fungsi penyetaraan saldo belum terpasang. Jalankan migrasi terbaru, lalu muat ulang." : "Database saldo menolak penyetaraan.", status: response.status || 500 };

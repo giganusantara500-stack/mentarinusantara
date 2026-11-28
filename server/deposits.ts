@@ -64,6 +64,32 @@ export async function loadCaller(authorization: string, env: Env): Promise<Calle
   return { id: callerId, role, username: profile.username ?? null };
 }
 
+async function listNormalizations(env: Env) {
+  try {
+    const response = await fetch(`${env.supabaseUrl}/rest/v1/balance_normalizations?select=id,at,provider_balance,pusat_before,pusat_after,wallets,fee,direction,amount,remaining,note&order=at.desc&limit=12`, {
+      headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
+      signal: AbortSignal.timeout(12_000),
+    });
+    const body = await readJson(response);
+    if (!response.ok || !Array.isArray(body)) return [];
+    return body.map((row: { id?: string; at?: string; provider_balance?: number; pusat_before?: number; pusat_after?: number; wallets?: number; fee?: number; direction?: string; amount?: number; remaining?: number; note?: string }) => ({
+      id: String(row.id || ""),
+      at: String(row.at || ""),
+      providerBalance: Number(row.provider_balance) || 0,
+      pusatBefore: Number(row.pusat_before) || 0,
+      pusatAfter: Number(row.pusat_after) || 0,
+      wallets: Number(row.wallets) || 0,
+      fee: Number(row.fee) || 0,
+      direction: row.direction === "credit" || row.direction === "debit" ? row.direction : "none",
+      amount: Number(row.amount) || 0,
+      remaining: Number(row.remaining) || 0,
+      note: String(row.note || ""),
+    }));
+  } catch {
+    return [];
+  }
+}
+
 function accountFor(bank: string) {
   return DEPOSIT_ACCOUNTS.find((account) => account.bank === bank);
 }
@@ -224,7 +250,8 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     const reconciledGap = snapshot && liveProvider != null
       ? mainBalance + networkBalance + feeBalance - liveProvider
       : null;
-    return { status: 200, body: { balance: caller.role === "super_admin" ? mainBalance : own, mainBalance, loketCode, providerBalance: provider.balance, providerError: provider.error, feeBalance, networkBalance, providerUsed, reconciledGap, reconcileReady: Boolean(snapshot) } };
+    const normalizations = caller.role === "super_admin" ? await listNormalizations(env) : [];
+    return { status: 200, body: { balance: caller.role === "super_admin" ? mainBalance : own, mainBalance, loketCode, providerBalance: provider.balance, providerError: provider.error, feeBalance, networkBalance, providerUsed, reconciledGap, reconcileReady: Boolean(snapshot), normalizations } };
   }
 
   if (pathname === "/api/wallet/sync" && method === "POST") {
@@ -239,7 +266,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     const note = credited > 0
       ? `Setoran baru ${rupiah(credited)} masuk ke Saldo Utama. Tarikan berhenti di batas saldo DigiFlazz.`
       : synced.capped
-        ? "Saldo Utama sudah mencapai saldo DigiFlazz. Setoran tidak ditambahkan. Gunakan Setarakan baseline bila angkanya masih kelebihan."
+        ? "Saldo Utama sudah mencapai saldo DigiFlazz. Setoran tidak ditambahkan. Gunakan Normalisasi saldo bila angkanya masih selisih."
         : "Tidak ada setoran baru. Saldo yang sudah ditarik atau sudah ada di dompet loket tidak ditarik ulang.";
     const snapshot = await moneySnapshot(env, caller.id);
     const networkBalance = snapshot?.wallets ?? 0;
@@ -248,25 +275,30 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     return { status: 200, body: { balance: synced.balance, providerBalance: provider.balance, credited, consumed, networkBalance, providerUsed, reconciledGap, feeBalance: snapshot?.fee ?? 0, reconcileReady: Boolean(snapshot), message: note } };
   }
 
-  if (pathname === "/api/wallet/align" && method === "POST") {
-    if (caller.role !== "super_admin") return { status: 403, body: { error: "Hanya Super Admin yang dapat menyetarakan saldo." } };
+  if ((pathname === "/api/wallet/align" || pathname === "/api/wallet/normalize") && method === "POST") {
+    if (caller.role !== "super_admin") return { status: 403, body: { error: "Hanya Super Admin yang dapat menormalkan saldo." } };
     const provider = await digiflazzDeposit(true).catch(() => ({ balance: null as number | null, error: "Saldo DigiFlazz tidak dapat dihubungi." }));
     if (provider.balance == null) return { status: 502, body: { error: provider.error || "Saldo DigiFlazz tidak terbaca." } };
     const aligned = await alignProviderDeposit(env, caller.id, provider.balance);
-    if (aligned.error || aligned.balance === undefined) return { status: aligned.status || 500, body: { error: aligned.error || "Penyetaraan saldo gagal." } };
+    if (aligned.error || aligned.balance === undefined) return { status: aligned.status || 500, body: { error: aligned.error || "Normalisasi saldo gagal." } };
     const reduced = Number(aligned.reduced) || 0;
+    const added = Number(aligned.added) || 0;
     const remaining = Number(aligned.remaining) || 0;
     const shortfall = Number(aligned.shortfall) || 0;
     const rupiah = (value: number) => `Rp${Math.round(value).toLocaleString("id-ID")}`;
     const note = reduced > 0
-      ? `Saldo Utama diturunkan ${rupiah(reduced)} agar tidak melebihi DigiFlazz. Dompet loket tidak dikurangi.${remaining > 0 ? ` Sisa ${rupiah(remaining)} sudah berada di dompet jaringan.` : ""}`
-      : shortfall > 0
-        ? `Titik acuan dipasang. Masih ada ${rupiah(shortfall)} di DigiFlazz yang belum masuk Saldo Utama. Tarik saldo hanya memasukkan bagian itu.`
-        : "Saldo sudah selaras dengan DigiFlazz. Titik acuan baru dipasang untuk tarikan berikutnya.";
+      ? `Saldo Utama diturunkan ${rupiah(reduced)} agar mengikuti DigiFlazz. Dompet loket tidak dikurangi.${remaining > 0 ? ` Sisa ${rupiah(remaining)} sudah berada di dompet jaringan.` : ""} Penyesuaian tercatat dan tidak ditarik ulang.`
+      : added > 0
+        ? `Selisih ${rupiah(added)} dari DigiFlazz masuk ke Saldo Utama satu kali. Tarikan berikutnya tidak menghitung angka yang sama.`
+        : shortfall > 0
+          ? `Migrasi normalisasi terbaru belum memasukkan selisih. Jalankan SQL terbaru, lalu tekan Normalisasi saldo lagi.`
+          : remaining > 0
+            ? `Saldo Utama sudah 0. Sisa ${rupiah(remaining)} ada di dompet jaringan dan tidak diambil.`
+            : "Saldo Mentari sudah mengikuti DigiFlazz. Tidak ada selisih yang dipindahkan.";
     const snapshot = await moneySnapshot(env, caller.id);
     const networkBalance = snapshot?.wallets ?? 0;
     const reconciledGap = snapshot ? Number(aligned.balance) + networkBalance + (snapshot.fee ?? 0) - provider.balance : null;
-    return { status: 200, body: { balance: aligned.balance, providerBalance: provider.balance, reduced, remaining, shortfall, networkBalance, providerUsed: snapshot?.providerUsed ?? 0, feeBalance: snapshot?.fee ?? 0, reconciledGap, reconcileReady: Boolean(snapshot), message: note } };
+    return { status: 200, body: { balance: aligned.balance, providerBalance: provider.balance, reduced, added, remaining, shortfall, direction: aligned.direction || "none", networkBalance, providerUsed: snapshot?.providerUsed ?? 0, feeBalance: snapshot?.fee ?? 0, reconciledGap, reconcileReady: Boolean(snapshot), normalizations: await listNormalizations(env), message: note } };
   }
 
   if (pathname === "/api/deposits" && method === "POST") {

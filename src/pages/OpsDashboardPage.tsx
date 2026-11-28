@@ -233,12 +233,17 @@ export function OpsDashboardPage() {
               type="button"
               disabled={aligning}
               onClick={() => {
-                if (!window.confirm("Setarakan Saldo Utama dengan saldo DigiFlazz? Dompet loket tidak dikurangi.")) return;
+                if (providerBalance == null) { setAlignNote("Saldo DigiFlazz belum terbaca."); return; }
+                if (reconciledGap != null && Math.abs(reconciledGap) <= 1000) { setAlignNote("Saldo sudah mengikuti DigiFlazz."); return; }
+                const warning = reconciledGap != null && reconciledGap > 1000
+                  ? `Mentari mencatat ${formatRupiah(reconciledGap)} di atas DigiFlazz. Normalisasi menurunkan Saldo Utama. Dompet loket tidak dikurangi dan tidak ditarik ulang. Lanjutkan?`
+                  : `DigiFlazz lebih tinggi dari catatan Mentari. Normalisasi memasukkan selisih ke Saldo Utama satu kali. Tarikan berikutnya tidak menghitung angka yang sama. Lanjutkan?`;
+                if (!window.confirm(warning)) return;
                 void (async () => {
                   setAligning(true);
                   setAlignNote("");
                   const session = await supabase.auth.getSession();
-                  const response = await fetch(apiUrl("/api/wallet/align"), { method: "POST", headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` } });
+                  const response = await fetch(apiUrl("/api/wallet/normalize"), { method: "POST", headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` } });
                   const body = await response.json().catch(() => null);
                   setAligning(false);
                   if (!response.ok) { setAlignNote(String(body?.error || "Penyetaraan gagal.")); return; }
@@ -250,7 +255,7 @@ export function OpsDashboardPage() {
                 })();
               }}
               className="rounded-lg bg-amber-400 px-3 py-1 text-[11px] font-bold text-slate-950 disabled:opacity-60"
-            >{aligning ? "Menyetarakan..." : "Setarakan baseline"}</button>
+            >{aligning ? "Menormalkan..." : "Normalisasi saldo"}</button>
           </div>
         )}
       </div>
