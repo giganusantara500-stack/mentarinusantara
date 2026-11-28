@@ -22,7 +22,7 @@ export function LoketHomePage() {
         headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` },
       });
       const body = response.ok ? await response.json() : { sales: [], simulations: [] };
-      if (!stop) setSales([...(body.simulations ?? []), ...(body.sales ?? [])]);
+      if (!stop) setSales(body.sales ?? []);
     };
     load();
     const timer = window.setInterval(load, 5000);

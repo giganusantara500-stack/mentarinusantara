@@ -110,7 +110,40 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     else void syncOpenNetworkSales(env).catch(() => undefined);
     const sales = (await attachSaleReceipts(env, listed).catch(() => listed)).map((sale) => caller.role === "super_admin" ? sale : omitFeeBreakdown(sale));
     const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
-    return { status: 200, body: { sales, simulations, balance, loketCode } };
+    return { status: 200, body: { sales, simulations: caller.role === "loket" ? [] : simulations, balance, loketCode } };
+  }
+
+  if (pathname === "/api/loket-sales/cleanup" && method === "POST") {
+    if (caller.role !== "loket") return { status: 403, body: { error: "Hanya Loket yang dapat membersihkan percobaan di riwayatnya." } };
+    await syncPendingSales(env, caller.id, true).catch(() => 0);
+    const cutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const headers = {
+      apikey: env.serviceRoleKey,
+      Authorization: `Bearer ${env.serviceRoleKey}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    };
+    const removed = await fetch(`${env.supabaseUrl}/rest/v1/payment_simulations?loket_id=eq.${encodeURIComponent(caller.id)}`, {
+      method: "DELETE",
+      headers,
+      signal: AbortSignal.timeout(12_000),
+    }).then(async (response) => response.ok ? await response.json().catch(() => []) : []).catch(() => []);
+    const closed = await fetch(`${env.supabaseUrl}/rest/v1/transactions?user_id=eq.${encodeURIComponent(caller.id)}&status=eq.pending&created_at=lt.${encodeURIComponent(cutoff)}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ status: "failed", completed_at: new Date().toISOString() }),
+      signal: AbortSignal.timeout(12_000),
+    }).then(async (response) => response.ok ? await response.json().catch(() => []) : []).catch(() => []);
+    const balance = await walletBalance(env, caller.id);
+    return {
+      status: 200,
+      body: {
+        removedSimulations: Array.isArray(removed) ? removed.length : 0,
+        closedPending: Array.isArray(closed) ? closed.length : 0,
+        balance,
+        message: "Percobaan simulasi dihapus dan pending yang menggantung ditutup tanpa memotong saldo. Transaksi Sukses tetap tersimpan.",
+      },
+    };
   }
 
   if (pathname === "/api/loket-sales" && method === "POST") {

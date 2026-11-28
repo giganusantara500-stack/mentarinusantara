@@ -483,7 +483,7 @@ export function LoketTransaksiPage() {
       const response = await fetch(apiUrl("/api/loket-sales"), { headers: await authHeader() });
       const body = response.ok ? await response.json() : { sales: [], simulations: [] };
       if (!active) return;
-      const loaded = [...(body.simulations ?? []), ...(body.sales ?? [])] as Sale[];
+      const loaded = (body.sales ?? []) as Sale[];
       setSales(loaded);
       salesRef.current = loaded;
       if (loaded.some((sale) => sale.status === "pending" || sale.status === "failed")) void syncStatus(false);
@@ -516,7 +516,7 @@ export function LoketTransaksiPage() {
     }
     setError("");
     setReprintHits(sales.filter((sale) => {
-      if (sale.status !== "success" && sale.status !== "simulated") return false;
+      if (sale.status !== "success") return false;
       if (sale.category && sale.category.toLowerCase() !== category.toLowerCase()) return false;
       if (reprintId.trim() && !sale.customerNumber.includes(reprintId.trim())) return false;
       if (reprintDate && !sale.createdAt.slice(0, 10).startsWith(reprintDate)) return false;

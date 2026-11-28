@@ -3,7 +3,7 @@ import type { LineSeries } from "@/components/dashboard/LineChart";
 const COLORS = ["#f59e0b", "#7c3aed", "#0284c7"];
 
 export function isCountedSale(status?: string | null) {
-  return status === "success" || status === "simulated";
+  return status === "success";
 }
 
 export function buildThreeMonthSheets(points: { at: string; ok?: boolean }[]) {

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { finiteNumber, formatRupiah } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { apiUrl } from "@/lib/apiBase";
+import { isLivePending, isProductionSuccess } from "@/lib/saleWindow";
 
 export function useDeskStats(tick: number) {
   const { profile } = useAuth();
@@ -31,9 +32,8 @@ export function useDeskStats(tick: number) {
       const salesBody = salesRes.ok ? await salesRes.json() : { sales: [] };
       const sales = (salesBody.sales ?? []) as { amount: number; createdAt: string; status: string }[];
       const today = new Date().toDateString();
-      const settled = (sale: { status: string }) => sale.status === "success" || sale.status === "simulated";
-      const todaySales = sales.filter((sale) => settled(sale) && new Date(sale.createdAt).toDateString() === today);
-      const pending = sales.filter((sale) => sale.status === "pending").reduce((sum, sale) => sum + finiteNumber(sale.amount), 0);
+      const todaySales = sales.filter((sale) => isProductionSuccess(sale.status) && new Date(sale.createdAt).toDateString() === today);
+      const pending = sales.filter((sale) => isLivePending(sale.status, sale.createdAt)).reduce((sum, sale) => sum + finiteNumber(sale.amount), 0);
       if (!active) return;
       setBalance(finiteNumber(wallet?.balance ?? salesBody.balance));
       setTodayCount(todaySales.length);
@@ -70,11 +70,10 @@ export function useDeskStats(tick: number) {
           const body = await salesRes.json();
           const sales = (body.sales ?? []) as { amount: number; createdAt: string; status?: string }[];
           const today = new Date().toDateString();
-          const settled = (sale: { status?: string }) => sale.status === "success" || sale.status === "simulated";
-          const todaySales = sales.filter((sale) => settled(sale) && new Date(sale.createdAt).toDateString() === today);
+          const todaySales = sales.filter((sale) => isProductionSuccess(sale.status) && new Date(sale.createdAt).toDateString() === today);
           setTodayCount(todaySales.length);
           setTodayAmount(todaySales.reduce((sum, sale) => sum + finiteNumber(sale.amount), 0));
-          setOutstanding(sales.filter((sale) => sale.status === "pending").reduce((sum, sale) => sum + finiteNumber(sale.amount), 0));
+          setOutstanding(sales.filter((sale) => isLivePending(sale.status, sale.createdAt)).reduce((sum, sale) => sum + finiteNumber(sale.amount), 0));
         }
       })();
     }, 5000);

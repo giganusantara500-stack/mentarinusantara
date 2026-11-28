@@ -10,6 +10,7 @@ import { BILLER_CATEGORIES, BILLER_CATALOG, productsFor } from "@/lib/billerCata
 import { PDAM_AREAS } from "@/lib/pdam";
 import { depositRequest } from "@/lib/depositApi";
 import { apiUrl } from "@/lib/apiBase";
+import { isLivePending, isProductionSuccess } from "@/lib/saleWindow";
 import { setoranDays, setoranLines } from "@/lib/setoranReport";
 import { PRINT_FORMATS, PRINT_KINDS, PRINTER_PRESETS, loadPrinterSettings, printReceipts, renderReceipts, sampleBill, savePrinterSettings, type PrinterSettings } from "@/lib/printer";
 export { LoketTransaksiPage } from "./TransaksiPane";
@@ -45,6 +46,7 @@ interface Sale {
   loketCode?: string;
   loketName?: string;
   status: string;
+  sn?: string;
   createdAt: string;
 }
 
@@ -957,7 +959,7 @@ export function LoketKolektifPage() {
     (async () => {
       const response = await fetch("/api/loket-sales", { headers: await authHeader() });
       const body = response.ok ? await response.json() : { sales: [], simulations: [] };
-      if (!stop) setHistorySales([...(body.simulations ?? []), ...(body.sales ?? [])]);
+      if (!stop) setHistorySales((body.sales ?? []) as Sale[]);
     })();
     return () => { stop = true; };
   }, [historyOpen, tick]);
@@ -968,6 +970,7 @@ export function LoketKolektifPage() {
     const collector = (active.collector || active.name || "").toLowerCase();
     const needle = historyQuery.trim().toLowerCase();
     return historySales.filter((sale) => {
+      if (!isProductionSuccess(sale.status)) return false;
       if (sale.category !== "Kolektif") return false;
       const inGroup = members.has(sale.customerNumber) || (productFilter === "semua" && collector.length > 0 && sale.product.toLowerCase().includes(collector));
       if (!inGroup) return false;
@@ -1295,20 +1298,30 @@ function statusLabel(status: string) {
 
 export function LoketStatusPage() {
   const { profile } = useAuth();
-  const { tick, loketCode } = useLoketRefresh();
+  const { tick, loketCode, requestRefresh } = useLoketRefresh();
   const [tab, setTab] = useState<"list" | "manual">("list");
   const [sales, setSales] = useState<Sale[]>([]);
   const [query, setQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
-  const [status, setStatus] = useState("semua");
-  const [appliedStatus, setAppliedStatus] = useState("semua");
+  const [status, setStatus] = useState("success");
+  const [appliedStatus, setAppliedStatus] = useState("success");
+  const [cleanupNote, setCleanupNote] = useState("");
   const [page, setPage] = useState(1);
   const [picked, setPicked] = useState<string[]>([]);
 
   const load = async () => {
     const response = await fetch("/api/loket-sales", { headers: await authHeader() });
     const body = response.ok ? await response.json() : { sales: [], simulations: [] };
-    setSales([...(body.simulations ?? []), ...(body.sales ?? [])]);
+    setSales((body.sales ?? []) as Sale[]);
+  };
+
+  const cleanupTrials = async () => {
+    setCleanupNote("");
+    const response = await fetch(apiUrl("/api/loket-sales/cleanup"), { method: "POST", headers: await authHeader(), body: "{}" });
+    const body = await response.json().catch(() => ({})) as { error?: string; message?: string };
+    setCleanupNote(response.ok ? (body.message || "Percobaan lama dibersihkan.") : (body.error || "Pembersihan belum selesai."));
+    await load();
+    requestRefresh();
   };
 
   useEffect(() => {
@@ -1318,9 +1331,13 @@ export function LoketStatusPage() {
   }, [tick]);
 
   const rows = useMemo(() => sales.filter((sale) => {
+    if (sale.status === "simulated") return false;
+    if (sale.status === "pending" && !isLivePending(sale.status, sale.createdAt)) return false;
+    if (appliedStatus === "semua" && sale.status !== "success" && sale.status !== "pending") return false;
+    if (appliedStatus === "success" && !isProductionSuccess(sale.status)) return false;
     const needle = appliedQuery.trim().toLowerCase();
     if (needle && !sale.customerNumber.toLowerCase().includes(needle) && !sale.customerName.toLowerCase().includes(needle)) return false;
-    if (appliedStatus !== "semua" && statusLabel(sale.status).toLowerCase() !== appliedStatus) return false;
+    if (appliedStatus !== "semua" && appliedStatus !== "success" && statusLabel(sale.status).toLowerCase() !== appliedStatus) return false;
     return true;
   }), [sales, appliedQuery, appliedStatus]);
   const pageCount = Math.max(1, Math.ceil(rows.length / 8));
@@ -1344,6 +1361,8 @@ export function LoketStatusPage() {
     tagihan: sale.tagihan ?? Math.max(0, Number(sale.amount) - Number(sale.adminFee ?? 0)),
     admin: Number(sale.adminFee ?? 0),
     total: Number(sale.amount),
+    sn: sale.sn || "",
+    at: formatWaktu(sale.createdAt),
   });
 
   const reprintOne = (sale: Sale) => {
@@ -1365,18 +1384,18 @@ export function LoketStatusPage() {
         <Field label="Cari nomor pelanggan"><Input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") search(); }} placeholder="Cari nomor pelanggan" /></Field>
         <Field label="Status">
           <Select value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="semua">Semua</option>
-            <option value="success">Success</option>
-            <option value="simulasi">Simulasi</option>
-            <option value="pending">Pending</option>
+            <option value="success">Sukses</option>
+            <option value="pending">Pending baru</option>
             <option value="gagal">Gagal</option>
-            <option value="refund">Refund</option>
-            <option value="pending">Pending</option>
-            <option value="gagal">Gagal</option>
+            <option value="semua">Sukses dan pending baru</option>
           </Select>
         </Field>
-        <button type="button" onClick={search} className="h-10 rounded-lg bg-amber-500 px-4 text-sm font-bold text-white">Cari / Refresh</button>
+        <div className="flex gap-2">
+          <button type="button" onClick={search} className="h-10 rounded-lg bg-amber-500 px-4 text-sm font-bold text-white">Cari / Refresh</button>
+          <button type="button" onClick={() => void cleanupTrials()} className="h-10 rounded-lg border border-slate-300 px-3 text-sm font-bold text-slate-700">Bersihkan percobaan</button>
+        </div>
       </div>
+      {cleanupNote && <p className="px-3 text-xs font-semibold text-slate-600">{cleanupNote}</p>}
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full table-fixed text-left text-xs">
           <thead className="sticky top-0 z-10 bg-slate-100 text-slate-500">
@@ -1450,7 +1469,7 @@ export function LoketReportPage() {
         depositRequest("/api/deposits", "GET", token),
       ]);
       const salesBody = salesRes.ok ? await salesRes.json() : { sales: [], simulations: [] };
-      setSales([...(salesBody.simulations ?? []), ...(salesBody.sales ?? [])]);
+      setSales(((salesBody.sales ?? []) as Sale[]).filter((sale) => isProductionSuccess(sale.status)));
       setTickets(depositRes.ok ? (depositRes.body.tickets ?? []) as typeof tickets : []);
     })();
   }, [tick]);
@@ -1460,6 +1479,7 @@ export function LoketReportPage() {
     ? [...new Set([...Object.values(PRODUCTS).flat(), ...BILLER_CATALOG.map((entry) => entry.label)])]
     : (PRODUCTS[biller] ?? productsFor(biller));
   const filtered = useMemo(() => sales.filter((sale) => {
+    if (!isProductionSuccess(sale.status)) return false;
     if (biller !== "semua" && sale.category !== biller) return false;
     if (product !== "semua" && !sale.product.toLowerCase().includes(product.toLowerCase())) return false;
     const day = sale.createdAt.slice(0, 10);
