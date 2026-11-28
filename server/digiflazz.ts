@@ -331,7 +331,8 @@ export function quoteFrom(data: Record<string, unknown>, fallback: { refId: stri
   const message = text(data.message);
   const state = text(data.status).toLowerCase();
   const rc = scalar(data.rc);
-  const sn = scalar(data.sn);
+  const directSn = displayToken(scalar(data.sn), scalar(data.serial_number), scalar(data.token));
+  const sn = directSn || (state.includes("sukses") || state === "success" || rc === "00" ? displayToken(scalar(data.message)) : "");
   let outcome = mapDigiOutcome(text(data.status), rc, message);
   if (outcome === "failed" && total >= 1000 && !/gagal|tidak ditemukan|tidak ada tagihan|invalid|salah|cutoff|gangguan|pending|proses|diproses/.test(message.toLowerCase())) {
     outcome = "success";
@@ -700,6 +701,23 @@ export async function statusDigiflazz(input: { kind: DigiKind; sku: string; cust
   const commands = input.kind === "postpaid" ? "status-pasca" : undefined;
   const data = await postDigi("/transaction", signedTransaction(input.refId, input.sku, input.customerNumber, commands));
   return quoteFrom(data, input);
+}
+
+export function displayToken(...parts: string[]) {
+  const blob = parts.map((part) => part.trim()).filter(Boolean).join(" ");
+  if (!blob) return "";
+  const labeled = blob.match(/token\s*[/:]\s*([0-9][0-9\s-]{7,})/i);
+  const dashed = blob.match(/\d{4}(?:[-\s]\d{4}){3,5}/);
+  const bare = blob.match(/(?:^|[^\d])(\d{16,24})(?:[^\d]|$)/);
+  const source = labeled?.[1] || dashed?.[0] || bare?.[1] || "";
+  if (source) {
+    const digits = source.replace(/\D/g, "");
+    if (digits.length >= 16 && digits.length <= 24) return digits.replace(/(\d{4})(?=\d)/g, "$1-");
+    return source.replace(/\s+/g, "").trim();
+  }
+  const compact = blob.replace(/\s+/g, " ").trim();
+  if (compact.length <= 40 && !compact.includes("/")) return compact;
+  return "";
 }
 
 export function callbackRef(body: Record<string, unknown>) {

@@ -1,4 +1,4 @@
-import { billIsPaid, callbackKeys, digiflazzReady, inquireDigiflazz, newRefId, payDigiflazz, productKind, quoteFrom, resolveBuyerSku, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
+import { billIsPaid, callbackKeys, digiflazzReady, displayToken, inquireDigiflazz, newRefId, payDigiflazz, productKind, quoteFrom, resolveBuyerSku, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
 import { findCatalogItem, foldLabel } from "../src/lib/billerCatalog";
 import { listNetworkSales, listSimulations, recordLoketSale, walletBalance, type LedgerEnv, type LoketSale } from "./ledger";
 import { ownerCollectives } from "./ops";
@@ -345,19 +345,31 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
   });
   if (pending.error || !pending.sale) return { ...pending, error: pending.error || "Transaksi tidak dapat dimulai.", paymentStatus: "failed" as PaymentStatus, mode };
   const already = pending.sale.status;
-  if (already === "success" || already === "failed" || already === "refunded" || already === "simulated") {
+  if (already === "success" || already === "refunded" || already === "simulated") {
+    const stored = await findDigiflazzSale(env, refId, actorId);
+    const sn = displayToken(stored?.provider_response?.sn || "", pending.sale.sn || "");
     return {
       ...pending,
       balance: pending.balance ?? await walletBalance(env, actorId),
       paymentStatus: already,
       mode,
       providerRef: refId,
-      sn: pending.sale.sn || "",
+      sn,
+      sale: pending.sale ? { ...pending.sale, sn } : pending.sale,
     };
+  }
+  if (already === "failed") {
+    const stored = await findDigiflazzSale(env, refId, actorId);
+    if (stored) return paymentFromStatus(await applyDigiflazzStatus(env, stored), mode, refId);
   }
   const claimed = await claimDigiflazz(env, pending.sale.id, receipt);
   const refTail = refId.replace(/[^a-z0-9]/gi, "").slice(-6) || "------";
   if (!claimed) {
+    const stored = await findDigiflazzSale(env, refId, actorId);
+    if (stored) {
+      const applied = await applyDigiflazzStatus(env, stored);
+      if (applied.body.statusText === "success" || applied.body.statusText === "failed") return paymentFromStatus(applied, mode, refId);
+    }
     const balance = pending.balance ?? await walletBalance(env, actorId);
     return { error: "Transaksi ini sedang diproses. Cek status sebelum mengulang.", status: 409, balance, sale: pending.sale, paymentStatus: "pending" as PaymentStatus, mode, providerRef: refId };
   }
@@ -366,7 +378,24 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
   console.log(`[bayar] provider ${submitted.outcome} ref···${refTail}`);
   const charged = submitted.bill && submitted.bill.total >= 1000 ? submitted.bill : inquiry.bill;
   const providerCost = settledProviderCost(charged.providerCost, inquiry.bill.providerCost, inquiry.bill.total);
-  const outcome = submitted.outcome === "pending" ? "pending" : submitted.outcome;
+  let outcome: "pending" | "success" | "failed" = submitted.outcome === "pending" ? "pending" : submitted.outcome;
+  let providerSn = displayToken(submitted.sn || "");
+  if (outcome !== "success") {
+    try {
+      const checked = await statusDigiflazz({ kind, sku, customerNumber: input.customerNumber, refId });
+      const checkedSn = displayToken(checked.sn || "");
+      if (checked.outcome === "success" || checkedSn) {
+        outcome = "success";
+        providerSn = checkedSn || providerSn;
+      } else if (checked.outcome === "failed" && outcome === "failed") {
+        outcome = "failed";
+      } else {
+        outcome = "pending";
+      }
+    } catch {
+      if (outcome === "failed") outcome = "pending";
+    }
+  }
   const settled = await recordLoketSale(env, actorId, {
     ...input,
     amount: inquiry.bill.total,
@@ -381,10 +410,23 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     outcome,
     clientRef: refId,
   });
-  const sn = submitted.sn || receipt.sn || "";
+  const sn = providerSn || displayToken(receipt.sn || "");
   if (settled.sale) await rememberDigiflazz(env, settled.sale.id, { ...receipt, providerCost, customerName: resolvedCustomerName(charged.customerName, customerName), sn }).catch(() => undefined);
-  const paymentStatus = settled.sale?.status === "success" || settled.sale?.status === "failed" || settled.sale?.status === "refunded" || settled.sale?.status === "pending"
-    ? settled.sale.status
+  const recorded = settled.sale?.status || "";
+  if (outcome === "success" && recorded !== "success") {
+    return {
+      ...settled,
+      sale: settled.sale ? { ...settled.sale, sn } : settled.sale,
+      error: "DigiFlazz sudah Sukses, tetapi saldo loket belum terpotong. Jalankan migrasi terbaru, lalu tekan Sinkronkan.",
+      status: 409,
+      paymentStatus: recorded === "failed" || recorded === "pending" || recorded === "refunded" ? recorded : "pending",
+      mode,
+      providerRef: refId,
+      sn,
+    };
+  }
+  const paymentStatus = recorded === "success" || recorded === "failed" || recorded === "refunded" || recorded === "pending"
+    ? recorded
     : (settled.error ? "failed" : outcome);
   return {
     ...settled,
@@ -480,7 +522,7 @@ export async function handleBillerRequest(method: string, pathname: string, body
     const key = clean(body.clientRef) || clean(body.saleId) || clean(body.refId);
     const row = await findDigiflazzSale(env, key, actorId);
     if (!row) return { status: 404, body: { error: "Transaksi DigiFlazz tidak ditemukan." } };
-    if (row.status === "success" || row.status === "failed" || row.status === "refunded") {
+    if (row.status === "success" || row.status === "refunded") {
       return { status: 200, body: { statusText: row.status, balance: await walletBalance(env, actorId), duplicate: true, sale: saleFromRow(row) } };
     }
     return applyDigiflazzStatus(env, row);
@@ -568,6 +610,7 @@ async function mapPool<T, R>(items: T[], limit: number, worker: (item: T) => Pro
 
 function saleFromRow(row: StoredDigiSale) {
   const meta = row.provider_response ?? {};
+  const sn = displayToken(meta.sn || "") || meta.sn || "";
   return {
     id: row.id,
     customerNumber: row.customer_number,
@@ -581,7 +624,7 @@ function saleFromRow(row: StoredDigiSale) {
     collfee: Number(meta.collfee) || 0,
     period: meta.period || "",
     providerCost: Number(meta.providerCost) || 0,
-    sn: meta.sn || "",
+    sn,
     clientRef: saleRef(row),
     status: row.status,
   };
@@ -698,7 +741,7 @@ async function settleDigiflazzQuote(env: LedgerEnv, row: StoredDigiSale, quote: 
     outcome,
     clientRef: refId,
   });
-  const sn = quote.sn || meta.sn || "";
+  const sn = displayToken(quote.sn || "", meta.sn || "") || quote.sn || meta.sn || "";
   await rememberDigiflazz(env, row.id, {
     ...meta,
     buyerSkuCode: sku,
@@ -712,8 +755,27 @@ async function settleDigiflazzQuote(env: LedgerEnv, row: StoredDigiSale, quote: 
   const sale = settled.sale ? { ...settled.sale, sn, clientRef: settled.sale.clientRef || refId } : undefined;
   const balance = Number.isFinite(Number(settled.balance)) ? Number(settled.balance) : balanceNow;
   console.log(`[bayar] sinkron ${outcome} ref···${tail}${sn ? " sn=ada" : ""}`);
-  if (settled.error) return { status: settled.status || 409, body: { error: settled.error, statusText: row.status === "pending" ? "pending" : outcome, balance, sale } };
-  return { status: 200, body: { sale, balance, statusText: settled.sale?.status || outcome, message: quote.message } };
+  const recorded = settled.sale?.status || "";
+  if (outcome === "success" && recorded !== "success") {
+    return { status: 409, body: { error: "DigiFlazz sudah Sukses, tetapi saldo loket belum terpotong. Jalankan migrasi terbaru, lalu tekan Sinkronkan.", statusText: recorded || row.status, balance, sale } };
+  }
+  if (settled.error) return { status: settled.status || 409, body: { error: settled.error, statusText: recorded || (row.status === "pending" ? "pending" : outcome), balance, sale } };
+  return { status: 200, body: { sale, balance, statusText: recorded || outcome, message: quote.message } };
+}
+
+function paymentFromStatus(applied: { status: number; body: { error?: string; statusText?: string; balance?: number; sale?: { sn?: string } } }, mode: BillerMode, refId: string) {
+  const statusText = applied.body.statusText || "pending";
+  const sn = applied.body.sale?.sn || "";
+  return {
+    sale: applied.body.sale ? { ...applied.body.sale, sn } as LoketSale : undefined,
+    balance: applied.body.balance,
+    error: statusText === "success" || statusText === "pending" ? applied.body.error : (applied.body.error || "Pembayaran gagal. Saldo tidak dipotong."),
+    paymentStatus: statusText as PaymentStatus,
+    status: applied.status,
+    mode,
+    providerRef: refId,
+    sn,
+  };
 }
 
 async function applyDigiflazzStatus(env: LedgerEnv, row: StoredDigiSale) {
@@ -732,13 +794,13 @@ async function applyDigiflazzStatus(env: LedgerEnv, row: StoredDigiSale) {
 const syncJobs = new Map<string, Promise<number>>();
 const syncAt = new Map<string, number>();
 
-async function listPendingDigiSales(env: LedgerEnv, actorId: string, limit: number) {
+async function listOpenDigiSales(env: LedgerEnv, actorId: string, status: "pending" | "failed", limit: number) {
   if (!env.supabaseUrl || !env.serviceRoleKey) return [] as StoredDigiSale[];
   const base = "id,user_id,status,amount,customer_number,product_name_snapshot,category_slug_snapshot,customer_name,provider_response";
   const selects = [`${base},idempotency_key`, `${base},client_ref`, base];
   for (const select of selects) {
     try {
-      const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?user_id=eq.${encodeURIComponent(actorId)}&status=eq.pending&select=${select}&order=created_at.desc&limit=${limit}`, {
+      const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?user_id=eq.${encodeURIComponent(actorId)}&status=eq.${status}&select=${select}&order=created_at.desc&limit=${limit}`, {
         headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
         signal: AbortSignal.timeout(12_000),
       });
@@ -755,7 +817,16 @@ async function listPendingDigiSales(env: LedgerEnv, actorId: string, limit: numb
 }
 
 async function runSync(env: LedgerEnv, actorId: string, limit: number) {
-  const rows = await listPendingDigiSales(env, actorId, limit);
+  const [pending, failed] = await Promise.all([
+    listOpenDigiSales(env, actorId, "pending", limit),
+    listOpenDigiSales(env, actorId, "failed", limit),
+  ]);
+  const seen = new Set<string>();
+  const rows = [...pending, ...failed].filter((row) => {
+    if (seen.has(row.id)) return false;
+    seen.add(row.id);
+    return true;
+  });
   let changed = 0;
   for (const row of rows) {
     try {
@@ -774,7 +845,7 @@ export function syncPendingSales(env: LedgerEnv, actorId: string, force = false)
   const current = syncJobs.get(actorId);
   if (current) return current;
   if (!force && Date.now() - (syncAt.get(actorId) || 0) < 20_000) return Promise.resolve(0);
-  const job = runSync(env, actorId, force ? 5 : 3).finally(() => {
+  const job = runSync(env, actorId, force ? 4 : 3).finally(() => {
     syncJobs.delete(actorId);
     syncAt.set(actorId, Date.now());
   });
@@ -826,7 +897,7 @@ export async function attachSaleReceipts(env: LedgerEnv, sales: LoketSale[]) {
       adminFee: Number(sale.adminFee) || Number(meta.adminFee) || 0,
       collfee: Number(sale.collfee) || Number(meta.collfee) || 0,
       period: sale.period || meta.period || "",
-      sn: meta.sn || "",
+      sn: displayToken(meta.sn || "", row.provider_reference || "") || meta.sn || "",
       clientRef: saleRef(row) || meta.refId || "",
       providerReference: row.provider_reference || meta.sn || meta.refId || "",
       profit,
@@ -853,11 +924,15 @@ export async function handleDigiflazzCallback(method: string, pathname: string, 
   const quote = quoteFrom(payload, { refId: saleRef(row) || keys[0], sku: clean(row.provider_response?.buyerSkuCode), customerNumber: row.customer_number });
   const tail = (saleRef(row) || keys[0]).replace(/[^a-z0-9]/gi, "").slice(-6) || "------";
   console.log(`[bayar] callback ${quote.outcome} ref···${tail}`);
-  if (row.status === "success" || row.status === "failed" || row.status === "refunded") {
-    if (row.status === "success" && quote.sn && !clean(row.provider_response?.sn)) {
-      await rememberDigiflazz(env, row.id, { ...(row.provider_response ?? {}), sn: quote.sn, refId: saleRef(row) || keys[0] }).catch(() => undefined);
-    }
+  if (row.status === "refunded" || (row.status === "success" && quote.outcome !== "success")) {
     return { status: 200, body: { ok: true, duplicate: true, statusText: row.status } };
+  }
+  if (row.status === "success") {
+    const sn = displayToken(quote.sn || "", row.provider_response?.sn || "");
+    if (sn && sn !== clean(row.provider_response?.sn)) {
+      await rememberDigiflazz(env, row.id, { ...(row.provider_response ?? {}), sn, refId: saleRef(row) || keys[0] }).catch(() => undefined);
+    }
+    return { status: 200, body: { ok: true, duplicate: true, statusText: "success" } };
   }
   try {
     if (quote.outcome === "success" || quote.outcome === "failed") return await settleDigiflazzQuote(env, row, quote);

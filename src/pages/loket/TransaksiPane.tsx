@@ -486,7 +486,7 @@ export function LoketTransaksiPage() {
       const loaded = [...(body.simulations ?? []), ...(body.sales ?? [])] as Sale[];
       setSales(loaded);
       salesRef.current = loaded;
-      if (loaded.some((sale) => sale.status === "pending")) void syncStatus(false);
+      if (loaded.some((sale) => sale.status === "pending" || sale.status === "failed")) void syncStatus(false);
       setPendingRef((current) => {
         const match = loaded.find((sale) => sale.clientRef === current);
         if (match) return match.status === "pending" ? current : "";
@@ -638,7 +638,7 @@ export function LoketTransaksiPage() {
       setError("");
     }
     try {
-      const response = await postJson("/api/biller/sync", {}, 70_000);
+      const response = await postJson("/api/biller/sync", {}, 100_000);
       const body = await response.json().catch(() => ({})) as { error?: string; sales?: Sale[] };
       if (!response.ok) {
         if (announce) setError(body.error || "Status belum tersinkron.");
@@ -652,11 +652,11 @@ export function LoketTransaksiPage() {
       ];
       salesRef.current = next;
       setSales(next);
-      const fresh = next.filter((sale) => (sale.status === "success" || sale.status === "simulated") && before.get(sale.id) === "pending");
+      const fresh = next.filter((sale) => (sale.status === "success" || sale.status === "simulated") && (before.get(sale.id) === "pending" || before.get(sale.id) === "failed"));
       if (fresh.length > 0 && !printPaid(fresh)) setError("Struk belum terbuka. Gunakan Cetak Ulang.");
       else if (announce && fresh.length === 0) setError("");
       setPendingRef(next.find((sale) => sale.status === "pending" && sale.clientRef)?.clientRef || "");
-      if (announce) requestRefresh();
+      if (announce || fresh.length > 0) requestRefresh();
     } catch {
       if (announce) setError("Sinkronisasi status belum mendapat jawaban. Coba lagi.");
     } finally {
@@ -1029,7 +1029,7 @@ export function LoketTransaksiPage() {
             <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
               <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-3 font-black" disabled={rows.length === 0} onClick={() => printReceipts(loadPrinterSettings(loketCode), rows.map((row): ReceiptBill => ({ id: row.customerId, name: row.name, product: `${row.category} ${row.product}`, period: row.period, tagihan: row.amount + row.denda, admin: row.admin, total: row.total })), `${loketCode} - ${loketName}`)}>Cetak Info Tagihan</Button>
               <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-4 font-black" onClick={() => { setCart([]); setNumber(""); setError(""); }}>Hapus</Button>
-              {sales.some((sale) => sale.status === "pending") && <button type="button" onClick={() => void syncStatus(true)} disabled={busy} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/40 px-3 text-sm font-black text-white">Sinkronkan</button>}
+              <button type="button" onClick={() => void syncStatus(true)} disabled={busy} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/40 px-3 text-sm font-black text-white">Sinkronkan</button>
               {pendingRef && <button type="button" onClick={checkStatus} disabled={busy} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/40 px-3 text-sm font-black text-white">Cek status</button>}
               <button onClick={() => void pay()} disabled={busy || checking || rows.length === 0} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-50">
                 {busy ? "Memproses..." : `BAYAR ${formatRupiah(total)}`}

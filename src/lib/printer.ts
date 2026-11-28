@@ -80,7 +80,7 @@ function meter(id: string, period: string) {
   };
 }
 
-const SLIP_LINES = 14;
+const SLIP_LINES = 16;
 
 function field(label: string, value: string, width: number) {
   return `${label.padEnd(12)}: ${value}`.slice(0, width);
@@ -152,9 +152,11 @@ function tokenLines(sn: string, width: number) {
   const room = Math.max(8, width - 14);
   if (!value) return [field("TOKEN/SN", "-", width)];
   const lines = [field("TOKEN/SN", value.slice(0, room), width)];
-  const rest = value.slice(room);
-  if (rest) lines.push(rest.slice(0, width));
-  if (rest.length > width) lines.push(rest.slice(width, width * 2));
+  let rest = value.slice(room);
+  while (rest) {
+    lines.push(rest.slice(0, width));
+    rest = rest.slice(width);
+  }
   return lines;
 }
 
