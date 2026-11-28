@@ -2,7 +2,7 @@ import { DEPOSIT_ACCOUNTS } from "../src/lib/banks";
 import { networkLoketIds, touchActivity } from "./accountAdmin";
 import { attachSaleReceipts, omitFeeBreakdown, requestedMode, runBillerPayment, syncOpenNetworkSales, syncPendingSales } from "./biller";
 import { digiflazzDeposit } from "./digiflazz";
-import { alignProviderDeposit, cancelOwnTicket, claimTicket, createTicket, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, moneySnapshot, PUSAT_ACCOUNT, syncProviderDeposit, walletBalance, type DepositTicket } from "./ledger";
+import { alignProviderDeposit, cancelOwnTicket, claimTicket, createTicket, creditWallet, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, moneySnapshot, PUSAT_ACCOUNT, syncProviderDeposit, walletBalance, type DepositTicket } from "./ledger";
 import { listAuthUsers, loketCodeFor, makeTransferCode } from "./loketCode";
 
 interface Env {
@@ -90,6 +90,55 @@ async function listNormalizations(env: Env) {
   }
 }
 
+let normalizeChain: Promise<void> = Promise.resolve();
+
+function queueNormalize<T>(task: () => Promise<T>) {
+  const run = normalizeChain.then(task, task);
+  normalizeChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function applicantWithdrew(ticket: { status?: string; decidedBy?: string | null }) {
+  return ticket.status === "cancelled" && !ticket.decidedBy;
+}
+
+async function recordNormalization(env: Env, row: { actorId: string; providerBalance: number; pusatBefore: number; pusatAfter: number; wallets: number; fee: number; direction: string; amount: number; note: string; key: string }) {
+  try {
+    const response = await fetch(`${env.supabaseUrl}/rest/v1/balance_normalizations`, {
+      method: "POST",
+      headers: {
+        apikey: env.serviceRoleKey,
+        Authorization: `Bearer ${env.serviceRoleKey}`,
+        "Content-Type": "application/json",
+        Prefer: "resolution=ignore-duplicates,return=minimal",
+      },
+      body: JSON.stringify({
+        actor_id: row.actorId,
+        provider_balance: row.providerBalance,
+        pusat_before: row.pusatBefore,
+        pusat_after: row.pusatAfter,
+        wallets: row.wallets,
+        fee: row.fee,
+        direction: row.direction,
+        amount: row.amount,
+        remaining: 0,
+        note: row.note,
+        idempotency_key: row.key,
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      console.log(`[normalisasi] riwayat gagal ${response.status} ${text.replace(/\s+/g, " ").slice(0, 240)}`);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.log(`[normalisasi] riwayat gagal ${error instanceof Error ? error.message : "jaringan"}`);
+    return false;
+  }
+}
+
 function accountFor(bank: string) {
   return DEPOSIT_ACCOUNTS.find((account) => account.bank === bank);
 }
@@ -113,7 +162,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       walletBalance(env, caller.id),
     ]);
     const visibleTickets = caller.role === "super_admin"
-      ? tickets
+      ? tickets.filter((ticket) => !applicantWithdrew(ticket))
       : tickets.filter((ticket) => ticket.loketId === caller.id || ticket.status !== "pending");
     const visibleMutations = caller.role === "super_admin"
       ? mutations
@@ -277,28 +326,76 @@ export async function handleDepositRequest(method: string, pathname: string, bod
 
   if ((pathname === "/api/wallet/align" || pathname === "/api/wallet/normalize") && method === "POST") {
     if (caller.role !== "super_admin") return { status: 403, body: { error: "Hanya Super Admin yang dapat menormalkan saldo." } };
-    const provider = await digiflazzDeposit(true).catch(() => ({ balance: null as number | null, error: "Saldo DigiFlazz tidak dapat dihubungi." }));
-    if (provider.balance == null) return { status: 502, body: { error: provider.error || "Saldo DigiFlazz tidak terbaca." } };
-    const aligned = await alignProviderDeposit(env, caller.id, provider.balance);
-    if (aligned.error || aligned.balance === undefined) return { status: aligned.status || 500, body: { error: aligned.error || "Normalisasi saldo gagal." } };
-    const reduced = Number(aligned.reduced) || 0;
-    const added = Number(aligned.added) || 0;
-    const remaining = Number(aligned.remaining) || 0;
-    const shortfall = Number(aligned.shortfall) || 0;
-    const rupiah = (value: number) => `Rp${Math.round(value).toLocaleString("id-ID")}`;
-    const note = reduced > 0
-      ? `Saldo Utama diturunkan ${rupiah(reduced)} agar mengikuti DigiFlazz. Dompet loket tidak dikurangi.${remaining > 0 ? ` Sisa ${rupiah(remaining)} sudah berada di dompet jaringan.` : ""} Penyesuaian tercatat dan tidak ditarik ulang.`
-      : added > 0
-        ? `Selisih ${rupiah(added)} dari DigiFlazz masuk ke Saldo Utama satu kali. Tarikan berikutnya tidak menghitung angka yang sama.`
-        : shortfall > 0
-          ? `Migrasi normalisasi terbaru belum memasukkan selisih. Jalankan SQL terbaru, lalu tekan Normalisasi saldo lagi.`
-          : remaining > 0
-            ? `Saldo Utama sudah 0. Sisa ${rupiah(remaining)} ada di dompet jaringan dan tidak diambil.`
-            : "Saldo Mentari sudah mengikuti DigiFlazz. Tidak ada selisih yang dipindahkan.";
-    const snapshot = await moneySnapshot(env, caller.id);
-    const networkBalance = snapshot?.wallets ?? 0;
-    const reconciledGap = snapshot ? Number(aligned.balance) + networkBalance + (snapshot.fee ?? 0) - provider.balance : null;
-    return { status: 200, body: { balance: aligned.balance, providerBalance: provider.balance, reduced, added, remaining, shortfall, direction: aligned.direction || "none", networkBalance, providerUsed: snapshot?.providerUsed ?? 0, feeBalance: snapshot?.fee ?? 0, reconciledGap, reconcileReady: Boolean(snapshot), normalizations: await listNormalizations(env), message: note } };
+    return queueNormalize(async () => {
+      const provider = await digiflazzDeposit(true).catch(() => ({ balance: null as number | null, error: "Saldo DigiFlazz tidak dapat dihubungi." }));
+      if (provider.balance == null) return { status: 502, body: { error: provider.error || "Saldo DigiFlazz tidak terbaca. Normalisasi tidak dijalankan." } };
+      const target = Math.round(provider.balance);
+      const rupiah = (value: number) => `Rp${Math.round(value).toLocaleString("id-ID")}`;
+      const before = await walletBalance(env, caller.id, PUSAT_ACCOUNT);
+      console.log(`[normalisasi] mulai saldoUtama=${before} digiflazz=${target} actor=${caller.id}`);
+      const aligned = await alignProviderDeposit(env, caller.id, target);
+      if (aligned.error) console.log(`[normalisasi] fungsi ${aligned.error}`);
+      let balance = Number.isFinite(Number(aligned.balance)) ? Number(aligned.balance) : before;
+      if (Math.abs(balance - target) > 1) {
+        const current = await walletBalance(env, caller.id, PUSAT_ACCOUNT);
+        const delta = target - Math.round(current);
+        if (delta !== 0) {
+          const moved = await creditWallet(env, caller.id, PUSAT_ACCOUNT, delta, "Normalisasi saldo mengikuti DigiFlazz");
+          if (moved.error || moved.balance === undefined) {
+            console.log(`[normalisasi] gagal ${moved.error || "saldo tidak kembali"}`);
+            return { status: moved.status || 500, body: { error: moved.error || "Saldo Utama gagal disamakan dengan DigiFlazz." } };
+          }
+          balance = Number(moved.balance);
+        } else {
+          balance = current;
+        }
+      }
+      if (Math.abs(balance - target) > 1) {
+        const message = `Saldo Utama masih ${rupiah(balance)} dan belum mengikuti DigiFlazz ${rupiah(target)}.`;
+        console.log(`[normalisasi] gagal ${message}`);
+        return { status: 409, body: { error: message } };
+      }
+      const delta = balance - before;
+      const direction = delta > 0 ? "credit" : delta < 0 ? "debit" : "none";
+      const amount = Math.abs(delta);
+      const snapshot = await moneySnapshot(env, caller.id);
+      const note = amount > 0
+        ? `Saldo Utama ${delta > 0 ? "naik" : "turun"} ${rupiah(amount)} menjadi ${rupiah(balance)}, mengikuti DigiFlazz. Dompet loket tidak diubah.`
+        : "Saldo Utama sudah mengikuti DigiFlazz. Tidak ada selisih yang dipindahkan.";
+      if (amount > 0) {
+        await recordNormalization(env, {
+          actorId: caller.id,
+          providerBalance: target,
+          pusatBefore: before,
+          pusatAfter: balance,
+          wallets: snapshot?.wallets ?? 0,
+          fee: snapshot?.fee ?? 0,
+          direction,
+          amount,
+          note,
+          key: `digiflazz-normalize:${before}:${target}:${target}`,
+        });
+      }
+      const stored = await listNormalizations(env);
+      const entry = amount > 0 ? {
+        id: `digiflazz-normalize:${before}:${target}:${target}`,
+        at: new Date().toISOString(),
+        providerBalance: target,
+        pusatBefore: before,
+        pusatAfter: balance,
+        direction,
+        amount,
+        remaining: 0,
+        note,
+      } : null;
+      const normalizations = entry && !stored.some((row) => row.pusatBefore === before && row.pusatAfter === balance && row.amount === amount)
+        ? [entry, ...stored]
+        : stored;
+      console.log(`[normalisasi] selesai saldoUtama=${balance} digiflazz=${target} selisih=${delta}`);
+      const networkBalance = snapshot?.wallets ?? 0;
+      const reconciledGap = snapshot ? balance + networkBalance + (snapshot.fee ?? 0) - target : null;
+      return { status: 200, body: { balance, providerBalance: target, reduced: delta < 0 ? amount : 0, added: delta > 0 ? amount : 0, remaining: 0, shortfall: 0, direction, networkBalance, providerUsed: snapshot?.providerUsed ?? 0, feeBalance: snapshot?.fee ?? 0, reconciledGap, reconcileReady: Boolean(snapshot), normalizations, message: note } };
+    });
   }
 
   if (pathname === "/api/deposits" && method === "POST") {

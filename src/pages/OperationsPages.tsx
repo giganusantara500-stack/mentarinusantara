@@ -51,6 +51,7 @@ interface Ticket {
   createdAt?: string;
   decidedAt?: string | null;
   status: "pending" | "approved" | "cancelled" | "reversed";
+  decidedBy?: string | null;
   route?: "pusat" | "jaringan";
   approverId?: string | null;
   applicantRole?: string;
@@ -207,12 +208,16 @@ interface NormalizationRow {
   note: string;
 }
 
-function normalizeConfirm(provider: number | null, pool: number, network: number, fee: number) {
+function normalizeConfirm(provider: number | null, pool: number) {
   if (provider == null) return "";
-  const gap = pool + network + fee - provider;
-  if (Math.abs(gap) <= 1000) return "";
-  if (gap > 0) return `Mentari mencatat ${formatRupiah(gap)} di atas saldo DigiFlazz ${formatRupiah(provider)}. Normalisasi menurunkan Saldo Utama. Dompet loket tidak dikurangi, dan angka yang sama tidak ditarik ulang. Lanjutkan?`;
-  return `Saldo DigiFlazz ${formatRupiah(provider)} lebih tinggi ${formatRupiah(-gap)} dari catatan Mentari. Normalisasi memasukkan selisih itu ke Saldo Utama satu kali. Tarikan berikutnya tidak menghitung angka yang sama. Lanjutkan?`;
+  const gap = Math.round(pool) - Math.round(provider);
+  if (Math.abs(gap) <= 1) return "";
+  if (gap > 0) return `Saldo Utama ${formatRupiah(pool)} akan menjadi ${formatRupiah(provider)} agar mengikuti DigiFlazz. Dompet loket tidak dikurangi. Lanjutkan?`;
+  return `Saldo Utama ${formatRupiah(pool)} akan naik menjadi ${formatRupiah(provider)} agar mengikuti DigiFlazz. Penambahan dicatat satu kali. Lanjutkan?`;
+}
+
+function rememberNormalizations(current: NormalizationRow[], incoming: NormalizationRow[]) {
+  return incoming.length > 0 ? incoming : current;
 }
 
 function NormalizationHistory({ rows }: { rows: NormalizationRow[] }) {
@@ -243,7 +248,8 @@ export function ManageSetoranPage() {
   const { profiles } = useProfiles();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [mutations, setMutations] = useState<FundMutation[]>([]);
-  const [status, setStatus] = useState("semua");
+  const [status, setStatus] = useState("pending");
+  const [normalizeError, setNormalizeError] = useState("");
   const [bank, setBank] = useState("semua");
   const [date, setDate] = useState("");
   const [query, setQuery] = useState("");
@@ -284,7 +290,7 @@ export function ManageSetoranPage() {
       setNetworkBalance(Number(body.networkBalance) || 0);
       setProviderUsed(Number(body.providerUsed) || 0);
       setReconcileReady(Boolean(body.reconcileReady));
-      setNormalizations(Array.isArray(body.normalizations) ? body.normalizations as NormalizationRow[] : []);
+      setNormalizations((current) => rememberNormalizations(current, Array.isArray(body.normalizations) ? body.normalizations as NormalizationRow[] : []));
     }
   };
   const sync = async () => {
@@ -309,17 +315,17 @@ export function ManageSetoranPage() {
   };
   const align = async () => {
     if (aligning || syncing) return;
-    if (provider == null) { setError("Saldo DigiFlazz belum terbaca. Muat ulang, lalu coba lagi."); return; }
-    const warning = normalizeConfirm(provider, pool, networkBalance, feeBalance);
-    if (!warning) { setNote("Saldo Mentari sudah mengikuti DigiFlazz. Tidak ada selisih yang dipindahkan."); return; }
+    if (provider == null) { setNormalizeError("Saldo DigiFlazz belum terbaca. Muat ulang, lalu coba lagi."); return; }
+    const warning = normalizeConfirm(provider, pool);
+    if (!warning) { setNormalizeError(""); setNote("Saldo Utama sudah mengikuti DigiFlazz. Tidak ada selisih yang dipindahkan."); return; }
     if (!window.confirm(warning)) return;
     setAligning(true);
-    setError("");
+    setNormalizeError("");
     setNote("");
     const response = await fetch("/api/wallet/normalize", { method: "POST", headers: await authHeader() });
     const body = await response.json().catch(() => null);
     setAligning(false);
-    if (!response.ok) { setError(body?.error || "Normalisasi saldo gagal."); return; }
+    if (!response.ok) { setNormalizeError(body?.error || "Normalisasi saldo gagal. Saldo Utama tidak diubah."); return; }
     setPool(Number(body.balance) || 0);
     setPoolReady(true);
     setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
@@ -327,8 +333,8 @@ export function ManageSetoranPage() {
     setNetworkBalance(Number(body.networkBalance) || 0);
     setProviderUsed(Number(body.providerUsed) || 0);
     setReconcileReady(Boolean(body.reconcileReady));
-    if (Array.isArray(body.normalizations)) setNormalizations(body.normalizations as NormalizationRow[]);
-    setNote(String(body.message || "Saldo dinormalkan mengikuti DigiFlazz."));
+    setNormalizations((current) => rememberNormalizations(current, Array.isArray(body.normalizations) ? body.normalizations as NormalizationRow[] : []));
+    setNote(String(body.message || "Saldo Utama mengikuti DigiFlazz."));
     await load();
   };
   useEffect(() => {
@@ -359,6 +365,7 @@ export function ManageSetoranPage() {
   const canDecide = (ticket: Ticket) => globalQueue && routeOf(ticket) === "pusat";
   const rows = tickets.filter((ticket) => {
     if (!globalQueue && ticket.loketId !== profile?.id && ticket.approverId !== profile?.id && (!ticket.loketId || !networkIds.has(ticket.loketId))) return false;
+    if (ticket.status === "cancelled" && !ticket.decidedBy) return false;
     if (status !== "semua" && ticket.status !== status) return false;
     if (bank !== "semua" && ticket.bank !== bank) return false;
     if (globalQueue && date && !ticket.transferAt.slice(0, 10).startsWith(date)) return false;
@@ -416,13 +423,14 @@ export function ManageSetoranPage() {
         <p className="px-4 pb-4 text-xs leading-5 text-slate-500">{reconcileReady ? balanceGapText(provider, pool, networkBalance, feeBalance, providerUsed) : "Angka rekonsiliasi lengkap muncul setelah migrasi saldo terbaru dijalankan. Sebelum itu, tarik saldo bisa menghitung ulang setoran yang sudah masuk."}</p>
       </Card>
       <NormalizationHistory rows={normalizations} />
+      {normalizeError && <div className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{normalizeError}</div>}
       {error && <div className="mb-3 text-sm text-rose-600">{error}</div>}
       {note && <div className="mb-3 text-sm text-emerald-700">{note}</div>}
       <div className={`mb-4 grid gap-3 rounded-xl border border-slate-200 bg-white p-3 ${globalQueue ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
         <Field label="Status">
           <Select value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="semua">Semua</option>
-            <option value="pending">Pending</option>
+            <option value="pending">Menunggu diperiksa</option>
+            <option value="semua">Semua kecuali batal pemohon</option>
             <option value="approved">Approved</option>
             <option value="cancelled">Ditolak</option>
             <option value="reversed">Dibatalkan</option>
@@ -444,7 +452,7 @@ export function ManageSetoranPage() {
         </Field>
       </div>
       <Card>
-        <CardHeader title={globalQueue ? "Antrean rekening pusat" : "Antrean jaringan Anda"} subtitle={`${rows.length} tiket · ${profile?.full_name || profile?.username || "Jaringan"}`} />
+        <CardHeader title={globalQueue ? "Antrean rekening pusat" : "Antrean jaringan Anda"} subtitle={globalQueue ? `${rows.length} tiket pada filter ini. Tiket yang dibatalkan loket atau mitra tidak masuk antrean maupun rekap.` : `${rows.length} tiket · ${profile?.full_name || profile?.username || "Jaringan"}`} />
         <div className="w-full max-w-full">
           <table className="w-full table-fixed text-sm">
             <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
@@ -565,7 +573,7 @@ export function BalanceAllocationPage() {
     setNetworkBalance(Number(body.networkBalance) || 0);
     setProviderUsed(Number(body.providerUsed) || 0);
     setReconcileReady(Boolean(body.reconcileReady));
-    setNormalizations(Array.isArray(body.normalizations) ? body.normalizations as NormalizationRow[] : []);
+    setNormalizations((current) => rememberNormalizations(current, Array.isArray(body.normalizations) ? body.normalizations as NormalizationRow[] : []));
   };
   useEffect(() => { void loadWallet(); }, []);
   const sync = async () => {
@@ -589,8 +597,8 @@ export function BalanceAllocationPage() {
   const align = async () => {
     if (aligning || syncing) return;
     if (provider == null) { setError("Saldo DigiFlazz belum terbaca. Muat ulang, lalu coba lagi."); return; }
-    const warning = normalizeConfirm(provider, pool, networkBalance, feeBalance);
-    if (!warning) { setMessage("Saldo Mentari sudah mengikuti DigiFlazz. Tidak ada selisih yang dipindahkan."); return; }
+    const warning = normalizeConfirm(provider, pool);
+    if (!warning) { setMessage("Saldo Utama sudah mengikuti DigiFlazz. Tidak ada selisih yang dipindahkan."); return; }
     if (!window.confirm(warning)) return;
     setAligning(true);
     setError("");
@@ -598,15 +606,15 @@ export function BalanceAllocationPage() {
     const response = await fetch("/api/wallet/normalize", { method: "POST", headers: await authHeader() });
     const body = await response.json().catch(() => null);
     setAligning(false);
-    if (!response.ok) { setError(body?.error || "Normalisasi saldo gagal."); return; }
+    if (!response.ok) { setError(body?.error || "Normalisasi saldo gagal. Saldo Utama tidak diubah."); return; }
     setPool(Number(body.balance) || 0);
     setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
     setFeeBalance(Number(body.feeBalance) || 0);
     setNetworkBalance(Number(body.networkBalance) || 0);
     setProviderUsed(Number(body.providerUsed) || 0);
     setReconcileReady(Boolean(body.reconcileReady));
-    if (Array.isArray(body.normalizations)) setNormalizations(body.normalizations as NormalizationRow[]);
-    setMessage(String(body.message || "Saldo dinormalkan mengikuti DigiFlazz."));
+    setNormalizations((current) => rememberNormalizations(current, Array.isArray(body.normalizations) ? body.normalizations as NormalizationRow[] : []));
+    setMessage(String(body.message || "Saldo Utama mengikuti DigiFlazz."));
   };
   const send = async () => {
     if (sendLock.current || sending) return;

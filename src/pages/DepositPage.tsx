@@ -27,6 +27,7 @@ interface Ticket {
   accountNumber: string;
   accountHolder?: string;
   status: "pending" | "approved" | "cancelled" | "reversed";
+  decidedBy?: string | null;
   route?: "pusat" | "jaringan";
   uplineRole?: string;
   uplineName?: string;
@@ -239,7 +240,8 @@ function DepositPanel({ onClose, tick, requestRefresh, page = false }: { onClose
 
   const visibleTickets = tickets.map((ticket) => forLoketEyes(ticket, role));
   const ownTickets = visibleTickets.filter((ticket) => ticket.loketId === profile?.id);
-  const listedTickets = role === "superadmin" ? visibleTickets : ownTickets;
+  const listedTickets = (role === "superadmin" ? visibleTickets : ownTickets)
+    .filter((ticket) => role !== "superadmin" || !(ticket.status === "cancelled" && !ticket.decidedBy));
   const phaseAudience = role === "superadmin" ? "admin" : "applicant";
   const openTicket = canCreate ? openDepositTicket(ownTickets, now) : null;
   const account = DEPOSIT_ACCOUNTS[0];

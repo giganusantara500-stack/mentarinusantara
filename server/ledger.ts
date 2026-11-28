@@ -282,17 +282,22 @@ export async function alignProviderDeposit(env: LedgerEnv, actorId: string, depo
   } catch {
     return { error: "Database saldo tidak dapat dihubungi.", status: 500 };
   }
-  const body = await response.json().catch(() => null) as ({ error?: string; status?: number; balance?: number; providerBalance?: number; reduced?: number; added?: number; remaining?: number; shortfall?: number; direction?: string; message?: string } | null);
+  const body = await response.json().catch(() => null) as ({ error?: string; status?: number; balance?: number; providerBalance?: number; reduced?: number; added?: number; remaining?: number; shortfall?: number; direction?: string; message?: string; details?: string; hint?: string } | null);
+  const detail = [body && "message" in body ? body.message : "", body?.details, body?.hint].filter(Boolean).join(" — ");
   if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)) {
-    const missing = String(body && "message" in body ? body.message : "").includes("ledger_align_provider");
-    return { error: missing ? "Fungsi penyetaraan saldo belum terpasang. Jalankan migrasi terbaru, lalu muat ulang." : "Database saldo menolak penyetaraan.", status: response.status || 500 };
+    console.log(`[normalisasi] fungsi ditolak ${response.status} ${detail.slice(0, 300)}`);
+    const missing = detail.includes("ledger_align_provider");
+    return { error: missing ? "Fungsi normalisasi saldo belum terpasang. Jalankan migrasi terbaru, lalu muat ulang." : (detail || "Database saldo menolak normalisasi."), status: response.status || 500 };
   }
-  if (body.error && !body.status) return { error: body.message || body.error, status: 500 };
+  if (body.error && !body.status) {
+    console.log(`[normalisasi] fungsi gagal ${body.message || body.error}`);
+    return { error: body.message || body.error, status: body.status || 500 };
+  }
   return body;
 }
 
-export function creditWallet(env: LedgerEnv, actorId: string, userId: string, amount: number) {
-  return ledgerApi(env, "credit", actorId, { userId, amount, note: "Penyesuaian saldo Super Admin" });
+export function creditWallet(env: LedgerEnv, actorId: string, userId: string, amount: number, note = "Penyesuaian saldo Super Admin") {
+  return ledgerApi(env, "credit", actorId, { userId, amount, note });
 }
 
 export function recordLoketSale(env: LedgerEnv, actorId: string, sale: {

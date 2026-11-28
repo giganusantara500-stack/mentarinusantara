@@ -233,11 +233,12 @@ export function OpsDashboardPage() {
               type="button"
               disabled={aligning}
               onClick={() => {
-                if (providerBalance == null) { setAlignNote("Saldo DigiFlazz belum terbaca."); return; }
-                if (reconciledGap != null && Math.abs(reconciledGap) <= 1000) { setAlignNote("Saldo sudah mengikuti DigiFlazz."); return; }
-                const warning = reconciledGap != null && reconciledGap > 1000
-                  ? `Mentari mencatat ${formatRupiah(reconciledGap)} di atas DigiFlazz. Normalisasi menurunkan Saldo Utama. Dompet loket tidak dikurangi dan tidak ditarik ulang. Lanjutkan?`
-                  : `DigiFlazz lebih tinggi dari catatan Mentari. Normalisasi memasukkan selisih ke Saldo Utama satu kali. Tarikan berikutnya tidak menghitung angka yang sama. Lanjutkan?`;
+                if (providerBalance == null || mainBalance == null) { setAlignNote("Saldo DigiFlazz belum terbaca."); return; }
+                const gap = Math.round(mainBalance) - Math.round(providerBalance);
+                if (Math.abs(gap) <= 1) { setAlignNote("Saldo Utama sudah mengikuti DigiFlazz."); return; }
+                const warning = gap > 0
+                  ? `Saldo Utama ${formatRupiah(mainBalance)} akan menjadi ${formatRupiah(providerBalance)} agar mengikuti DigiFlazz. Dompet loket tidak dikurangi. Lanjutkan?`
+                  : `Saldo Utama ${formatRupiah(mainBalance)} akan naik menjadi ${formatRupiah(providerBalance)} agar mengikuti DigiFlazz. Lanjutkan?`;
                 if (!window.confirm(warning)) return;
                 void (async () => {
                   setAligning(true);
