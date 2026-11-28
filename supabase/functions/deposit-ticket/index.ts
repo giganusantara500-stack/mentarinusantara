@@ -153,6 +153,22 @@ Deno.serve(async (req) => {
         return respond({ error: "Aksi keputusan tiket tidak valid." }, 400);
       }
     }
+    if (action === "decide" && decision === "approve") {
+      const approved = await admin.rpc("ledger_approve_deposit", { p_actor: user.id, p_ticket: id });
+      if (approved.error) {
+        const missing = /schema cache|could not find the function|PGRST202/i.test(databaseMessage(approved.error));
+        return respond({
+          error: missing
+            ? "Persetujuan belum memasukkan kode unik. Jalankan migrasi SQL terbaru, lalu setujui lagi. Saldo belum berubah."
+            : databaseMessage(approved.error),
+        }, 500);
+      }
+      const approvedBody = (approved.data ?? {}) as { error?: string; status?: number; ticket?: unknown; balance?: number };
+      if (approvedBody.error || !approvedBody.ticket) {
+        return respond({ error: approvedBody.error || "Status tiket gagal diperbarui." }, approvedBody.status || 500);
+      }
+      return respond({ ticket: approvedBody.ticket, balance: approvedBody.balance });
+    }
     const ledgerAction = action === "cancel" ? "cancel_ticket" : action === "claim" ? "claim_ticket" : "decide_ticket";
     const result = await ledger(admin, ledgerAction, user.id, action === "decide" ? { id, action: decision } : { id });
     if (result.status >= 400 || !result.body.ticket) {

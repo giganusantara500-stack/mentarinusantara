@@ -201,7 +201,48 @@ export function claimTicket(env: LedgerEnv, actorId: string, ticketId: string) {
   return ledgerApi(env, "claim_ticket", actorId, { id: ticketId });
 }
 
+async function approveFullDeposit(env: LedgerEnv, actorId: string, ticketId: string): Promise<LedgerResult> {
+  if (!env.supabaseUrl || !env.serviceRoleKey) {
+    return { error: "Konfigurasi database belum lengkap.", status: 500 };
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${env.supabaseUrl}/rest/v1/rpc/ledger_approve_deposit`, {
+      method: "POST",
+      headers: {
+        apikey: env.serviceRoleKey,
+        Authorization: `Bearer ${env.serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_actor: actorId, p_ticket: ticketId }),
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    return {
+      error: timedOut
+        ? "Database saldo tidak menjawab tepat waktu. Cek saldo sebelum menyetujui lagi."
+        : "Database saldo tidak dapat dihubungi.",
+      status: timedOut ? 504 : 500,
+    };
+  }
+  const body = await response.json().catch(() => null) as (LedgerResult & { message?: string; details?: string; hint?: string; code?: string }) | null;
+  if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)) {
+    const message = String(body?.message || "");
+    const missing = body?.code === "PGRST202" || /schema cache|could not find the function|ledger_approve_deposit/i.test(message);
+    return {
+      error: missing
+        ? "Persetujuan belum memasukkan kode unik. Jalankan migrasi SQL terbaru, lalu setujui lagi. Saldo belum berubah."
+        : ([body?.message, body?.details, body?.hint].filter(Boolean).join(" — ") || "Database saldo menolak persetujuan."),
+      status: response.status || 500,
+    };
+  }
+  if (body.error && !body.status) return { error: body.message || body.error, status: 500 };
+  return body;
+}
+
 export function decideTicket(env: LedgerEnv, actorId: string, ticketId: string, action: "approve" | "cancel" | "pending" | "void") {
+  if (action === "approve") return approveFullDeposit(env, actorId, ticketId);
   return ledgerApi(env, "decide_ticket", actorId, { id: ticketId, action });
 }
 
