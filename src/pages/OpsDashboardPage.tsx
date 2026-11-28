@@ -5,9 +5,10 @@ import { supabase } from "@/lib/supabase";
 import { PageContainer } from "@/components/PageContainer";
 import { CapaianChart } from "@/components/dashboard/CapaianChart";
 import { WelcomeGreeting } from "@/components/dashboard/WelcomeGreeting";
-import { buildThreeMonthSheets, isCountedSale } from "@/lib/sheetChart";
 import { isLivePending } from "@/lib/saleWindow";
 import { formatRupiah } from "@/lib/format";
+import { apiUrl } from "@/lib/apiBase";
+import { buildThreeMonthSheets, buildThreeMonthSums, isCountedSale } from "@/lib/sheetChart";
 import { depositRequest } from "@/lib/depositApi";
 import { ticketPhase } from "@/lib/depositStatus";
 import { Button } from "@/components/ui/Button";
@@ -98,6 +99,9 @@ export function OpsDashboardPage() {
   const [providerBalance, setProviderBalance] = useState<number | null>(null);
   const [feeBalance, setFeeBalance] = useState(0);
   const [reconciledGap, setReconciledGap] = useState<number | null>(null);
+  const [aligning, setAligning] = useState(false);
+  const [alignNote, setAlignNote] = useState("");
+  const [feeChart, setFeeChart] = useState(() => buildThreeMonthSums([]));
   const role = profile ? dbRoleToAppRole(profile.role) : "pending";
   const networkView = role === "mitra" || role === "submitra";
   const networkLoketIds = useMemo(
@@ -111,6 +115,18 @@ export function OpsDashboardPage() {
   }, [profiles, profile?.id]);
   const archive = loketRows;
   const chart = useMemo(() => buildThreeMonthSheets(archive.map((row) => ({ at: row.created_at, ok: isCountedSale(row.status) }))), [archive]);
+  useEffect(() => {
+    if (role !== "superadmin") return;
+    let stop = false;
+    (async () => {
+      const session = await supabase.auth.getSession();
+      const response = await fetch(apiUrl("/api/fee-report"), { headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` } });
+      const body = await response.json().catch(() => null);
+      if (stop || !response.ok || !Array.isArray(body?.days)) return;
+      setFeeChart(buildThreeMonthSums((body.days as { date: string; total: number }[]).map((day) => ({ at: day.date, amount: Number(day.total) || 0 }))));
+    })();
+    return () => { stop = true; };
+  }, [role]);
   const scopedTickets = useMemo(() => {
     if (!networkView) return tickets;
     return tickets.filter((ticket) => !!ticket.loketId && networkAccountIds.has(ticket.loketId));
@@ -199,7 +215,7 @@ export function OpsDashboardPage() {
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">{role === "submitra" ? "Saldo" : "Saldo Utama"}</div>
           <div className="text-lg font-bold leading-none tabular-nums">{mainBalance === null ? "—" : formatRupiah(mainBalance)}</div>
-          {role === "superadmin" && <div className="mt-1 text-[11px] text-amber-100/80">{providerBalance == null ? "DigiFlazz belum terbaca" : `DigiFlazz ${formatRupiah(providerBalance)}`} · Fee internal {formatRupiah(feeBalance)}{reconciledGap == null ? "" : reconciledGap > 1000 ? ` · Kelebihan tercatat ${formatRupiah(reconciledGap)} tidak ditarik lagi` : reconciledGap < -1000 ? ` · Belum ditarik ${formatRupiah(-reconciledGap)}` : " · Selaras"}</div>}
+          {role === "superadmin" && <div className="mt-1 text-[11px] text-amber-100/80">{providerBalance == null ? "DigiFlazz belum terbaca" : `DigiFlazz ${formatRupiah(providerBalance)}`} · Fee internal {formatRupiah(feeBalance)}{reconciledGap == null ? "" : reconciledGap > 1000 ? ` · Kelebihan tercatat ${formatRupiah(reconciledGap)}` : reconciledGap < -1000 ? ` · Belum ditarik ${formatRupiah(-reconciledGap)}` : " · Selaras"}{alignNote ? ` · ${alignNote}` : ""}</div>}
         </div>
         {role === "mitra" && tickets.some((ticket) => ticket.loketId === profile.id) && (
           <button type="button" onClick={() => { window.location.hash = "/deposit"; }} className="hidden rounded-lg bg-white/10 px-3 py-1 text-left text-[11px] leading-snug sm:block">
@@ -211,8 +227,30 @@ export function OpsDashboardPage() {
           </button>
         )}
         {role === "superadmin" && (
-          <div className="ml-auto hidden max-w-[46%] text-right text-[11px] leading-snug text-white/70 sm:block">
-            Tiket memindahkan Saldo Utama satu kali. Transfer ke loket memotong Saldo Utama yang sama.
+          <div className="ml-auto flex items-center gap-2">
+            <button type="button" onClick={() => { window.location.hash = "/laporan-fee"; }} className="rounded-lg bg-white/10 px-3 py-1 text-[11px] font-bold">Laporan Fee</button>
+            <button
+              type="button"
+              disabled={aligning}
+              onClick={() => {
+                if (!window.confirm("Setarakan Saldo Utama dengan saldo DigiFlazz? Dompet loket tidak dikurangi.")) return;
+                void (async () => {
+                  setAligning(true);
+                  setAlignNote("");
+                  const session = await supabase.auth.getSession();
+                  const response = await fetch(apiUrl("/api/wallet/align"), { method: "POST", headers: { Authorization: `Bearer ${session.data.session?.access_token ?? ""}` } });
+                  const body = await response.json().catch(() => null);
+                  setAligning(false);
+                  if (!response.ok) { setAlignNote(String(body?.error || "Penyetaraan gagal.")); return; }
+                  setMainBalance(Number(body.balance) || 0);
+                  setProviderBalance(body.providerBalance == null ? null : Number(body.providerBalance));
+                  setFeeBalance(Number(body.feeBalance) || 0);
+                  setReconciledGap(body.reconciledGap == null ? null : Number(body.reconciledGap));
+                  setAlignNote(String(body.message || "Saldo disetarakan."));
+                })();
+              }}
+              className="rounded-lg bg-amber-400 px-3 py-1 text-[11px] font-bold text-slate-950 disabled:opacity-60"
+            >{aligning ? "Menyetarakan..." : "Setarakan baseline"}</button>
           </div>
         )}
       </div>
@@ -249,17 +287,48 @@ export function OpsDashboardPage() {
           setReconciledGap(wallet?.reconciledGap == null ? null : Number(wallet.reconciledGap));
         })();
       }} />}
-      <div className="relative mt-3 flex min-h-0 flex-1 flex-col">
-        <CapaianChart
-          labels={chart.labels}
-          series={chart.series}
-          emptyText="Kurva menunggu data transaksi."
-          caption={role === "superadmin" ? "Seluruh transaksi jaringan" : role === "mitra" ? "Sub Mitra dan loket di jaringan Anda" : "Loket di bawah Sub Mitra ini"}
-          fill
-          className="relative z-0 min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-left shadow-sm"
-        />
-        <WelcomeGreeting className="top-14" />
-      </div>
+      {role === "superadmin" ? (
+        <div className="mt-3 grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-2">
+          <div className="relative flex min-h-[220px] flex-col">
+            <CapaianChart
+              labels={chart.labels}
+              series={chart.series}
+              emptyText="Kurva menunggu data transaksi."
+              caption="Seluruh transaksi jaringan"
+              fill
+              className="relative z-0 min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm"
+            />
+            <WelcomeGreeting className="top-12" />
+          </div>
+          <div className="flex min-h-[220px] flex-col">
+            <CapaianChart
+              title="Capaian Fee"
+              labels={feeChart.labels}
+              series={feeChart.series}
+              emptyText="Kurva fee menunggu transaksi sukses."
+              caption="Fee DigiFlazz + Mentari, 3 bulan berjalan"
+              formatValue={(value) => formatRupiah(value)}
+              axisFormat={(value) => new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(value)}
+              integerScale={false}
+              emptyMax={100000}
+              fill
+              className="min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm"
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="relative mt-3 flex min-h-0 flex-1 flex-col">
+          <CapaianChart
+            labels={chart.labels}
+            series={chart.series}
+            emptyText="Kurva menunggu data transaksi."
+            caption={role === "mitra" ? "Sub Mitra dan loket di jaringan Anda" : "Loket di bawah Sub Mitra ini"}
+            fill
+            className="relative z-0 min-h-0 flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-left shadow-sm"
+          />
+          <WelcomeGreeting className="top-14" />
+        </div>
+      )}
     </PageContainer>
   );
 }

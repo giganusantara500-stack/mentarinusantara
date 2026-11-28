@@ -13,6 +13,12 @@ export function CapaianChart({
   caption,
   className,
   fill = false,
+  title = "Capaian Transaksi",
+  unit = "lembar",
+  formatValue,
+  axisFormat,
+  integerScale = true,
+  emptyMax = 10,
 }: {
   labels: string[];
   series: LineSeries[];
@@ -20,6 +26,12 @@ export function CapaianChart({
   caption?: string;
   className?: string;
   fill?: boolean;
+  title?: string;
+  unit?: string;
+  formatValue?: (value: number) => string;
+  axisFormat?: (value: number) => string;
+  integerScale?: boolean;
+  emptyMax?: number;
 }) {
   const plotRef = useRef<HTMLDivElement>(null);
   const [plotHeight, setPlotHeight] = useState(240);
@@ -39,7 +51,7 @@ export function CapaianChart({
     <section className={cn(className, fill && "flex min-h-0 flex-col")}>
       <div className={cn("relative flex items-center justify-center px-28", fill ? "mb-1 min-h-6 shrink-0" : "mb-2 min-h-7")}>
         <div className="text-center">
-          <h2 className={cn("font-black text-slate-950", fill ? "text-sm" : "text-base")}>Capaian Transaksi</h2>
+          <h2 className={cn("font-black text-slate-950", fill ? "text-sm" : "text-base")}>{title}</h2>
           {caption && <div className="text-[11px] font-semibold text-slate-500">{caption}</div>}
         </div>
         {current && (
@@ -55,7 +67,7 @@ export function CapaianChart({
               <span className={cn("rounded-full", fill ? "h-2 w-2" : "h-2.5 w-2.5")} style={{ backgroundColor: item.color }} />
               {item.name}
             </div>
-            <div className={cn("font-black text-slate-700", fill ? "text-[11px]" : "text-xs")}>{sheetTotal(item)} lembar</div>
+            <div className={cn("font-black text-slate-700", fill ? "text-[11px]" : "text-xs")}>{formatValue ? formatValue(sheetTotal(item)) : `${sheetTotal(item)} ${unit}`}</div>
           </div>
         ))}
       </div>
@@ -63,10 +75,12 @@ export function CapaianChart({
         <LineChart
           labels={labels}
           series={series}
-          formatValue={(value) => `${Math.round(value)} lembar`}
+          formatValue={formatValue ?? ((value) => `${Math.round(value)} ${unit}`)}
+          axisFormat={axisFormat}
           height={fill ? plotHeight : 340}
           emptyText={emptyText}
-          integerScale
+          emptyMax={emptyMax}
+          integerScale={integerScale}
         />
       </div>
     </section>

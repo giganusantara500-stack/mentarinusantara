@@ -30,7 +30,7 @@ const SUBMITRA = new Set([
 
 const MITRA = new Set([...SUBMITRA, "/submitra", "/runtext"]);
 
-const SUPER = new Set([...MITRA, "/mitra", "/harga", "/pembagian", "/audit-fee", "/produk", "/beli", "/setup-superadmin", "/setoran", "/deposit-approval"]);
+const SUPER = new Set([...MITRA, "/mitra", "/harga", "/pembagian", "/audit-fee", "/laporan-fee", "/produk", "/beli", "/setup-superadmin", "/setoran", "/deposit-approval"]);
 
 export function routeBase(path: string) {
   const base = (path.split("?")[0] || "/").replace(/\/+$/, "") || "/";

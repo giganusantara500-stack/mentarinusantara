@@ -99,6 +99,123 @@ async function loketDirectory(env: LedgerEnv) {
   })).filter((row) => row.id);
 }
 
+function shiftMonth(year: number, month: number, delta: number) {
+  const index = year * 12 + (month - 1) + delta;
+  return { year: Math.floor(index / 12), month: (index % 12) + 1 };
+}
+
+function rollingFeeWindow() {
+  const [yearText, monthText, dayText] = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()).split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const start = shiftMonth(year, month, -2);
+  const end = shiftMonth(year, month, 1);
+  const months = [0, 1, 2].map((offset) => {
+    const part = shiftMonth(start.year, start.month, offset);
+    return `${part.year}-${String(part.month).padStart(2, "0")}`;
+  });
+  return {
+    start: `${start.year}-${String(start.month).padStart(2, "0")}-01T00:00:00.000+07:00`,
+    end: `${end.year}-${String(end.month).padStart(2, "0")}-01T00:00:00.000+07:00`,
+    months,
+    today: `${yearText}-${monthText}-${dayText}`,
+  };
+}
+
+function jakartaDay(iso: string) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+}
+
+async function loadSuccessWindow(env: LedgerEnv, start: string, end: string) {
+  const rows: StoredRow[] = [];
+  const page = 1000;
+  for (let offset = 0; offset < 8000; offset += page) {
+    const params = new URLSearchParams();
+    params.set("select", "id,user_id,product_name_snapshot,category_slug_snapshot,customer_number,customer_name,amount,cost_price,sell_price,profit,status,created_at,provider_response");
+    params.set("channel", "eq.production");
+    params.set("status", "eq.success");
+    params.set("created_at", `gte.${start}`);
+    params.append("created_at", `lt.${end}`);
+    params.set("order", "created_at.asc");
+    params.set("limit", String(page));
+    params.set("offset", String(offset));
+    const stored = await readRows(env, params);
+    if (!stored.ok) return { ok: false as const, rows };
+    rows.push(...stored.rows);
+    if (stored.rows.length < page) break;
+  }
+  return { ok: true as const, rows };
+}
+
+async function feeReport(env: LedgerEnv) {
+  const window = rollingFeeWindow();
+  const [stored, lokets] = await Promise.all([loadSuccessWindow(env, window.start, window.end), loketDirectory(env)]);
+  if (!stored.ok) return { status: 502, body: { error: "Laporan fee belum dapat dibaca." } };
+  const names = new Map(lokets.map((loket) => [loket.id, loket]));
+  const daily = new Map<string, { h2h: number; mentari: number; count: number }>();
+  const byLoket = new Map<string, { id: string; name: string; code: string; h2h: number; mentari: number; count: number; months: Record<string, { h2h: number; mentari: number; count: number }> }>();
+  for (const row of stored.rows) {
+    const meta = row.provider_response ?? {};
+    const parts = splitFee({
+      amount: Number(row.amount) || 0,
+      tagihan: Number(meta.tagihan) || 0,
+      denda: Number(meta.denda) || 0,
+      providerCost: Number(meta.providerCost) || Number(row.cost_price) || 0,
+      providerAdmin: Number(meta.providerAdmin) || 0,
+      profit: Number(row.profit) || 0,
+      status: row.status,
+    });
+    const date = jakartaDay(row.created_at);
+    const month = date.slice(0, 7);
+    const bucket = daily.get(date) ?? { h2h: 0, mentari: 0, count: 0 };
+    bucket.h2h += parts.h2hFee;
+    bucket.mentari += parts.mentariFee;
+    bucket.count += 1;
+    daily.set(date, bucket);
+    const loket = names.get(row.user_id);
+    const entry = byLoket.get(row.user_id) ?? { id: row.user_id, name: loket?.name || "Loket", code: loket?.code || "", h2h: 0, mentari: 0, count: 0, months: {} };
+    entry.h2h += parts.h2hFee;
+    entry.mentari += parts.mentariFee;
+    entry.count += 1;
+    const monthEntry = entry.months[month] ?? { h2h: 0, mentari: 0, count: 0 };
+    monthEntry.h2h += parts.h2hFee;
+    monthEntry.mentari += parts.mentariFee;
+    monthEntry.count += 1;
+    entry.months[month] = monthEntry;
+    byLoket.set(row.user_id, entry);
+  }
+  const days: { date: string; month: string; h2h: number; mentari: number; total: number; count: number; h2hAccum: number; mentariAccum: number; totalAccum: number }[] = [];
+  const monthsSummary: { month: string; h2h: number; mentari: number; total: number; count: number }[] = [];
+  for (const month of window.months) {
+    const [yearText, monthText] = month.split("-");
+    const length = new Date(Date.UTC(Number(yearText), Number(monthText), 0)).getUTCDate();
+    let h2hAccum = 0;
+    let mentariAccum = 0;
+    let count = 0;
+    for (let day = 1; day <= length; day += 1) {
+      const date = `${month}-${String(day).padStart(2, "0")}`;
+      if (date > window.today) break;
+      const bucket = daily.get(date) ?? { h2h: 0, mentari: 0, count: 0 };
+      h2hAccum += bucket.h2h;
+      mentariAccum += bucket.mentari;
+      count += bucket.count;
+      days.push({ date, month, h2h: bucket.h2h, mentari: bucket.mentari, total: bucket.h2h + bucket.mentari, count: bucket.count, h2hAccum, mentariAccum, totalAccum: h2hAccum + mentariAccum });
+    }
+    monthsSummary.push({ month, h2h: h2hAccum, mentari: mentariAccum, total: h2hAccum + mentariAccum, count });
+  }
+  const loketRows = [...byLoket.values()]
+    .map((entry) => ({ ...entry, total: entry.h2h + entry.mentari }))
+    .sort((a, b) => b.total - a.total);
+  const totals = monthsSummary.reduce((sum, month) => ({
+    h2h: sum.h2h + month.h2h,
+    mentari: sum.mentari + month.mentari,
+    total: sum.total + month.total,
+    count: sum.count + month.count,
+  }), { h2h: 0, mentari: 0, total: 0, count: 0 });
+  return { status: 200, body: { months: window.months, days, monthsSummary, lokets: loketRows, totals } };
+}
+
 export async function handleFeeAudit(method: string, pathname: string, search: string, caller: Caller, env: LedgerEnv) {
   if (caller.role !== "super_admin") return { status: 403, body: { error: "Rincian fee hanya untuk Super Admin." } };
   if (!env.supabaseUrl || !env.serviceRoleKey) return { status: 500, body: { error: "Konfigurasi database belum lengkap." } };
@@ -106,6 +223,7 @@ export async function handleFeeAudit(method: string, pathname: string, search: s
     const checked = await syncOpenNetworkSales(env, true);
     return { status: 200, body: { checked } };
   }
+  if (pathname === "/api/fee-report" && method === "GET") return feeReport(env);
   if (pathname !== "/api/fee-audit" || method !== "GET") return null;
   const query = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
   const month = monthWindow(query.get("month") || "") ? query.get("month") || "" : currentMonth();

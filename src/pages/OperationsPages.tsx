@@ -190,7 +190,7 @@ function balanceGapText(provider: number | null, pool: number, network: number, 
   const usedText = `Pemakaian H2H ${formatRupiah(used)} sudah mengurangi saldo DigiFlazz dan tidak ditarik lagi.`;
   if (provider == null) return `Saldo DigiFlazz belum terbaca. ${usedText}`;
   const gap = pool + network + fee - provider;
-  if (gap > 1000) return `Dompet jaringan ${formatRupiah(network)}. Mentari sudah mencatat ${formatRupiah(gap)} lebih banyak daripada saldo DigiFlazz. Bagian itu ada di Saldo Utama atau dompet, jadi tidak ditarik ulang. ${usedText}`;
+  if (gap > 1000) return `Dompet jaringan ${formatRupiah(network)}. Mentari mencatat ${formatRupiah(gap)} di atas saldo DigiFlazz. Setarakan baseline menurunkan kelebihan yang masih di Saldo Utama. Uang yang sudah di dompet loket tidak diambil kembali. ${usedText}`;
   if (gap < -1000) return `Dompet jaringan ${formatRupiah(network)}. Masih ada ${formatRupiah(-gap)} di DigiFlazz yang belum masuk Saldo Utama. Tarik saldo hanya memasukkan bagian itu. ${usedText}`;
   return `Dompet jaringan ${formatRupiah(network)}. Saldo DigiFlazz selaras dengan Saldo Utama, dompet jaringan, dan fee internal. ${usedText}`;
 }
@@ -215,6 +215,7 @@ export function ManageSetoranPage() {
   const [providerUsed, setProviderUsed] = useState(0);
   const [reconcileReady, setReconcileReady] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [aligning, setAligning] = useState(false);
   const [note, setNote] = useState("");
   const [detail, setDetail] = useState<Ticket | null>(null);
   const globalQueue = isSuperAdmin;
@@ -259,6 +260,26 @@ export function ManageSetoranPage() {
     setProviderUsed(Number(body.providerUsed) || 0);
     setReconcileReady(Boolean(body.reconcileReady));
     setNote(String(body.message || "Saldo Utama diperbarui dari DigiFlazz."));
+    await load();
+  };
+  const align = async () => {
+    if (aligning || syncing) return;
+    if (!window.confirm("Setarakan Saldo Utama dengan saldo DigiFlazz sekarang? Dompet loket tidak dikurangi. Kelebihan yang masih di Saldo Utama diturunkan dan titik acuan tarikan dipasang ulang.")) return;
+    setAligning(true);
+    setError("");
+    setNote("");
+    const response = await fetch("/api/wallet/align", { method: "POST", headers: await authHeader() });
+    const body = await response.json().catch(() => null);
+    setAligning(false);
+    if (!response.ok) { setError(body?.error || "Penyetaraan saldo gagal."); return; }
+    setPool(Number(body.balance) || 0);
+    setPoolReady(true);
+    setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
+    setFeeBalance(Number(body.feeBalance) || 0);
+    setNetworkBalance(Number(body.networkBalance) || 0);
+    setProviderUsed(Number(body.providerUsed) || 0);
+    setReconcileReady(Boolean(body.reconcileReady));
+    setNote(String(body.message || "Saldo disetarakan dengan DigiFlazz."));
     await load();
   };
   useEffect(() => {
@@ -340,7 +361,8 @@ export function ManageSetoranPage() {
             <div className="text-xs text-slate-500">Fee internal Mentari</div>
             <div className="text-lg font-bold text-slate-900">{formatRupiah(feeBalance)}</div>
           </div>
-          <Button onClick={() => void sync()} disabled={syncing}>{syncing ? "Menarik..." : "Tarik saldo DigiFlazz"}</Button>
+          <Button onClick={() => void sync()} disabled={syncing || aligning}>{syncing ? "Menarik..." : "Tarik saldo DigiFlazz"}</Button>
+          <Button variant="outline" onClick={() => void align()} disabled={syncing || aligning}>{aligning ? "Menyetarakan..." : "Setarakan baseline"}</Button>
         </div>
         <p className="px-4 pb-4 text-xs leading-5 text-slate-500">{reconcileReady ? balanceGapText(provider, pool, networkBalance, feeBalance, providerUsed) : "Angka rekonsiliasi lengkap muncul setelah migrasi saldo terbaru dijalankan. Sebelum itu, tarik saldo bisa menghitung ulang setoran yang sudah masuk."}</p>
       </Card>
@@ -475,6 +497,7 @@ export function BalanceAllocationPage() {
   const [loketId, setLoketId] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [aligning, setAligning] = useState(false);
   const [sending, setSending] = useState(false);
   const sendLock = useRef(false);
   const transferKey = useRef("");
@@ -510,6 +533,24 @@ export function BalanceAllocationPage() {
     setProviderUsed(Number(body.providerUsed) || 0);
     setReconcileReady(Boolean(body.reconcileReady));
     setMessage(String(body.message || "Saldo Utama diperbarui dari DigiFlazz."));
+  };
+  const align = async () => {
+    if (aligning || syncing) return;
+    if (!window.confirm("Setarakan Saldo Utama dengan saldo DigiFlazz sekarang? Dompet loket tidak dikurangi. Kelebihan yang masih di Saldo Utama diturunkan dan titik acuan tarikan dipasang ulang.")) return;
+    setAligning(true);
+    setError("");
+    setMessage("");
+    const response = await fetch("/api/wallet/align", { method: "POST", headers: await authHeader() });
+    const body = await response.json().catch(() => null);
+    setAligning(false);
+    if (!response.ok) { setError(body?.error || "Penyetaraan saldo gagal."); return; }
+    setPool(Number(body.balance) || 0);
+    setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
+    setFeeBalance(Number(body.feeBalance) || 0);
+    setNetworkBalance(Number(body.networkBalance) || 0);
+    setProviderUsed(Number(body.providerUsed) || 0);
+    setReconcileReady(Boolean(body.reconcileReady));
+    setMessage(String(body.message || "Saldo disetarakan dengan DigiFlazz."));
   };
   const send = async () => {
     if (sendLock.current || sending) return;
@@ -573,7 +614,8 @@ export function BalanceAllocationPage() {
             <div className="text-xs text-slate-500">Fee internal Mentari</div>
             <div className="text-lg font-bold text-slate-900">{formatRupiah(feeBalance)}</div>
           </div>
-          <Button onClick={() => void sync()} disabled={syncing}>{syncing ? "Menarik..." : "Tarik saldo DigiFlazz"}</Button>
+          <Button onClick={() => void sync()} disabled={syncing || aligning}>{syncing ? "Menarik..." : "Tarik saldo DigiFlazz"}</Button>
+          <Button variant="outline" onClick={() => void align()} disabled={syncing || aligning}>{aligning ? "Menyetarakan..." : "Setarakan baseline"}</Button>
         </div>
         <p className="px-4 pb-4 text-xs leading-5 text-slate-500">{reconcileReady ? balanceGapText(provider, pool, networkBalance, feeBalance, providerUsed) : "Angka rekonsiliasi lengkap muncul setelah migrasi saldo terbaru dijalankan. Sebelum itu, tarik saldo bisa menghitung ulang setoran yang sudah masuk."}</p>
       </Card>

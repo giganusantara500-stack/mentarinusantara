@@ -254,10 +254,38 @@ export async function syncProviderDeposit(env: LedgerEnv, actorId: string, depos
   } catch {
     return { error: "Database saldo tidak dapat dihubungi.", status: 500 };
   }
-  const body = await response.json().catch(() => null) as ({ error?: string; status?: number; balance?: number; providerBalance?: number; credited?: number; consumed?: number; message?: string } | null);
+  const body = await response.json().catch(() => null) as ({ error?: string; status?: number; balance?: number; providerBalance?: number; credited?: number; consumed?: number; capped?: boolean; message?: string } | null);
   if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)) {
     const missing = String(body && "message" in body ? body.message : "").includes("ledger_sync_provider");
     return { error: missing ? "Fungsi tarik saldo DigiFlazz belum terpasang. Jalankan migrasi terbaru, lalu muat ulang." : "Database saldo menolak penarikan DigiFlazz.", status: response.status || 500 };
+  }
+  if (body.error && !body.status) return { error: body.message || body.error, status: 500 };
+  return body;
+}
+
+export async function alignProviderDeposit(env: LedgerEnv, actorId: string, deposit: number) {
+  if (!env.supabaseUrl || !env.serviceRoleKey) {
+    return { error: "Konfigurasi database belum lengkap.", status: 500 };
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${env.supabaseUrl}/rest/v1/rpc/ledger_align_provider`, {
+      method: "POST",
+      headers: {
+        apikey: env.serviceRoleKey,
+        Authorization: `Bearer ${env.serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_actor: actorId, p_deposit: Math.round(deposit) }),
+      signal: AbortSignal.timeout(12_000),
+    });
+  } catch {
+    return { error: "Database saldo tidak dapat dihubungi.", status: 500 };
+  }
+  const body = await response.json().catch(() => null) as ({ error?: string; status?: number; balance?: number; providerBalance?: number; reduced?: number; remaining?: number; shortfall?: number; message?: string } | null);
+  if (!response.ok || !body || typeof body !== "object" || Array.isArray(body)) {
+    const missing = String(body && "message" in body ? body.message : "").includes("ledger_align_provider");
+    return { error: missing ? "Fungsi penyetaraan saldo belum terpasang. Jalankan migrasi terbaru, lalu muat ulang." : "Database saldo menolak penyetaraan.", status: response.status || 500 };
   }
   if (body.error && !body.status) return { error: body.message || body.error, status: 500 };
   return body;

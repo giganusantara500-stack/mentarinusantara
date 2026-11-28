@@ -66,6 +66,7 @@ function managementNav(role: Role): NavSection[] {
       { path: "/harga", label: "Prepare Fee", icon: Percent },
       { path: "/pembagian", label: "Share Fee", icon: Share2 },
       { path: "/audit-fee", label: "Audit Fee", icon: Receipt },
+      { path: "/laporan-fee", label: "Laporan Fee", icon: FileBarChart },
     );
   }
   if (role === "superadmin" || role === "mitra" || role === "submitra") admin.push({ path: "/keamanan", label: "Keamanan (2FA)", icon: ShieldCheck });
