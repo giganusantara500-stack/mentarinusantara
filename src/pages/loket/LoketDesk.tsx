@@ -61,7 +61,7 @@ interface Bill {
 }
 
 interface Member { number: string; name: string; product?: string }
-interface GroupBill { number: string; name: string; product?: string; period: string; total: number; status: "LUNAS" | "BL LNS" | "LAINNYA"; note?: string; sku?: string; providerRef?: string; menuCategory?: string; menuProduct?: string }
+interface GroupBill { number: string; name: string; product?: string; period: string; total: number; status: "LUNAS" | "BL LNS" | "LAINNYA"; note?: string; sku?: string; providerRef?: string; menuCategory?: string; menuProduct?: string; tagihan?: number; denda?: number; adminFee?: number; providerCost?: number }
 interface Group {
   id: string;
   name: string;
@@ -77,6 +77,16 @@ interface Group {
 async function authHeader() {
   const session = await supabase.auth.getSession();
   return { Authorization: `Bearer ${session.data.session?.access_token ?? ""}`, "Content-Type": "application/json" };
+}
+
+async function apiFetch(path: string, init: RequestInit = {}, ms = 20_000) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(apiUrl(path), { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timer);
+  }
 }
 
 const HOSTING_KOLEKTIF = "Layanan kolektif di hosting tidak menjawab JSON. Pastikan fungsi API dan kunci Supabase aktif.";
@@ -216,6 +226,10 @@ function normalizeBill(bill: Partial<GroupBill>): GroupBill {
     providerRef: bill.providerRef ? String(bill.providerRef) : "",
     menuCategory: bill.menuCategory ? String(bill.menuCategory) : "",
     menuProduct: bill.menuProduct ? String(bill.menuProduct) : "",
+    tagihan: Number(bill.tagihan) || 0,
+    denda: Number(bill.denda) || 0,
+    adminFee: Number(bill.adminFee) || 0,
+    providerCost: Number(bill.providerCost) || 0,
   };
 }
 
@@ -537,7 +551,7 @@ export function LoketKolektifPage() {
     const revAtStart = revision.current;
     let parsed: Awaited<ReturnType<typeof readApi>> = { ok: false, json: false, body: { error: HOSTING_KOLEKTIF } };
     try {
-      const response = await fetch("/api/kolektif", { headers: await authHeader() });
+      const response = await apiFetch("/api/kolektif", { headers: await authHeader() });
       parsed = await readApi(response);
     } catch {
       parsed = { ok: false, json: false, body: { error: HOSTING_KOLEKTIF } };
@@ -625,13 +639,21 @@ export function LoketKolektifPage() {
     void (async () => {
       let response: Response;
       try {
-        response = await fetch(apiUrl("/api/biller/inquiry-batch"), {
+        response = await apiFetch("/api/biller/inquiry-batch", {
           method: "POST",
           headers: await authHeader(),
           body: JSON.stringify({ items: slice.map((row) => ({ key: memberKey(row), category: canonicalCategory(row.product), product: row.product || "", customerNumber: row.number })) }),
-        });
+        }, 90_000);
       } catch {
-        if (!cancel) tell("Cek tagihan kolektif tidak terhubung ke server.");
+        if (!cancel) {
+          tell("Cek tagihan kolektif tidak terhubung ke server. Saldo tidak berubah.");
+          const failed = groupsRef.current.map((group) => group.id === groupId ? { ...group, bills: group.members.map((member) => {
+            const previous = findBill(group.bills, member, group.members);
+            if (previous && previous.period !== "Memuat") return previous;
+            return { number: member.number, name: storedName(member.name), product: member.product || "", period: "-", total: 0, status: "LAINNYA" as const, note: "Cek tagihan tidak mendapat jawaban. Coba lagi beberapa saat." };
+          }) } : group);
+          commitLocal(failed);
+        }
         return;
       }
       const body = await response.json().catch(() => ({} as { error?: string; results?: unknown[] }));
@@ -669,6 +691,10 @@ export function LoketKolektifPage() {
           providerRef: String(hit?.providerRef || ""),
           menuCategory: String(hit?.category || ""),
           menuProduct: String(hit?.product || ""),
+          tagihan: Number(quote.amount) || 0,
+          denda: Number(quote.denda) || 0,
+          adminFee: Number(quote.adminFee) || 0,
+          providerCost: Number(quote.providerCost) || 0,
         };
       });
       const members = current.members.map((member) => {
@@ -696,14 +722,14 @@ export function LoketKolektifPage() {
       await mirrorAccount(groupsRef.current);
     };
     try {
-      const listed = await readApi(await fetch("/api/kolektif", { headers: await authHeader() }));
+      const listed = await readApi(await apiFetch("/api/kolektif", { headers: await authHeader() }));
       if (revision.current !== rev) return;
       if (!listed.json || !listed.ok || !Array.isArray(listed.body.rows)) {
         await keepLocal();
         return;
       }
       for (const id of removedIds.current) {
-        const removed = await readApi(await fetch("/api/kolektif", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id, action: "delete" }) }));
+        const removed = await readApi(await apiFetch("/api/kolektif", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id, action: "delete" }) }));
         if (revision.current !== rev) return;
         if (!removed.json) {
           await keepLocal();
@@ -717,7 +743,7 @@ export function LoketKolektifPage() {
       let latest = rows;
       let changed = false;
       for (const group of rows) {
-        const saved = await readApi(await fetch("/api/kolektif", {
+        const saved = await readApi(await apiFetch("/api/kolektif", {
           method: "POST",
           headers: await authHeader(),
           body: JSON.stringify({ id: group.id, name: group.name, collector: group.collector, category: group.category, members: group.members }),
@@ -735,7 +761,7 @@ export function LoketKolektifPage() {
         }
         const current = latest.find((item) => item.id === savedId);
         if (current?.bills.length) {
-          await fetch("/api/kolektif/bills", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: savedId, bills: current.bills }) }).catch(() => undefined);
+          await apiFetch("/api/kolektif/bills", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: savedId, bills: current.bills }) }).catch(() => undefined);
         }
       }
       if (revision.current !== rev) return;
@@ -822,19 +848,52 @@ export function LoketKolektifPage() {
     try {
     const next = active.bills.map((row) => ({ ...row }));
     const queue = [...payable];
+    const slips: { id: string; name: string; product: string; period: string; tagihan: number; admin: number; total: number; sn: string; at: string }[] = [];
     let stopped = "";
     while (queue.length > 0) {
       const chunk = queue.splice(0, 10);
       let paidCount = 0;
       let paidTotal = 0;
       for (const row of chunk) {
-        const response = await fetch("/api/loket-sales", {
-          method: "POST",
-          headers: await authHeader(),
-          body: JSON.stringify({ channel: "digiflazz", clientRef: row.providerRef || `kolektif:${active.id}:${row.number}:${row.period}`, providerRef: row.providerRef, buyerSkuCode: row.sku, category: row.menuCategory || canonicalCategory(row.product), product: row.menuProduct || row.product || canonicalCategory(row.product), customerNumber: row.number, customerName: storedName(row.name), amount: row.total, tagihan: row.total, period: row.period, loketName }),
-        });
+        const ref = row.providerRef && /^[A-Za-z0-9._:-]{6,80}$/.test(row.providerRef)
+          ? row.providerRef
+          : `kolektif${active.id.replace(/-/g, "").slice(0, 16)}${row.number.replace(/\W/g, "").slice(-12)}`.slice(0, 80);
+        let response: Response;
+        try {
+          response = await apiFetch("/api/loket-sales", {
+            method: "POST",
+            headers: await authHeader(),
+            body: JSON.stringify({
+              channel: "digiflazz",
+              clientRef: ref,
+              providerRef: row.providerRef || ref,
+              buyerSkuCode: row.sku,
+              category: row.menuCategory || canonicalCategory(row.product),
+              product: row.menuProduct || row.product || canonicalCategory(row.product),
+              customerNumber: row.number,
+              customerName: storedName(row.name),
+              amount: row.total,
+              tagihan: row.tagihan || row.total,
+              denda: row.denda || 0,
+              adminFee: row.adminFee || 0,
+              providerCost: row.providerCost || 0,
+              period: row.period,
+              loketName,
+            }),
+          }, 55_000);
+        } catch {
+          stopped = "Pembayaran kolektif belum mendapat jawaban tepat waktu. Cek status sebelum mengulang. Saldo hanya terpotong bila Sukses.";
+          break;
+        }
         const parsed = await readApi(response);
-        if (!parsed.ok) { stopped = parsed.body.error || "Batch berhenti."; break; }
+        const sale = (parsed.body as { sale?: Sale }).sale;
+        const statusText = String((parsed.body as { statusText?: string }).statusText || sale?.status || "");
+        if (!parsed.ok || (statusText !== "success" && statusText !== "simulated")) {
+          stopped = parsed.body.error || (statusText === "pending"
+            ? "Pembayaran masih diproses. Cek status sebelum mengulang. Saldo hanya terpotong bila Sukses."
+            : "Pembayaran kolektif gagal. Saldo tidak berubah.");
+          break;
+        }
         const numbered = next.filter((item) => item.number === row.number);
         const target = numbered.find((item) => sameCategory(item.product, row.product || ""))
           ?? (numbered.length === 1 && !(numbered[0].product || "").trim() ? numbered[0] : undefined);
@@ -842,6 +901,17 @@ export function LoketKolektifPage() {
           target.status = "LUNAS";
           if (!(target.product || "").trim()) target.product = row.product || "";
         }
+        slips.push({
+          id: sale?.customerNumber || row.number,
+          name: storedName(sale?.customerName || row.name) || shownCustomer(row.name),
+          product: sale?.product || row.menuProduct || row.product || "",
+          period: sale?.period || row.period,
+          tagihan: Number(sale?.tagihan) || row.tagihan || row.total,
+          admin: Number(sale?.adminFee) || row.adminFee || 0,
+          total: Number(sale?.amount) || row.total,
+          sn: sale?.sn || "",
+          at: formatWaktu(sale?.createdAt || new Date().toISOString()),
+        });
         paidCount += 1;
         paidTotal += row.total;
       }
@@ -850,10 +920,15 @@ export function LoketKolektifPage() {
         groupsRef.current = updated;
         setGroups(updated);
         writeCollectiveCache(userId, updated, true);
-        await fetch("/api/kolektif/bills", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: active.id, bills: next, paid: true, paidCount, paidTotal }) }).catch(() => undefined);
+        await apiFetch("/api/kolektif/bills", { method: "POST", headers: await authHeader(), body: JSON.stringify({ id: active.id, bills: next, paid: true, paidCount, paidTotal }) }).catch(() => undefined);
       }
       if (stopped) break;
     }
+    if (slips.length > 0) {
+      const opened = printReceipts(loadPrinterSettings(loketCode), slips, identityLine(loketCode, loketName));
+      if (!opened) tell("Struk belum terbuka. Cetak ulang dari riwayat kolektif.");
+    }
+    await apiFetch("/api/biller/sync", { method: "POST", headers: await authHeader(), body: "{}" }, 30_000).catch(() => undefined);
     if (stopped) tell(stopped);
     setConfirmOpen(false);
     setPicked([]);
@@ -957,7 +1032,7 @@ export function LoketKolektifPage() {
     if (!historyOpen) return;
     let stop = false;
     (async () => {
-      const response = await fetch("/api/loket-sales", { headers: await authHeader() });
+      const response = await apiFetch("/api/loket-sales", { headers: await authHeader() });
       const body = response.ok ? await response.json() : { sales: [], simulations: [] };
       if (!stop) setHistorySales((body.sales ?? []) as Sale[]);
     })();
@@ -967,14 +1042,12 @@ export function LoketKolektifPage() {
   const historyRows = useMemo(() => {
     if (!active) return [];
     const members = new Set(active.members.filter((member) => productFilter === "semua" || sameCategory(member.product, productFilter)).map((member) => member.number));
-    const collector = (active.collector || active.name || "").toLowerCase();
     const needle = historyQuery.trim().toLowerCase();
     return historySales.filter((sale) => {
       if (!isProductionSuccess(sale.status)) return false;
-      if (sale.category !== "Kolektif") return false;
-      const inGroup = members.has(sale.customerNumber) || (productFilter === "semua" && collector.length > 0 && sale.product.toLowerCase().includes(collector));
+      const inGroup = members.has(sale.customerNumber);
       if (!inGroup) return false;
-      if (productFilter !== "semua" && canonicalCategory(sale.product) !== canonicalCategory(productFilter)) return false;
+      if (productFilter !== "semua" && canonicalCategory(sale.product) !== canonicalCategory(productFilter) && canonicalCategory(sale.category) !== canonicalCategory(productFilter)) return false;
       const date = new Date(sale.createdAt);
       if (date.getMonth() + 1 !== Number(historyApplied.month) || date.getFullYear() !== Number(historyApplied.year)) return false;
       if (!needle) return true;
@@ -996,9 +1069,11 @@ export function LoketKolektifPage() {
       name: sale.customerName,
       product: sale.product,
       period,
-      tagihan: Math.max(0, Number(sale.amount) - Number(sale.adminFee ?? 0)),
+      tagihan: Number(sale.tagihan) || Math.max(0, Number(sale.amount) - Number(sale.adminFee ?? 0) - Number(sale.denda ?? 0)),
       admin: Number(sale.adminFee ?? 0),
       total: Number(sale.amount),
+      sn: sale.sn || "",
+      at: formatWaktu(sale.createdAt),
     })), identityLine(loketCode, loketName));
   };
 
@@ -1091,7 +1166,7 @@ export function LoketKolektifPage() {
         </div>
         <div className="flex shrink-0 items-center justify-between gap-3 bg-slate-800 px-4 py-2.5 text-white">
           <div className="min-w-0 text-sm text-slate-200">Total: {bills.length} pelanggan · Total bayar: {formatRupiah(listTotal)}</div>
-          <button onClick={() => nextBatch.length && setConfirmOpen(true)} disabled={nextBatch.length === 0 || paying} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-40">{paying ? "Memproses" : `Bayar ${nextBatch.length} Lembar`}</button>
+          <button type="button" onClick={() => nextBatch.length && setConfirmOpen(true)} disabled={nextBatch.length === 0 || paying} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-40">{paying ? "Memproses" : `Bayar ${nextBatch.length} Lembar`}</button>
         </div>
       </section>
     </div>
@@ -1181,7 +1256,7 @@ export function LoketKolektifPage() {
             {remainder.length > 0 && <p className="mt-2 text-sm text-slate-600">Sisa {remainder.length} lembar senilai {formatRupiah(remainderTotal)} dibayar pada batch berikutnya sampai seluruh tagihan selesai.</p>}
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="outline" onClick={() => !paying && setConfirmOpen(false)}>Batal</Button>
-              <button onClick={payBatch} disabled={paying} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{paying ? "Memproses" : "Lanjutkan"}</button>
+              <button type="button" onClick={payBatch} disabled={paying} className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">{paying ? "Memproses" : "Lanjutkan"}</button>
             </div>
           </div>
         </div>

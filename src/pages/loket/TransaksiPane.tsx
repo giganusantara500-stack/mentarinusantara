@@ -795,6 +795,8 @@ export function LoketTransaksiPage() {
     setError(stopped || (printed ? "" : "Struk belum terbuka. Gunakan Cetak Ulang."));
     if (pendingKey) setPendingRef(pendingKey);
     requestRefresh();
+    } catch {
+      setError("Pembayaran terputus. Cek status sebelum mengulang. Saldo hanya terpotong bila status Sukses.");
     } finally {
       paying.current = false;
       setBusy(false);
@@ -1031,7 +1033,7 @@ export function LoketTransaksiPage() {
               <Button variant="outline" size="sm" className="h-10 shrink-0 whitespace-nowrap px-4 font-black" onClick={() => { setCart([]); setNumber(""); setError(""); }}>Hapus</Button>
               <button type="button" onClick={() => void syncStatus(true)} disabled={busy} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/40 px-3 text-sm font-black text-white">Sinkronkan</button>
               {pendingRef && <button type="button" onClick={checkStatus} disabled={busy} className="h-10 shrink-0 whitespace-nowrap rounded-md border border-white/40 px-3 text-sm font-black text-white">Cek status</button>}
-              <button onClick={() => void pay()} disabled={busy || checking || rows.length === 0} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-50">
+              <button type="button" onClick={() => void pay()} disabled={busy || checking || rows.length === 0} className="h-10 shrink-0 whitespace-nowrap rounded-md bg-amber-500 px-4 text-sm font-black text-slate-950 disabled:opacity-50">
                 {busy ? "Memproses..." : `BAYAR ${formatRupiah(total)}`}
               </button>
             </div>

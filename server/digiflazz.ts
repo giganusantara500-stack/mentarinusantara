@@ -425,7 +425,16 @@ function signedTransaction(refId: string, sku: string, customerNumber: string, c
   };
 }
 
-const priceCache: { at: number; prepaid: Record<string, unknown>[]; postpaid: Record<string, unknown>[]; prepaidMessage: string; postpaidMessage: string } = { at: 0, prepaid: [], postpaid: [], prepaidMessage: "", postpaidMessage: "" };
+const PRICE_TTL_MS = 15 * 60 * 1000;
+const PRICE_COOLDOWN_MS = 3 * 60 * 1000;
+
+type PriceBucket = { at: number; rows: Record<string, unknown>[]; message: string; cooldownUntil: number };
+
+const priceBuckets: Record<DigiKind, PriceBucket> = {
+  prepaid: { at: 0, rows: [], message: "", cooldownUntil: 0 },
+  postpaid: { at: 0, rows: [], message: "", cooldownUntil: 0 },
+};
+const priceFlights = new Map<DigiKind, Promise<{ rows: Record<string, unknown>[]; message: string }>>();
 
 function rowSku(row: Record<string, unknown>) {
   return text(row.buyer_sku_code) || text(row.buyerSkuCode);
@@ -461,17 +470,49 @@ async function loadPriceList(kind: DigiKind) {
   return { rows: extractRows(payload), message: listMessage(payload) };
 }
 
+function priceLimited(message: string) {
+  return /limitasi|rate limit|too many|terlalu banyak/i.test(message);
+}
+
 async function priceRows(kind: DigiKind) {
-  if (Date.now() - priceCache.at < 10 * 60 * 1000 && (kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid).length > 0) {
-    return { rows: kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid, message: kind === "prepaid" ? priceCache.prepaidMessage : priceCache.postpaidMessage };
+  const bucket = priceBuckets[kind];
+  if (bucket.rows.length > 0 && Date.now() - bucket.at < PRICE_TTL_MS) {
+    return { rows: bucket.rows, message: bucket.message };
   }
-  const [prepaid, postpaid] = await Promise.allSettled([loadPriceList("prepaid"), loadPriceList("postpaid")]);
-  priceCache.at = Date.now();
-  priceCache.prepaid = prepaid.status === "fulfilled" ? prepaid.value.rows : [];
-  priceCache.postpaid = postpaid.status === "fulfilled" ? postpaid.value.rows : [];
-  priceCache.prepaidMessage = prepaid.status === "fulfilled" ? prepaid.value.message : "Daftar harga prabayar DigiFlazz tidak dapat dibaca.";
-  priceCache.postpaidMessage = postpaid.status === "fulfilled" ? postpaid.value.message : "Daftar harga pascabayar DigiFlazz tidak dapat dibaca.";
-  return { rows: kind === "prepaid" ? priceCache.prepaid : priceCache.postpaid, message: kind === "prepaid" ? priceCache.prepaidMessage : priceCache.postpaidMessage };
+  if (Date.now() < bucket.cooldownUntil) {
+    return { rows: bucket.rows, message: bucket.message || "Daftar harga DigiFlazz sedang dibatasi. Coba lagi beberapa saat." };
+  }
+  const current = priceFlights.get(kind);
+  if (current) return current;
+  const flight = (async () => {
+    try {
+      console.log(`[pricelist] ambil ${kind}`);
+      const loaded = await loadPriceList(kind);
+      if (loaded.rows.length > 0) {
+        bucket.at = Date.now();
+        bucket.rows = loaded.rows;
+        bucket.message = loaded.message;
+        bucket.cooldownUntil = 0;
+        return { rows: bucket.rows, message: bucket.message };
+      }
+      bucket.cooldownUntil = Date.now() + PRICE_COOLDOWN_MS;
+      bucket.message = loaded.message || bucket.message || "Daftar harga DigiFlazz tidak dapat dibaca.";
+      if (priceLimited(bucket.message)) console.log(`[pricelist] ${kind} dibatasi, permintaan berikut memakai cache`);
+      return { rows: bucket.rows, message: bucket.message };
+    } catch (error) {
+      bucket.cooldownUntil = Date.now() + PRICE_COOLDOWN_MS;
+      if (!bucket.message) bucket.message = "Daftar harga DigiFlazz tidak dapat dihubungi.";
+      const detail = error instanceof Error ? error.message : "gagal";
+      console.log(`[pricelist] ${kind} gagal ${detail.replace(/\s+/g, " ").slice(0, 120)}`);
+      return { rows: bucket.rows, message: bucket.message };
+    }
+  })();
+  priceFlights.set(kind, flight);
+  try {
+    return await flight;
+  } finally {
+    if (priceFlights.get(kind) === flight) priceFlights.delete(kind);
+  }
 }
 
 function plnAmount(sku: string) {
@@ -599,11 +640,12 @@ export async function resolveBuyerSku(kind: DigiKind, category: string, product:
   const given = explicit.trim();
   const mapped = findCatalogItem(category, product);
   const preferred = /^[A-Za-z0-9._-]{1,64}$/.test(given) ? given : mapped?.sku || "";
-  if (!digiflazzReady()) return preferred;
+  if (preferred || !digiflazzReady()) return preferred;
   try {
     const primary = await priceRows(kind);
     const live = selectPriceRow(primary.rows, preferred, category, product);
     if (live) return rowSku(live);
+    if (primary.rows.length === 0) return preferred;
     const alternate = await priceRows(kind === "prepaid" ? "postpaid" : "prepaid");
     const other = selectPriceRow(alternate.rows, preferred, category, product);
     return other ? rowSku(other) : preferred;
