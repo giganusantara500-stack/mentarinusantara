@@ -96,6 +96,7 @@ export function OpsDashboardPage() {
   const [mainBalance, setMainBalance] = useState<number | null>(null);
   const [providerBalance, setProviderBalance] = useState<number | null>(null);
   const [feeBalance, setFeeBalance] = useState(0);
+  const [reconciledGap, setReconciledGap] = useState<number | null>(null);
   const role = profile ? dbRoleToAppRole(profile.role) : "pending";
   const networkView = role === "mitra" || role === "submitra";
   const networkLoketIds = useMemo(
@@ -130,6 +131,7 @@ export function OpsDashboardPage() {
       setMainBalance(Number(wallet?.mainBalance ?? wallet?.balance ?? 0));
       setProviderBalance(wallet?.providerBalance == null ? null : Number(wallet.providerBalance));
       setFeeBalance(Number(wallet?.feeBalance) || 0);
+      setReconciledGap(wallet?.reconciledGap == null ? null : Number(wallet.reconciledGap));
       setCmsReady(true);
     })();
     return () => { stop = true; };
@@ -149,6 +151,7 @@ export function OpsDashboardPage() {
           setMainBalance(Number(wallet?.mainBalance ?? wallet?.balance ?? 0));
           setProviderBalance(wallet?.providerBalance == null ? null : Number(wallet.providerBalance));
           setFeeBalance(Number(wallet?.feeBalance) || 0);
+          setReconciledGap(wallet?.reconciledGap == null ? null : Number(wallet.reconciledGap));
         }
         if (depositRes.ok) setTickets((depositRes.body.tickets ?? []) as CmsTicket[]);
       })();
@@ -195,7 +198,7 @@ export function OpsDashboardPage() {
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-200">{role === "submitra" ? "Saldo" : "Saldo Utama"}</div>
           <div className="text-lg font-bold leading-none tabular-nums">{mainBalance === null ? "—" : formatRupiah(mainBalance)}</div>
-          {role === "superadmin" && <div className="mt-1 text-[11px] text-amber-100/80">{providerBalance == null ? "DigiFlazz belum terbaca" : `DigiFlazz ${formatRupiah(providerBalance)}`} · Fee internal {formatRupiah(feeBalance)}</div>}
+          {role === "superadmin" && <div className="mt-1 text-[11px] text-amber-100/80">{providerBalance == null ? "DigiFlazz belum terbaca" : `DigiFlazz ${formatRupiah(providerBalance)}`} · Fee internal {formatRupiah(feeBalance)}{reconciledGap == null ? "" : reconciledGap > 1000 ? ` · Kelebihan tercatat ${formatRupiah(reconciledGap)} tidak ditarik lagi` : reconciledGap < -1000 ? ` · Belum ditarik ${formatRupiah(-reconciledGap)}` : " · Selaras"}</div>}
         </div>
         {role === "mitra" && tickets.some((ticket) => ticket.loketId === profile.id) && (
           <button type="button" onClick={() => { window.location.hash = "/deposit"; }} className="hidden rounded-lg bg-white/10 px-3 py-1 text-left text-[11px] leading-snug sm:block">
@@ -242,6 +245,7 @@ export function OpsDashboardPage() {
           setMainBalance(Number(wallet?.mainBalance ?? wallet?.balance ?? 0));
           setProviderBalance(wallet?.providerBalance == null ? null : Number(wallet.providerBalance));
           setFeeBalance(Number(wallet?.feeBalance) || 0);
+          setReconciledGap(wallet?.reconciledGap == null ? null : Number(wallet.reconciledGap));
         })();
       }} />}
       <div className="relative mt-3 flex min-h-0 flex-1 flex-col">

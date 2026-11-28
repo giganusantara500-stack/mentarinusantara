@@ -867,10 +867,11 @@ export function omitFeeBreakdown<T extends { profit?: number; providerCost?: num
   return next;
 }
 
-export function syncOpenNetworkSales(env: LedgerEnv) {
+export function syncOpenNetworkSales(env: LedgerEnv, force = false) {
   const key = "__network__";
   const current = syncJobs.get(key);
   if (current) return current;
+  if (!force && Date.now() - (syncAt.get(key) || 0) < 30_000) return Promise.resolve(0);
   const job = runSync(env, "", 4).finally(() => {
     syncJobs.delete(key);
     syncAt.set(key, Date.now());

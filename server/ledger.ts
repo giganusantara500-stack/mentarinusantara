@@ -209,6 +209,32 @@ export function distributeBalance(env: LedgerEnv, actorId: string, toId: string,
   return ledgerApi(env, "distribute", actorId, { loketId: toId, amount, loketName: toName, clientRef });
 }
 
+export async function moneySnapshot(env: LedgerEnv, actorId: string) {
+  if (!env.supabaseUrl || !env.serviceRoleKey) return null;
+  try {
+    const response = await fetch(`${env.supabaseUrl}/rest/v1/rpc/ledger_money_snapshot`, {
+      method: "POST",
+      headers: {
+        apikey: env.serviceRoleKey,
+        Authorization: `Bearer ${env.serviceRoleKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_actor: actorId }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    const body = await response.json().catch(() => null) as { error?: string; pusat?: number; fee?: number; wallets?: number; providerUsed?: number } | null;
+    if (!response.ok || !body || body.error) return null;
+    return {
+      pusat: Number(body.pusat) || 0,
+      fee: Number(body.fee) || 0,
+      wallets: Number(body.wallets) || 0,
+      providerUsed: Number(body.providerUsed) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function syncProviderDeposit(env: LedgerEnv, actorId: string, deposit: number) {
   if (!env.supabaseUrl || !env.serviceRoleKey) {
     return { error: "Konfigurasi database belum lengkap.", status: 500 };

@@ -149,12 +149,11 @@ function isPrepaidProduct(product: string) {
 
 function tokenLines(sn: string, width: number) {
   const value = sn.trim();
-  const room = Math.max(8, width - 14);
   if (!value) return [field("TOKEN/SN", "-", width)];
-  const lines = [field("TOKEN/SN", value.slice(0, room), width)];
-  let rest = value.slice(room);
+  const lines = [center("TOKEN/SN", width)];
+  let rest = value;
   while (rest) {
-    lines.push(rest.slice(0, width));
+    lines.push(center(rest.slice(0, width), width));
     rest = rest.slice(width);
   }
   return lines;

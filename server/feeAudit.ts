@@ -103,7 +103,7 @@ export async function handleFeeAudit(method: string, pathname: string, search: s
   if (caller.role !== "super_admin") return { status: 403, body: { error: "Rincian fee hanya untuk Super Admin." } };
   if (!env.supabaseUrl || !env.serviceRoleKey) return { status: 500, body: { error: "Konfigurasi database belum lengkap." } };
   if (pathname === "/api/fee-audit/sync" && method === "POST") {
-    const checked = await syncOpenNetworkSales(env);
+    const checked = await syncOpenNetworkSales(env, true);
     return { status: 200, body: { checked } };
   }
   if (pathname !== "/api/fee-audit" || method !== "GET") return null;

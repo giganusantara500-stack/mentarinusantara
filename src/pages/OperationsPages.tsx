@@ -185,6 +185,15 @@ function DistributeBalance({ ownerId, profiles, balance, mutations, onRefresh }:
   );
 }
 
+function balanceGapText(provider: number | null, pool: number, network: number, fee: number, used: number) {
+  const usedText = `Pemakaian H2H ${formatRupiah(used)} sudah mengurangi saldo DigiFlazz dan tidak ditarik lagi.`;
+  if (provider == null) return `Saldo DigiFlazz belum terbaca. ${usedText}`;
+  const gap = pool + network + fee - provider;
+  if (gap > 1000) return `Dompet jaringan ${formatRupiah(network)}. Mentari sudah mencatat ${formatRupiah(gap)} lebih banyak daripada saldo DigiFlazz. Bagian itu ada di Saldo Utama atau dompet, jadi tidak ditarik ulang. ${usedText}`;
+  if (gap < -1000) return `Dompet jaringan ${formatRupiah(network)}. Masih ada ${formatRupiah(-gap)} di DigiFlazz yang belum masuk Saldo Utama. Tarik saldo hanya memasukkan bagian itu. ${usedText}`;
+  return `Dompet jaringan ${formatRupiah(network)}. Saldo DigiFlazz selaras dengan Saldo Utama, dompet jaringan, dan fee internal. ${usedText}`;
+}
+
 export function ManageSetoranPage() {
   const { isSuperAdmin, profile } = useAuth();
   const { profiles } = useProfiles();
@@ -201,6 +210,9 @@ export function ManageSetoranPage() {
   const [provider, setProvider] = useState<number | null>(null);
   const [providerError, setProviderError] = useState("");
   const [feeBalance, setFeeBalance] = useState(0);
+  const [networkBalance, setNetworkBalance] = useState(0);
+  const [providerUsed, setProviderUsed] = useState(0);
+  const [reconcileReady, setReconcileReady] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [note, setNote] = useState("");
   const [detail, setDetail] = useState<Ticket | null>(null);
@@ -223,6 +235,9 @@ export function ManageSetoranPage() {
       setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
       setProviderError(String(body.providerError || ""));
       setFeeBalance(Number(body.feeBalance) || 0);
+      setNetworkBalance(Number(body.networkBalance) || 0);
+      setProviderUsed(Number(body.providerUsed) || 0);
+      setReconcileReady(Boolean(body.reconcileReady));
     }
   };
   const sync = async () => {
@@ -238,6 +253,10 @@ export function ManageSetoranPage() {
     setPoolReady(true);
     setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
     setProviderError("");
+    setFeeBalance(Number(body.feeBalance) || 0);
+    setNetworkBalance(Number(body.networkBalance) || 0);
+    setProviderUsed(Number(body.providerUsed) || 0);
+    setReconcileReady(Boolean(body.reconcileReady));
     setNote(String(body.message || "Saldo Utama diperbarui dari DigiFlazz."));
     await load();
   };
@@ -305,7 +324,7 @@ export function ManageSetoranPage() {
       description="Menyetujui tiket memindahkan Saldo Utama ke Loket, Sub Mitra, atau Mitra tepat satu kali. Tarik saldo DigiFlazz dulu bila Saldo Utama belum cukup."
     >
       <Card className="mb-4">
-        <CardHeader title="Saldo untuk menyetujui deposit" subtitle="Tarik setoran DigiFlazz ke Saldo Utama. Fee internal adalah selisih harga jual loket dan biaya DigiFlazz; angka itu tidak mengurangi saldo DigiFlazz. Rekonsiliasi: DigiFlazz ≈ Saldo Utama + saldo dompet jaringan + fee internal." />
+        <CardHeader title="Saldo untuk menyetujui deposit" subtitle="Tombol tarik hanya memasukkan setoran DigiFlazz yang belum pernah masuk. Saldo yang sudah dibagikan ke loket tetap di dompet loket." />
         <div className="flex flex-wrap items-end gap-4 p-4">
           <div>
             <div className="text-xs text-slate-500">Saldo Utama</div>
@@ -322,6 +341,7 @@ export function ManageSetoranPage() {
           </div>
           <Button onClick={() => void sync()} disabled={syncing}>{syncing ? "Menarik..." : "Tarik saldo DigiFlazz"}</Button>
         </div>
+        <p className="px-4 pb-4 text-xs leading-5 text-slate-500">{reconcileReady ? balanceGapText(provider, pool, networkBalance, feeBalance, providerUsed) : "Angka rekonsiliasi lengkap muncul setelah migrasi saldo terbaru dijalankan. Sebelum itu, tarik saldo bisa menghitung ulang setoran yang sudah masuk."}</p>
       </Card>
       {error && <div className="mb-3 text-sm text-rose-600">{error}</div>}
       {note && <div className="mb-3 text-sm text-emerald-700">{note}</div>}
@@ -448,6 +468,9 @@ export function BalanceAllocationPage() {
   const [provider, setProvider] = useState<number | null>(null);
   const [providerError, setProviderError] = useState("");
   const [feeBalance, setFeeBalance] = useState(0);
+  const [networkBalance, setNetworkBalance] = useState(0);
+  const [providerUsed, setProviderUsed] = useState(0);
+  const [reconcileReady, setReconcileReady] = useState(false);
   const [loketId, setLoketId] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
   const [syncing, setSyncing] = useState(false);
@@ -464,6 +487,9 @@ export function BalanceAllocationPage() {
     setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
     setProviderError(String(body.providerError || ""));
     setFeeBalance(Number(body.feeBalance) || 0);
+    setNetworkBalance(Number(body.networkBalance) || 0);
+    setProviderUsed(Number(body.providerUsed) || 0);
+    setReconcileReady(Boolean(body.reconcileReady));
   };
   useEffect(() => { void loadWallet(); }, []);
   const sync = async () => {
@@ -478,6 +504,10 @@ export function BalanceAllocationPage() {
     setPool(Number(body.balance) || 0);
     setProvider(body.providerBalance == null ? null : Number(body.providerBalance));
     setProviderError("");
+    setFeeBalance(Number(body.feeBalance) || 0);
+    setNetworkBalance(Number(body.networkBalance) || 0);
+    setProviderUsed(Number(body.providerUsed) || 0);
+    setReconcileReady(Boolean(body.reconcileReady));
     setMessage(String(body.message || "Saldo Utama diperbarui dari DigiFlazz."));
   };
   const send = async () => {
@@ -527,7 +557,7 @@ export function BalanceAllocationPage() {
   return (
     <Shell title="Pembagian Saldo" description={`Saldo Utama ${formatRupiah(pool)} didistribusikan ke loket. Transfer memotong Saldo Utama dan menambah saldo loket dalam satu catatan.`}>
       <Card className="mb-4">
-        <CardHeader title="Saldo DigiFlazz, Saldo Utama, dan fee internal" subtitle="Setoran baru di DigiFlazz masuk ke Saldo Utama. Biaya DigiFlazz adalah harga penyedia. Fee internal Mentari adalah selisih harga jual dan biaya itu, dicatat terpisah, dan tidak mengurangi saldo DigiFlazz. Rekonsiliasi: DigiFlazz ≈ Saldo Utama + saldo dompet + fee internal." />
+        <CardHeader title="Saldo DigiFlazz, Saldo Utama, dan fee internal" subtitle="Tarik saldo hanya memasukkan setoran baru. Transfer ke loket memotong Saldo Utama satu kali." />
         <div className="flex flex-wrap items-end gap-3 p-4">
           <div>
             <div className="text-xs text-slate-500">Saldo Utama</div>
@@ -544,6 +574,7 @@ export function BalanceAllocationPage() {
           </div>
           <Button onClick={() => void sync()} disabled={syncing}>{syncing ? "Menarik..." : "Tarik saldo DigiFlazz"}</Button>
         </div>
+        <p className="px-4 pb-4 text-xs leading-5 text-slate-500">{reconcileReady ? balanceGapText(provider, pool, networkBalance, feeBalance, providerUsed) : "Angka rekonsiliasi lengkap muncul setelah migrasi saldo terbaru dijalankan. Sebelum itu, tarik saldo bisa menghitung ulang setoran yang sudah masuk."}</p>
       </Card>
       <Card className="mb-4">
         <CardHeader title="Transfer ke loket" subtitle="Nominal dipotong dari Saldo Utama dan masuk ke dompet loket. Permintaan yang sama tidak dipotong dua kali." />
@@ -736,6 +767,7 @@ export function RecapPage() {
   return (
     <Shell title="Rekap Transaksi" description="Ringkasan per tanggal, per loket, dan per layanan.">
       <HierarchyPanel drill={drill} rows={panelRows} search={nodeSearch} onSearch={setNodeSearch} />
+      {isSuperAdmin && <div className="mb-3 text-sm text-slate-600">Rekap ini menghitung transaksi Sukses. Rincian modal, fee H2H, dan fee Mentari ada di menu <button type="button" className="font-bold text-sky-700" onClick={() => { window.location.hash = "/audit-fee"; }}>Audit Fee</button>.</div>}
       <div className="mb-4 flex flex-wrap items-end gap-2">
         {(["tanggal", "loket", "layanan"] as const).map((item) => (
           <Button key={item} variant={mode === item ? "primary" : "outline"} size="sm" onClick={() => setMode(item)}>

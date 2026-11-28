@@ -1,8 +1,8 @@
 import { DEPOSIT_ACCOUNTS } from "../src/lib/banks";
 import { networkLoketIds, touchActivity } from "./accountAdmin";
-import { attachSaleReceipts, omitFeeBreakdown, requestedMode, runBillerPayment, syncPendingSales } from "./biller";
+import { attachSaleReceipts, omitFeeBreakdown, requestedMode, runBillerPayment, syncOpenNetworkSales, syncPendingSales } from "./biller";
 import { digiflazzDeposit } from "./digiflazz";
-import { cancelOwnTicket, claimTicket, createTicket, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, PUSAT_ACCOUNT, syncProviderDeposit, walletBalance, type DepositTicket } from "./ledger";
+import { cancelOwnTicket, claimTicket, createTicket, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, moneySnapshot, PUSAT_ACCOUNT, syncProviderDeposit, walletBalance, type DepositTicket } from "./ledger";
 import { listAuthUsers, loketCodeFor, makeTransferCode } from "./loketCode";
 
 interface Env {
@@ -107,6 +107,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       walletBalance(env, caller.id),
     ]);
     if (caller.role === "loket") void syncPendingSales(env, caller.id).catch(() => undefined);
+    else void syncOpenNetworkSales(env).catch(() => undefined);
     const sales = (await attachSaleReceipts(env, listed).catch(() => listed)).map((sale) => caller.role === "super_admin" ? sale : omitFeeBreakdown(sale));
     const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
     return { status: 200, body: { sales, simulations, balance, loketCode } };
@@ -183,7 +184,14 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     const mainBalance = caller.role === "super_admin" ? await walletBalance(env, caller.id, PUSAT_ACCOUNT) : own;
     const provider = caller.role === "super_admin" ? await digiflazzDeposit().catch(() => ({ balance: null as number | null, error: "Saldo DigiFlazz tidak dapat dihubungi." })) : { balance: null as number | null, error: "" };
     const feeBalance = caller.role === "super_admin" ? await walletBalance(env, caller.id, "__fee__") : 0;
-    return { status: 200, body: { balance: caller.role === "super_admin" ? mainBalance : own, mainBalance, loketCode, providerBalance: provider.balance, providerError: provider.error, feeBalance } };
+    const snapshot = caller.role === "super_admin" ? await moneySnapshot(env, caller.id) : null;
+    const networkBalance = snapshot?.wallets ?? 0;
+    const providerUsed = snapshot?.providerUsed ?? 0;
+    const liveProvider = provider.balance;
+    const reconciledGap = snapshot && liveProvider != null
+      ? mainBalance + networkBalance + feeBalance - liveProvider
+      : null;
+    return { status: 200, body: { balance: caller.role === "super_admin" ? mainBalance : own, mainBalance, loketCode, providerBalance: provider.balance, providerError: provider.error, feeBalance, networkBalance, providerUsed, reconciledGap, reconcileReady: Boolean(snapshot) } };
   }
 
   if (pathname === "/api/wallet/sync" && method === "POST") {
@@ -196,11 +204,13 @@ export async function handleDepositRequest(method: string, pathname: string, bod
     const consumed = Number(synced.consumed) || 0;
     const rupiah = (value: number) => `Rp${Math.round(value).toLocaleString("id-ID")}`;
     const note = credited > 0
-      ? `Setoran DigiFlazz ${rupiah(credited)} masuk ke Saldo Utama.`
-      : consumed > 0
-        ? "Saldo DigiFlazz turun karena pemakaian transaksi. Saldo Utama tidak dipotong lagi."
-        : "Saldo Utama sudah mengikuti setoran DigiFlazz yang baru.";
-    return { status: 200, body: { balance: synced.balance, providerBalance: provider.balance, credited, consumed, message: note } };
+      ? `Setoran baru ${rupiah(credited)} masuk ke Saldo Utama. Uang yang sudah ditarik atau sudah dibagikan tidak ditambahkan lagi.`
+      : "Tidak ada setoran baru. Saldo yang sudah ditarik atau sudah ada di dompet loket tidak ditarik ulang.";
+    const snapshot = await moneySnapshot(env, caller.id);
+    const networkBalance = snapshot?.wallets ?? 0;
+    const providerUsed = snapshot?.providerUsed ?? 0;
+    const reconciledGap = snapshot && provider.balance != null ? Number(synced.balance) + networkBalance + (snapshot.fee ?? 0) - provider.balance : null;
+    return { status: 200, body: { balance: synced.balance, providerBalance: provider.balance, credited, consumed, networkBalance, providerUsed, reconciledGap, feeBalance: snapshot?.fee ?? 0, reconcileReady: Boolean(snapshot), message: note } };
   }
 
   if (pathname === "/api/deposits" && method === "POST") {
