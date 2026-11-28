@@ -1,5 +1,5 @@
+import { foldLabel, resolveCollectiveProduct } from "../src/lib/billerCatalog";
 import { billIsPaid, callbackKeys, digiflazzReady, displayToken, inquireDigiflazz, newRefId, payDigiflazz, productKind, quoteFrom, resolveBuyerSku, sameSecret, statusDigiflazz, type DigiKind, type DigiQuote } from "./digiflazz";
-import { findCatalogItem, foldLabel } from "../src/lib/billerCatalog";
 import { listNetworkSales, listSimulations, recordLoketSale, walletBalance, type LedgerEnv, type LoketSale } from "./ledger";
 import { ownerCollectives } from "./ops";
 
@@ -475,7 +475,7 @@ export async function handleBillerRequest(method: string, pathname: string, body
       const key = clean(record.key);
       const menu = menuForCollective(clean(record.category), clean(record.product));
       const customerNumber = clean(record.customerNumber);
-      if (!menu) return { key, customerNumber, statusText: "failed", message: "Produk kolektif belum terpetakan ke DigiFlazz." };
+      if (!menu) return { key, customerNumber, statusText: "failed", message: collectiveMiss(clean(record.category), clean(record.product)) };
       const result = await inquireBill("h2h", { category: menu.category, product: menu.product, customerNumber, adminFee: Number(record.adminFee) || 0 });
       const directory = await directoryPromise;
       const providerName = result.bill?.customerName || "";
@@ -584,18 +584,16 @@ function missingColumn(body: unknown, column: string) {
 }
 
 function menuForCollective(category: string, product: string) {
-  const direct = findCatalogItem(category, product) || findCatalogItem(product, category);
-  if (direct) return { category: direct.category, product: direct.label };
-  const key = foldLabel(`${category} ${product}`);
-  if (key.includes("pln")) return { category: "PLN", product: "Postpaid" };
-  if (key.includes("bpjs")) return { category: "BPJS", product: "BPJS Kesehatan" };
-  if (key.includes("telkom") || key.includes("pstn")) return { category: "Internet", product: "Telkom" };
-  if (key.includes("gas") || key.includes("pertagas") || key.includes("pgn")) return { category: "Gas", product: "Pertagas 20.000" };
-  if (key.includes("pdam")) {
-    const area = findCatalogItem("PDAM", product) || findCatalogItem("PDAM", category);
-    return area ? { category: "PDAM", product: area.label } : null;
-  }
-  return null;
+  return resolveCollectiveProduct(category, product);
+}
+
+function collectiveMiss(category: string, product: string) {
+  const hint = foldLabel(`${category} ${product}`);
+  if (hint.includes("pdam")) return "Pilih wilayah PDAM pelanggan. Cek tagihan dijalankan setelah wilayah dipilih.";
+  if (hint.includes("internet") || hint.includes("tv")) return "Pilih produk Internet atau TV pelanggan. Cek tagihan dijalankan setelah produk dipilih.";
+  if (hint.includes("telco")) return "Pilih operator pascabayar pelanggan. Cek tagihan dijalankan setelah operator dipilih.";
+  if (hint.includes("finance") || hint.includes("pajak") || hint.includes("pbb")) return "Produk ini belum tersedia di katalog pembayaran server.";
+  return "Produk kolektif belum terpetakan ke DigiFlazz.";
 }
 
 async function mapPool<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>) {

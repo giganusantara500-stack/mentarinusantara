@@ -6,7 +6,7 @@ import { useLoketRefresh } from "@/components/layout/LoketShell";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Form";
 import { formatRupiah, formatWaktu } from "@/lib/format";
-import { BILLER_CATEGORIES, BILLER_CATALOG, productsFor } from "@/lib/billerCatalog";
+import { BILLER_CATEGORIES, BILLER_CATALOG, collectiveProductChoices, collectiveTab, productsFor, resolveCollectiveProduct } from "@/lib/billerCatalog";
 import { PDAM_AREAS } from "@/lib/pdam";
 import { depositRequest } from "@/lib/depositApi";
 import { apiUrl } from "@/lib/apiBase";
@@ -300,6 +300,8 @@ function isCustomerId(value: string) {
 function canonicalCategory(product?: string): string {
   const raw = (product || "").trim();
   if (!raw) return "CUSTID";
+  const tab = collectiveTab(raw, raw);
+  if (tab) return tab;
   const key = raw.toUpperCase().replace(/\s+/g, " ").replace(/PASCABAYAR/g, "POSTPAID");
   if ((KOLEKTIF_CATEGORIES as readonly string[]).includes(key)) return key;
   for (const [category, names] of Object.entries(PRODUCTS)) {
@@ -378,11 +380,17 @@ function findBill(bills: GroupBill[], member: Member, peers: Member[]) {
   return bills.find((bill) => bill.number === member.number && !(bill.product || "").trim());
 }
 
+function quoteSettled(bill: GroupBill | undefined) {
+  if (!bill) return false;
+  if (bill.status === "LUNAS" || bill.status === "LAINNYA") return true;
+  return Boolean(bill.providerRef) && bill.total >= 1000;
+}
+
 function buildBills(group: Group): GroupBill[] {
   return group.members.map((member) => {
     const existing = findBill(group.bills, member, group.members);
     const name = storedName(existing?.name || member.name || "");
-    if (existing && existing.period && existing.period !== "Memuat") {
+    if (existing && quoteSettled(existing)) {
       return { ...existing, name, product: member.product || existing.product };
     }
     return { number: member.number, name, product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" as const };
@@ -494,6 +502,7 @@ export function LoketKolektifPage() {
   const [sessionOmit, setSessionOmit] = useState<string[]>([]);
   const [collectorName, setCollectorName] = useState("");
   const [biller, setBiller] = useState("PLN");
+  const [detailProduct, setDetailProduct] = useState("Postpaid");
   const [custNo, setCustNo] = useState("");
   const [notice, setNotice] = useState("");
   const [noticeTone, setNoticeTone] = useState<"error" | "ok">("error");
@@ -610,8 +619,11 @@ export function LoketKolektifPage() {
   const scopedMembers = (active?.members ?? []).filter((member) => productFilter === "semua" || sameCategory(member.product, productFilter));
   const tableRows: GroupBill[] = scopedMembers.filter((member) => !omitted.has(memberKey(member))).map((member) => {
     const bill = active ? findBill(active.bills, member, active.members) : undefined;
-    if (bill) return { ...bill, name: storedName(member.name) || storedName(bill.name), product: member.product || bill.product };
-    return { number: member.number, name: storedName(member.name), product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" };
+    const shown = bill
+      ? { ...bill, name: storedName(member.name) || storedName(bill.name), product: member.product || bill.product }
+      : { number: member.number, name: storedName(member.name), product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" as const };
+    if (!quoteSettled(shown)) return { ...shown, period: "Memuat", total: 0, status: "BL LNS" as const, providerRef: "", note: "" };
+    return shown;
   });
   const bills = tableRows;
   const counts = {
@@ -635,21 +647,25 @@ export function LoketKolektifPage() {
     const groupId = active.id;
     const slice = bills.filter((row) => row.period === "Memuat").slice(0, 40);
     let cancel = false;
-    tell(`Mengecek ${slice.length} ID pelanggan...`, "ok");
+    tell(`Mengecek ${slice.length} ID pelanggan ke server...`, "ok");
     void (async () => {
       let response: Response;
       try {
         response = await apiFetch("/api/biller/inquiry-batch", {
           method: "POST",
           headers: await authHeader(),
-          body: JSON.stringify({ items: slice.map((row) => ({ key: memberKey(row), category: canonicalCategory(row.product), product: row.product || "", customerNumber: row.number })) }),
+          body: JSON.stringify({ items: slice.map((row) => {
+            const menu = resolveCollectiveProduct(row.product || "", row.product || "") || resolveCollectiveProduct(canonicalCategory(row.product), row.product || "");
+            return { key: memberKey(row), category: menu?.category || canonicalCategory(row.product), product: menu?.product || row.product || "", customerNumber: row.number };
+          }) }),
         }, 90_000);
       } catch {
         if (!cancel) {
           tell("Cek tagihan kolektif tidak terhubung ke server. Saldo tidak berubah.");
           const failed = groupsRef.current.map((group) => group.id === groupId ? { ...group, bills: group.members.map((member) => {
             const previous = findBill(group.bills, member, group.members);
-            if (previous && previous.period !== "Memuat") return previous;
+            if (previous && quoteSettled(previous) && !slice.some((row) => memberKey(row) === memberKey(member))) return previous;
+            if (!slice.some((row) => memberKey(row) === memberKey(member))) return previous && quoteSettled(previous) ? previous : { number: member.number, name: storedName(member.name), product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" as const };
             return { number: member.number, name: storedName(member.name), product: member.product || "", period: "-", total: 0, status: "LAINNYA" as const, note: "Cek tagihan tidak mendapat jawaban. Coba lagi beberapa saat." };
           }) } : group);
           commitLocal(failed);
@@ -672,23 +688,26 @@ export function LoketKolektifPage() {
       const billsNext = current.members.map((member) => {
         const key = memberKey(member);
         const previous = findBill(current.bills, member, current.members);
-        if (!checked.has(key)) return previous && previous.period !== "Memuat" ? previous : { number: member.number, name: storedName(member.name), product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" as const };
+        if (!checked.has(key)) return previous && quoteSettled(previous) ? previous : { number: member.number, name: storedName(member.name), product: member.product || "", period: "Memuat", total: 0, status: "BL LNS" as const };
         const hit = byKey.get(key);
         const quote = hit?.bill && typeof hit.bill === "object" ? hit.bill as Record<string, unknown> : {};
         const inquired = storedName(String(quote.customerName || ""));
         const statusText = String(hit?.statusText || "failed");
-        const status = statusText === "paid" ? "LUNAS" as const : statusText === "found" ? "BL LNS" as const : "LAINNYA" as const;
-        const note = String(hit?.message || (statusText === "not_found" ? "Tidak ada tagihan." : "Jawaban untuk ID ini tidak kembali."));
+        const providerRef = String(hit?.providerRef || "");
+        const total = Number(quote.total) || 0;
+        let status = statusText === "paid" ? "LUNAS" as const : statusText === "found" ? "BL LNS" as const : "LAINNYA" as const;
+        if (status === "BL LNS" && total < 1000) status = "LAINNYA";
+        const note = String(hit?.message || (statusText === "not_found" ? "Tidak ada tagihan." : status === "LAINNYA" ? "Jawaban untuk ID ini tidak kembali." : ""));
         return {
           number: member.number,
           name: preferShownName(inquired, member.name),
           product: member.product || "",
-          period: String(quote.period || (status === "LAINNYA" ? "-" : "")),
-          total: Number(quote.total) || 0,
+          period: String(quote.period || (status === "BL LNS" ? "Tagihan" : "-")),
+          total,
           status,
           note: status === "BL LNS" ? "" : note,
           sku: String(hit?.buyerSkuCode || ""),
-          providerRef: String(hit?.providerRef || ""),
+          providerRef,
           menuCategory: String(hit?.category || ""),
           menuProduct: String(hit?.product || ""),
           tagihan: Number(quote.amount) || 0,
@@ -817,8 +836,13 @@ export function LoketKolektifPage() {
 
   const importFile = async (file: File) => {
     const category = biller;
+    const chosen = selectedProduct();
     if (manageOpen) setProductFilter(category);
-    const stamp = (rows: Member[]) => rows.map((row) => ({ ...row, product: category }));
+    const stamp = (rows: Member[]) => rows.map((row) => {
+      const fromFile = (row.product || "").trim();
+      const resolved = fromFile ? resolveCollectiveProduct(fromFile, fromFile) : null;
+      return { ...row, product: resolved?.product || chosen || fromFile || category };
+    });
     const lower = file.name.toLowerCase();
     const seed = file.name.replace(/\.[^.]+$/, "") || "Kolektor";
     const fromText = async () => stamp(membersFromTable(rowsFromText(await file.text()), category));
@@ -942,6 +966,63 @@ export function LoketKolektifPage() {
     }
   };
 
+  const productChoices = collectiveProductChoices(biller);
+  const productChoiceKey = productChoices.join("|");
+  useEffect(() => {
+    setDetailProduct((current) => {
+      if (productChoices.includes(current)) return current;
+      if (biller === "PDAM" || biller === "TELCO" || biller === "INTERNET & TV") return "";
+      return productChoices[0] || "";
+    });
+  }, [biller, productChoiceKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const selectedProduct = () => {
+    if (productChoices.length === 0) return biller;
+    if (productChoices.includes(detailProduct)) return detailProduct;
+    if (biller === "PDAM" || biller === "TELCO" || biller === "INTERNET & TV") return "";
+    return productChoices[0] || biller;
+  };
+
+  const applyProduct = () => {
+    const product = selectedProduct();
+    if (!product) {
+      tell(biller === "PDAM" ? "Pilih wilayah PDAM terlebih dahulu." : "Pilih produk terlebih dahulu.");
+      return;
+    }
+    const group = groupsRef.current.find((item) => item.id === activeIdRef.current && sameCollectorCategory(item, biller));
+    if (!group) {
+      tell(`Pilih kolektor ${biller} terlebih dahulu.`);
+      return;
+    }
+    let changed = 0;
+    const members = group.members.map((member) => {
+      if (canonicalCategory(member.product || biller) !== canonicalCategory(biller)) return member;
+      const bare = (KOLEKTIF_CATEGORIES as readonly string[]).includes((member.product || "").trim().toUpperCase());
+      if (!bare && resolveCollectiveProduct(member.product || "", member.product || "")) return member;
+      changed += 1;
+      return { ...member, product };
+    });
+    if (changed === 0) {
+      tell("Semua pelanggan pada kategori ini sudah punya produk.", "ok");
+      return;
+    }
+    const bills = group.bills.map((bill) => {
+      if (bill.status === "LUNAS") return bill;
+      const bare = (KOLEKTIF_CATEGORIES as readonly string[]).includes((bill.product || "").trim().toUpperCase());
+      if (!bare && resolveCollectiveProduct(bill.product || "", bill.product || "")) return bill;
+      return { ...bill, product, period: "Memuat", total: 0, status: "BL LNS" as const, providerRef: "", sku: "", note: "" };
+    });
+    commitLocal(groupsRef.current.map((item) => item.id === group.id ? { ...item, members, bills } : item), `${changed} pelanggan memakai ${product}. Tagihan dicek ulang.`, group.id);
+  };
+
+  const recheckBills = () => {
+    if (!active || paying) return;
+    const next = groupsRef.current.map((group) => group.id !== active.id ? group : {
+      ...group,
+      bills: group.bills.map((bill) => bill.status === "LUNAS" ? bill : { ...bill, period: "Memuat", total: 0, status: "BL LNS" as const, providerRef: "", sku: "", note: "" }),
+    });
+    commitLocal(next, "Tagihan dicek ulang ke server.", active.id);
+  };
+
   const addCollector = () => {
     const name = collectorName.trim();
     if (!name) return;
@@ -978,11 +1059,16 @@ export function LoketKolektifPage() {
       custNoRef.current?.focus();
       return;
     }
-    const members = mergeMembers(group.members, [{ number, name: "", product: biller }]);
-    const next = groupsRef.current.map((item) => item.id === group.id ? { ...item, category: canonicalCategory(biller), members } : item);
+    const product = selectedProduct();
+    if (!product) {
+      tell(biller === "PDAM" ? "Pilih wilayah PDAM terlebih dahulu." : "Pilih produk terlebih dahulu.");
+      return;
+    }
+    const members = mergeMembers(group.members, [{ number, name: "", product }]);
+    const next = groupsRef.current.map((item) => item.id === group.id ? { ...item, category: canonicalCategory(product), members } : item);
     setCustNo("");
-    setProductFilter(biller);
-    commitLocal(next, `${number} masuk ke ${group.collector || group.name} sebagai ${biller}.`, group.id);
+    setProductFilter(canonicalCategory(product));
+    commitLocal(next, `${number} masuk ke ${group.collector || group.name} sebagai ${product}.`, group.id);
     requestAnimationFrame(() => custNoRef.current?.focus());
   };
 
@@ -1003,7 +1089,7 @@ export function LoketKolektifPage() {
     }
     const sheet = XLSX.utils.aoa_to_sheet([
       ["ID Pelanggan", "Nama Pelanggan", "Produk"],
-      ...rows.map((member) => [member.number, member.name, canonicalCategory(member.product)]),
+      ...rows.map((member) => [member.number, member.name, member.product || canonicalCategory(member.product)]),
     ]);
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, "Pelanggan");
@@ -1111,6 +1197,7 @@ export function LoketKolektifPage() {
           <button onClick={() => fileRef.current?.click()} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">Impor Excel/CSV</button>
           <button onClick={() => setSheetOpen(true)} disabled={!active || bills.length === 0 || bills.some((row) => row.period === "Memuat")} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40">Preview List</button>
           <button onClick={() => setHistoryOpen(true)} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700">Riwayat Pembayaran</button>
+          <button type="button" onClick={recheckBills} disabled={!active || paying || bills.some((row) => row.period === "Memuat")} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40">Cek Ulang</button>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2 px-3 py-3">
           {([
@@ -1121,7 +1208,7 @@ export function LoketKolektifPage() {
           ] as const).map(([key, label]) => (
             <button key={key} onClick={() => setFilter(key)} className={`rounded-full px-3 py-1.5 text-xs font-semibold ${filter === key ? "bg-amber-500 text-white" : "bg-slate-100 text-slate-600"}`}>{label}</button>
           ))}
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari ID atau nama" className="ml-auto w-48 rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") event.preventDefault(); }} placeholder="Cari ID atau nama" className="ml-auto w-48 rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
         </div>
         <div className={`h-5 shrink-0 px-3 text-sm ${noticeTone === "ok" ? "text-emerald-700" : "text-rose-600"}`}>{notice}</div>
         <div className="min-h-0 flex-1 overflow-auto">
@@ -1151,11 +1238,11 @@ export function LoketKolektifPage() {
                   <td className="px-3 py-2">{index + 1}</td>
                   <td className="px-3 py-2 font-mono">{row.number}</td>
                   <td className="px-2 py-2 break-words">{shownCustomer(row.name)}</td>
-                  <td className="px-3 py-2">{canonicalCategory(row.product)}</td>
+                  <td className="px-3 py-2">{row.menuProduct || row.product || canonicalCategory(row.product)}</td>
                   <td className="px-3 py-2 break-words">{row.period}</td>
                   <td className="px-3 py-2 font-semibold">{formatRupiah(row.total)}</td>
                   <td className="px-3 py-2" title={row.note || undefined}>
-                    <div>{statusText(row.status)}</div>
+                    <div>{row.period === "Memuat" ? "Memuat" : statusText(row.status)}</div>
                     {row.note && <div className="mt-0.5 break-words text-[10px] leading-tight text-slate-500">{row.note}</div>}
                   </td>
                   <td className="px-3 py-2 text-right"><button onClick={() => releaseCustomer(memberKey(row))} className="text-xs font-semibold text-rose-600">Keluarkan</button></td>
@@ -1249,8 +1336,8 @@ export function LoketKolektifPage() {
         </div>
       )}
       {confirmOpen && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4" onKeyDown={(event) => { if (event.key === "Escape" && !paying) setConfirmOpen(false); if (event.key === "Enter" && !paying) { event.preventDefault(); void payBatch(); } }}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl" tabIndex={-1} ref={(node) => node?.focus()}>
             <h2 className="font-semibold text-slate-900">Pembayaran batch</h2>
             <p className="mt-2 text-sm text-slate-600">Batch ini {nextBatch.length} lembar senilai {formatRupiah(nextBatchTotal)}. Setiap batch paling banyak 10 lembar.</p>
             {remainder.length > 0 && <p className="mt-2 text-sm text-slate-600">Sisa {remainder.length} lembar senilai {formatRupiah(remainderTotal)} dibayar pada batch berikutnya sampai seluruh tagihan selesai.</p>}
@@ -1289,9 +1376,16 @@ export function LoketKolektifPage() {
                 <Select value={biller} onChange={(event) => { const next = event.target.value; setBiller(next); setProductFilter(next); setPicked([]); }}>
                   {KOLEKTIF_CATEGORIES.map((item) => <option key={item}>{item}</option>)}
                 </Select>
+                {productChoices.length > 0 && (
+                  <Select value={detailProduct} onChange={(event) => setDetailProduct(event.target.value)}>
+                    {(biller === "PDAM" || biller === "TELCO" || biller === "INTERNET & TV") && <option value="">Pilih produk</option>}
+                    {productChoices.map((item) => <option key={item} value={item}>{item}</option>)}
+                  </Select>
+                )}
                 <Input ref={custNoRef} value={custNo} onChange={(event) => setCustNo(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addCustomer(); } }} placeholder="Nomor pelanggan, lalu Enter" />
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={addCustomer} className="rounded-lg bg-amber-500 px-3 py-2 text-xs font-semibold text-white">Tambah</button>
+                  <button type="button" onClick={applyProduct} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Terapkan Produk</button>
                   <button type="button" onClick={() => fileRef.current?.click()} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Import Excel/CSV/Notepad</button>
                   <button type="button" onClick={exportCustomers} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold">Ekspor Excel</button>
                 </div>

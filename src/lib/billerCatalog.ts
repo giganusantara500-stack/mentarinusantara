@@ -181,6 +181,89 @@ function foldProduct(value: string) {
   return foldLabel(value).replace(/\bpascabayar\b/g, "postpaid");
 }
 
+export function resolveCollectiveProduct(category: string, product: string): { category: string; product: string } | null {
+  const attempts = [
+    [category, product],
+    [product, category],
+    [category, category],
+    [product, product],
+  ];
+  for (const [group, name] of attempts) {
+    const found = findCatalogItem(group, name);
+    if (found) return { category: found.category, product: found.label };
+  }
+  const blob = foldLabel(`${category} ${product}`);
+  if (blob.includes("pdam")) {
+    const area = BILLER_CATALOG.find((entry) => entry.category === "PDAM" && (
+      (entry.aliases ?? []).some((alias) => mentions(blob, alias))
+      || foldLabel(entry.label).split(" ").some((word) => word !== "pdam" && mentions(blob, word))
+    ));
+    if (area) return { category: "PDAM", product: area.label };
+    return null;
+  }
+  const billed = BILLER_CATALOG.find((entry) => (
+    entry.category === "Internet" || entry.category === "TV Postpaid" || entry.category === "HP Postpaid" || entry.category === "Gas"
+  ) && (
+    mentions(blob, entry.label) || (entry.aliases ?? []).some((alias) => mentions(blob, alias))
+  ));
+  if (billed) return { category: billed.category, product: billed.label };
+  const defaults: { test: RegExp; category: string; product: string }[] = [
+    { test: /nontaglis/, category: "PLN", product: "Nontaglis" },
+    { test: /\bpln\b/, category: "PLN", product: "Postpaid" },
+    { test: /bpjs/, category: "BPJS", product: "BPJS Kesehatan" },
+    { test: /pertagas|\bpgn\b|(^|\s)gas(\s|$)/, category: "Gas", product: "Pertagas 20.000" },
+    { test: /telkom|pstn|speedy|indihome/, category: "Internet", product: "Telkom" },
+    { test: /halo/, category: "HP Postpaid", product: "Telkomsel Halo" },
+    { test: /indosat|matrix/, category: "HP Postpaid", product: "Indosat Matrix" },
+    { test: /smartfren/, category: "HP Postpaid", product: "Smartfren" },
+    { test: /\bthree\b|\btri\b/, category: "HP Postpaid", product: "Three" },
+    { test: /\bxl\b/, category: "HP Postpaid", product: "XL" },
+    { test: /\btelco\b/, category: "HP Postpaid", product: "Telkomsel Halo" },
+  ];
+  for (const rule of defaults) {
+    if (!rule.test.test(blob)) continue;
+    const found = findCatalogItem(rule.category, rule.product);
+    if (found) return { category: found.category, product: found.label };
+  }
+  return null;
+}
+
+function mentions(blob: string, value: string) {
+  const token = foldLabel(value);
+  if (!token) return false;
+  if (token.length < 4) return new RegExp(`(^|\\s)${token}(\\s|$)`).test(blob);
+  return blob.includes(token);
+}
+
+export function collectiveTab(category: string, product: string) {
+  const resolved = resolveCollectiveProduct(category, product);
+  if (!resolved) return "";
+  if (resolved.category === "PLN") return "PLN";
+  if (resolved.category === "PDAM") return "PDAM";
+  if (resolved.category === "Gas") return "GAS";
+  if (resolved.category === "BPJS") return "BPJS";
+  if (resolved.category === "HP Postpaid") return "TELCO";
+  if (resolved.category === "TV Postpaid") return "INTERNET & TV";
+  if (resolved.category === "Internet") {
+    const label = foldLabel(resolved.product);
+    if (label.includes("telkom") || label.includes("speedy")) return "TELKOM";
+    return "INTERNET & TV";
+  }
+  return "";
+}
+
+export function collectiveProductChoices(tab: string) {
+  const key = foldLabel(tab);
+  if (key === "pln") return productsFor("PLN");
+  if (key === "pdam") return productsFor("PDAM");
+  if (key === "gas") return productsFor("Gas");
+  if (key === "telkom") return ["Telkom", "Speedy"];
+  if (key === "bpjs") return productsFor("BPJS");
+  if (key === "telco") return productsFor("HP Postpaid");
+  if (key.includes("internet")) return [...productsFor("Internet"), ...productsFor("TV Postpaid")];
+  return [] as string[];
+}
+
 export function findCatalogItem(category: string, product: string) {
   const cat = foldProduct(category);
   const raw = foldLabel(product).replace(/\bpascabayar\b/g, "postpaid");
