@@ -15,6 +15,7 @@ export interface BillQuote {
   collfee: number;
   total: number;
   providerCost: number;
+  providerAdmin?: number;
   lines?: { period: string; amount: number | null; denda: number | null }[];
 }
 
@@ -212,6 +213,7 @@ function billFromQuote(quote: DigiQuote, adminFee: number): BillQuote {
     collfee: 0,
     total: total || summed,
     providerCost: quote.providerCost > 0 ? quote.providerCost : Math.max(0, quote.amount + quote.denda),
+    providerAdmin: quote.adminFee > 0 ? quote.adminFee : 0,
     lines: quote.lines ?? [],
   };
 }
@@ -327,6 +329,7 @@ export async function runBillerPayment(env: LedgerEnv, actorId: string, mode: Bi
     collfee: inquiry.bill.collfee,
     period: inquiry.bill.period,
     providerCost: inquiry.bill.providerCost,
+    providerAdmin: inquiry.bill.providerAdmin,
     customerName,
   };
   const pending = await recordLoketSale(env, actorId, {
@@ -533,7 +536,7 @@ export async function handleBillerRequest(method: string, pathname: string, body
       listNetworkSales(env, actorId),
       walletBalance(env, actorId),
     ]);
-    const sales = await attachSaleReceipts(env, listed).catch(() => listed);
+    const sales = (await attachSaleReceipts(env, listed).catch(() => listed)).map(omitFeeBreakdown);
     return { status: 200, body: { sales, balance, checked: changed } };
   }
   return null;
@@ -551,6 +554,7 @@ interface DigiMeta {
   collfee?: number;
   period?: string;
   providerCost?: number;
+  providerAdmin?: number;
   customerName?: string;
 }
 
@@ -751,6 +755,7 @@ async function settleDigiflazzQuote(env: LedgerEnv, row: StoredDigiSale, quote: 
     sn,
     providerCost,
     customerName: resolvedCustomerName(quote.customerName, meta.customerName || row.customer_name || ""),
+    providerAdmin: quote.adminFee > 0 ? quote.adminFee : meta.providerAdmin,
   }).catch(() => undefined);
   const sale = settled.sale ? { ...settled.sale, sn, clientRef: settled.sale.clientRef || refId } : undefined;
   const balance = Number.isFinite(Number(settled.balance)) ? Number(settled.balance) : balanceNow;
@@ -800,7 +805,8 @@ async function listOpenDigiSales(env: LedgerEnv, actorId: string, status: "pendi
   const selects = [`${base},idempotency_key`, `${base},client_ref`, base];
   for (const select of selects) {
     try {
-      const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?user_id=eq.${encodeURIComponent(actorId)}&status=eq.${status}&select=${select}&order=created_at.desc&limit=${limit}`, {
+      const owner = actorId ? `user_id=eq.${encodeURIComponent(actorId)}&` : "";
+      const response = await fetch(`${env.supabaseUrl}/rest/v1/transactions?${owner}status=eq.${status}&select=${select}&order=created_at.desc&limit=${limit}`, {
         headers: { apikey: env.serviceRoleKey, Authorization: `Bearer ${env.serviceRoleKey}` },
         signal: AbortSignal.timeout(12_000),
       });
@@ -850,6 +856,26 @@ export function syncPendingSales(env: LedgerEnv, actorId: string, force = false)
     syncAt.set(actorId, Date.now());
   });
   syncJobs.set(actorId, job);
+  return job;
+}
+
+export function omitFeeBreakdown<T extends { profit?: number; providerCost?: number; sellPrice?: number }>(sale: T) {
+  const next = { ...sale };
+  delete next.profit;
+  delete next.providerCost;
+  delete next.sellPrice;
+  return next;
+}
+
+export function syncOpenNetworkSales(env: LedgerEnv) {
+  const key = "__network__";
+  const current = syncJobs.get(key);
+  if (current) return current;
+  const job = runSync(env, "", 4).finally(() => {
+    syncJobs.delete(key);
+    syncAt.set(key, Date.now());
+  });
+  syncJobs.set(key, job);
   return job;
 }
 

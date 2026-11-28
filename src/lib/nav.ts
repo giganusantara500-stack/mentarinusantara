@@ -13,6 +13,7 @@ import {
   Network,
   Layers,
   ScrollText,
+  Receipt,
   Ban,
   BadgeAlert,
   ShieldCheck,
@@ -64,6 +65,7 @@ function managementNav(role: Role): NavSection[] {
     admin.push(
       { path: "/harga", label: "Prepare Fee", icon: Percent },
       { path: "/pembagian", label: "Share Fee", icon: Share2 },
+      { path: "/audit-fee", label: "Audit Fee", icon: Receipt },
     );
   }
   if (role === "superadmin" || role === "mitra" || role === "submitra") admin.push({ path: "/keamanan", label: "Keamanan (2FA)", icon: ShieldCheck });

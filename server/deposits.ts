@@ -1,6 +1,6 @@
 import { DEPOSIT_ACCOUNTS } from "../src/lib/banks";
 import { networkLoketIds, touchActivity } from "./accountAdmin";
-import { attachSaleReceipts, requestedMode, runBillerPayment, syncPendingSales } from "./biller";
+import { attachSaleReceipts, omitFeeBreakdown, requestedMode, runBillerPayment, syncPendingSales } from "./biller";
 import { digiflazzDeposit } from "./digiflazz";
 import { cancelOwnTicket, claimTicket, createTicket, decideTicket, distributeBalance, listMutations, listNetworkSales, listSimulations, listTickets, PUSAT_ACCOUNT, syncProviderDeposit, walletBalance, type DepositTicket } from "./ledger";
 import { listAuthUsers, loketCodeFor, makeTransferCode } from "./loketCode";
@@ -107,7 +107,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       walletBalance(env, caller.id),
     ]);
     if (caller.role === "loket") void syncPendingSales(env, caller.id).catch(() => undefined);
-    const sales = await attachSaleReceipts(env, listed).catch(() => listed);
+    const sales = (await attachSaleReceipts(env, listed).catch(() => listed)).map((sale) => caller.role === "super_admin" ? sale : omitFeeBreakdown(sale));
     const loketCode = caller.role === "loket" ? await loketCodeFor(env, caller.id).catch(() => "") : "";
     return { status: 200, body: { sales, simulations, balance, loketCode } };
   }
@@ -159,7 +159,7 @@ export async function handleDepositRequest(method: string, pathname: string, bod
       return { status: result.status || 409, body: { error: result.error || "Pembayaran gagal. Saldo tidak dipotong.", balance, statusText } };
     }
     const enriched = (await attachSaleReceipts(env, [result.sale]).catch(() => [result.sale]))[0] ?? result.sale;
-    const sale = { ...enriched, sn: enriched.sn || providerSn };
+    const sale = omitFeeBreakdown({ ...enriched, sn: enriched.sn || providerSn });
     await touchActivity(caller.id, env).catch(() => undefined);
     const inFlight = Boolean(result.error) && !failed && statusText !== "success" && statusText !== "simulated";
     if (inFlight) {

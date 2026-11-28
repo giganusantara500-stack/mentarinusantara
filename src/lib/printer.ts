@@ -80,7 +80,7 @@ function meter(id: string, period: string) {
   };
 }
 
-const SLIP_LINES = 16;
+const SLIP_LINES = 18;
 
 function field(label: string, value: string, width: number) {
   return `${label.padEnd(12)}: ${value}`.slice(0, width);
@@ -167,17 +167,19 @@ export function slipText(bill: ReceiptBill, width: number, _loket: string, copy:
   if (copy === "SEGI") {
     if (isPrepaidProduct(bill.product)) {
       return balance([
+        center("MENTARI NUSANTARA", width),
         center("SEGI TOKEN", width),
         center(bill.product.toUpperCase(), width),
         line,
         field("IDPEL", bill.id, width),
         field("NAMA", bill.name, width),
         field("TOTAL", formatRupiah(bill.total), width),
-        ...(bill.sn ? [field("TOKEN", bill.sn, width)] : []),
+        ...tokenLines(bill.sn || "", width),
         line,
       ]).join("\n");
     }
     return balance([
+      center("MENTARI NUSANTARA", width),
       center("SEGI PELUNASAN", width),
       center(bill.product.toUpperCase(), width),
       line,
@@ -194,6 +196,7 @@ export function slipText(bill: ReceiptBill, width: number, _loket: string, copy:
     const title = /token/i.test(bill.product) ? "STRUK PEMBELIAN TOKEN LISTRIK" : `STRUK ${bill.product.toUpperCase()}`;
     return padLines([
       rule,
+      center("MENTARI NUSANTARA", width),
       center(title, width),
       line,
       field("ID PELANGGAN", bill.id, width),
@@ -212,6 +215,7 @@ export function slipText(bill: ReceiptBill, width: number, _loket: string, copy:
   if (!isPlnSlip(bill.product)) {
     return padLines([
       rule,
+      center("MENTARI NUSANTARA", width),
       center(receiptTitle(bill.product), width),
       line,
       field("ID PELANGGAN", bill.id, width),
@@ -228,6 +232,7 @@ export function slipText(bill: ReceiptBill, width: number, _loket: string, copy:
   }
   return padLines([
     rule,
+    center("MENTARI NUSANTARA", width),
     center(receiptTitle(bill.product), width),
     line,
     columns(field("ID PELANGGAN", bill.id, left), `BL/TH: ${info.blth}`, width),
@@ -301,7 +306,7 @@ export function printReceipts(settings: PrinterSettings, bills: ReceiptBill[], l
     .band{height:71.75mm;box-sizing:border-box;display:flex;align-items:stretch;overflow:hidden}
     .segi{width:32ch;flex:0 0 32ch}
     .struk{width:68ch;flex:0 0 68ch;margin-left:3ch}
-    .segi,.struk,.single{margin:0;height:71.75mm;box-sizing:border-box;font-family:"Courier New",Consolas,monospace;font-size:8.5pt;line-height:calc(71.75mm / 14);white-space:pre;overflow:hidden}
+    .segi,.struk,.single{margin:0;height:71.75mm;box-sizing:border-box;font-family:"Courier New",Consolas,monospace;font-size:8.5pt;line-height:calc(71.75mm / 18);white-space:pre;overflow:hidden}
     .single{height:auto;font-size:11pt;line-height:13pt}
   </style></head><body>${pageHtml}</body></html>`);
   popup.document.close();

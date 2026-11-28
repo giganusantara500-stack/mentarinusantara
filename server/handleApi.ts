@@ -3,6 +3,7 @@ import { createNetworkAccount, requestPasswordReset, resetAccountPassword, type 
 import { digiflazzReady } from "./digiflazz";
 import { handleBillerRequest, handleDigiflazzCallback } from "./biller";
 import { handleDepositRequest, loadCaller } from "./deposits";
+import { handleFeeAudit } from "./feeAudit";
 import { importLegacyLedger } from "./ledgerSync";
 import { handleOpsRequest } from "./ops";
 import { allocateBalance, assignOwnRole, getUserDetail, listAccounts, sessionProfile, updateUserDetails } from "./accountAdmin";
@@ -83,6 +84,10 @@ async function routeApi(input: {
   if (pathname === "/api/allocate" && method === "POST") return allocateBalance(authorization, String(body.userId ?? ""), Number(body.amount), env);
   if (pathname === "/api/reset-password" && method === "POST") return resetAccountPassword(authorization, String(body.userId ?? ""), env);
   const caller = await loadCaller(authorization, env);
+  if (caller && (pathname === "/api/fee-audit" || pathname === "/api/fee-audit/sync")) {
+    const audit = await handleFeeAudit(method, pathname, input.search || "", caller, env);
+    if (audit) return audit;
+  }
   if (caller) {
     const biller = await handleBillerRequest(method, pathname, body, caller.id, env);
     if (biller) return biller;

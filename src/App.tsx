@@ -23,6 +23,7 @@ import { PricingPage } from "@/pages/PricingPage";
 import { TransactionsPage } from "@/pages/TransactionsPage";
 import { MutationsPage } from "@/pages/MutationsPage";
 import { ReportsPage } from "@/pages/ReportsPage";
+import { FeeAuditPage } from "@/pages/FeeAuditPage";
 import { AnnouncementsPage } from "@/pages/AnnouncementsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { OpsDashboardPage } from "@/pages/OpsDashboardPage";
@@ -184,6 +185,8 @@ function ProtectedApp() {
       case "/saldo": return <BalanceMonitorPage />;
       case "/pembagian":
         return isSuperAdmin ? <BalanceAllocationPage /> : <BalanceMonitorPage />;
+      case "/audit-fee":
+        return isSuperAdmin ? <FeeAuditPage /> : <OpsDashboardPage />;
       case "/outstanding": return <OutstandingPage />;
       case "/rekap": return <RecapPage />;
       case "/qris": return <QrisReportPage />;
